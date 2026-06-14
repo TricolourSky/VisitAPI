@@ -73,6 +73,5 @@ Copy those into your SPT folder to try it on Ragman; delete them to remove the d
 - `.dlg` script reference — [docs/DLG_FORMAT.md](docs/DLG_FORMAT.md)
 - Full guide (Chinese) — [docs/GUIDE.zh-CN.md](docs/GUIDE.zh-CN.md)
 
-## Version
-
-`0.2.2` · SPT 4.0.13 · MIT
+## Contribute to the Project.
+If you want to contribute to this project, Feel free to DM me on Discord: @tricoloursky
