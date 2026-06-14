@@ -196,6 +196,6 @@ Note: xcopy does not delete removed files; after deleting quests/text, clean the
 
 ## Version
 
-`0.2.2` · for SPT 4.0.13 · MIT
+`0.2.3` · for SPT 4.0.13 · MIT
 
 Sora is the Best~

@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace VisitAPI;
 
-[BepInPlugin("com.spt.visitapi", "VisitAPI", "0.2.2")]
+[BepInPlugin("com.spt.visitapi", "VisitAPI", "0.2.3")]
 public sealed class VisitPlugin : BaseUnityPlugin
 {
 	private static class CursorLockBlockerPatch
@@ -27,7 +27,7 @@ public sealed class VisitPlugin : BaseUnityPlugin
 
 	public const string PluginName = "VisitAPI";
 
-	public const string PluginVersion = "0.2.2";
+	public const string PluginVersion = "0.2.3";
 
 	private ConfigEntry<KeyCode>? _coordKey;
 
