@@ -1,6 +1,6 @@
 # .dlg dialogue script — format reference
 
-[中文](DLG_FORMAT.md)
+[中文](DLG_FORMAT.zh-CN.md)
 
 One trader = one `BepInEx/config/VisitAPI/<traderId>.dlg` file (UTF-8).
 A `.dlg` takes priority over a `.json` of the same name; on a parse error it falls back to the `.json`, and errors are written to the BepInEx log with line numbers.
