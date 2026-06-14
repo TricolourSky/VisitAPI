@@ -1,6 +1,6 @@
 # .dlg 对话剧本格式参考
 
-[English](DLG_FORMAT.en.md)
+[English](DLG_FORMAT.md)
 
 一个商人 = 一个 `BepInEx/config/VisitAPI/<traderId>.dlg` 文件（UTF-8 编码）。
 `.dlg` 优先于同名 `.json`；解析失败自动回退 `.json`，错误带行号写入 BepInEx 日志。
