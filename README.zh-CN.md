@@ -72,7 +72,7 @@ start: root
 
 ## 文档
 
-- `.dlg` 剧本完整语法 — [docs/DLG_FORMAT.md](docs/DLG_FORMAT.md)
+- `.dlg` 剧本完整语法 — [docs/DLG_FORMAT.zh-CN.md](docs/DLG_FORMAT.zh-CN.md)
 - 详细指南(中文) — [docs/GUIDE.zh-CN.md](docs/GUIDE.zh-CN.md)
 
 ## 参与项目贡献
