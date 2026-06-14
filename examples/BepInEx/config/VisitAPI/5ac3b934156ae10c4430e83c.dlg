@@ -1,0 +1,54 @@
+# =============================================================================
+# VisitAPI example  —  Ragman   (traderId 5ac3b934156ae10c4430e83c)
+# The file name MUST equal the traderId:  <traderId>.dlg
+# Install to:  SPT/BepInEx/config/VisitAPI/5ac3b934156ae10c4430e83c.dlg
+# Full syntax: docs/DLG_FORMAT.md
+# =============================================================================
+
+trader: 5ac3b934156ae10c4430e83c "Ragman"
+start: root
+first: first_meeting
+
+# --- In-raid trigger ---------------------------------------------------------
+# Walk to the coordinates on the map and look at the spot to interact.
+# Get your own coordinates: press F8 in raid (printed to the BepInEx console),
+# then replace the location id and (x, y, z) below.
+trigger: raid Sandbox (33.66, 22.81, -79.20) door 1.5x2.2 dist 3 "Visit Ragman"
+
+# --- Hideout trigger ---------------------------------------------------------
+# Appears at the Intelligence Center once it reaches level 1; interacting jumps
+# straight to the 'hideout_chat' node.
+trigger: hideout IntelligenceCenter level 1 dist 4 node hideout_chat "Visit Ragman"
+
+# --- Quest alias -------------------------------------------------------------
+# 'demo'  ->  user/mods/VisitAPI-Server/db/quests/ragman_visit_demo.json
+quest demo = 726167766973697464656d6f
+
+# --- Backgrounds (optional) --------------------------------------------------
+# Add  "bg: yourimage.png"  after a node header to show a background from
+# config/VisitAPI/backgrounds/ . Omitted here so the demo needs no extra files.
+
+<root>
+Need anything? Take a look around.
+- Show me your goods. -> @trade
+- Just saying hi. -> small_talk
+- See you.
+
+<small_talk>
+Hah. Stay out of trouble out there, {player}.
+- Will do. -> @start
+
+<first_meeting>
+> You run into Ragman out in the open.
+Well, look who it is. Since you're here — run an errand for me and I'll make it worth your while.
+- Sure, what do you need? -> first_accept
+- Not interested. -> @start
+
+<first_accept>
+Good. Swing by my place when you get a moment.
+- Got it. | accept: demo
+
+<hideout_chat>
+So you came by after all. Here's your cut — pleasure doing business.
+- Thanks. | complete: demo, if: demo=Started
+- Just looking around. -> @start
