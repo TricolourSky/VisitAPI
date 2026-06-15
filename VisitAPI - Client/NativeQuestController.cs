@@ -29,16 +29,72 @@ internal static class NativeQuestController
 		{
 			LastKnownProfileId = profileId;
 		}
-		// 仅服务端接取（/quest/accept 写档持久化）。不调用游戏原生 AcceptQuest：
-		// 原生接取会触发任务列表 UI 整体重建，恰好把同一步里刚点亮的前置任务
-		//（如 Ragman「调查不明第三方势力」）进度条盖回去；且此刻 SORA 多半尚未解锁，
-		// device 作为 SORA 任务本就不该立刻显示，原生接取无可见收益、纯添乱。
-		// 任务在 SORA 解锁后由档案呈现；完成仍走情报中心对话的 complete 指令。
+		// 先尝试游戏原生接取：任务在原生任务书里（WTT/eft 真任务）时走完整原生流程、任务面板同步；
+		// 找不到（VisitAPI 隐藏触发任务，如 SORA 影子任务）则回到纯服务端旁路写档。
+		// Native=true 时服务端只留旁路状态文件、不再自己写档，避免与原生重复冲突。
+		bool nativeAccepted = TryNativeAcceptQuest(questId, out bool _);
 		return Post("/quest/accept", new
 		{
 			ProfileId = profileId,
-			QuestId = questId
+			QuestId = questId,
+			Native = nativeAccepted
 		});
+	}
+
+	// 原生接取：在游戏任务书里找到任务对象，调 AbstractQuestControllerClass.AcceptQuest(quest, true) 走完整原生流程。
+	// 返回 true 表示已发起原生接取；questInBook 表示任务是否在原生任务书里。
+	private static bool TryNativeAcceptQuest(string questId, out bool questInBook)
+	{
+		string questId2 = questId;
+		questInBook = false;
+		try
+		{
+			object questCtrl = TraderDealScreenVisitButton._cachedQuestCtrl;
+			if (questCtrl == null && VisitPlugin.TryGetInRaidControllers(out object _, out object inRaidCtrl, out object _))
+			{
+				questCtrl = inRaidCtrl;
+			}
+			if (questCtrl == null)
+			{
+				VisitPlugin.Log.LogWarning((object)"[NativeQuest] No quest controller (native accept)");
+				return false;
+			}
+			object quest = FindQuestInBook(questCtrl, questId2);
+			if (quest == null)
+			{
+				VisitPlugin.Log.LogInfo((object)("[NativeQuest] Quest " + questId2 + " not in QuestBook; bypass accept"));
+				return false;
+			}
+			questInBook = true;
+			MethodInfo accept = questCtrl.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+				.FirstOrDefault((MethodInfo m) => m.Name == "AcceptQuest" && m.GetParameters().Length == 2);
+			if (accept == null)
+			{
+				VisitPlugin.Log.LogWarning((object)"[NativeQuest] AcceptQuest(quest,bool) not found");
+				return false;
+			}
+			if (accept.Invoke(questCtrl, new object[2] { quest, true }) is Task task)
+			{
+				task.ContinueWith(delegate(Task t)
+				{
+					if (t.IsFaulted)
+					{
+						VisitPlugin.Log.LogWarning((object)("[NativeQuest] Native AcceptQuest faulted: " + t.Exception?.InnerException?.Message));
+					}
+					else
+					{
+						VisitPlugin.Log.LogInfo((object)("[NativeQuest] Native AcceptQuest completed: " + questId2));
+					}
+				});
+			}
+			VisitPlugin.Log.LogInfo((object)("[NativeQuest] Native AcceptQuest triggered: " + questId2));
+			return true;
+		}
+		catch (Exception ex)
+		{
+			VisitPlugin.Log.LogWarning((object)("[NativeQuest] Native accept failed: " + (ex.InnerException?.Message ?? ex.Message)));
+			return false;
+		}
 	}
 
 	public static void ShowNativeHandoverScreen(string questId, Action<bool> onResult)
@@ -241,125 +297,182 @@ internal static class NativeQuestController
 		}
 	}
 
+	// 枚举当前能拿到的原生 QuestController 里的任务，对每个回调 (questId, status)。
+	// 返回数据来源标签（trader-cache / in-raid / none / *:no-quests）供日志用。
+	private static string ForEachNativeQuest(Action<string, int> onQuest)
+	{
+		object questCtrl = TraderDealScreenVisitButton._cachedQuestCtrl;
+		string source = "trader-cache";
+		if (questCtrl == null && VisitPlugin.TryGetInRaidControllers(out object _, out object inRaidCtrl, out object _))
+		{
+			questCtrl = inRaidCtrl;
+			source = "in-raid";
+		}
+		if (questCtrl == null)
+		{
+			return "none";
+		}
+		BindingFlags all = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+		if (!(questCtrl.GetType().GetProperty("Quests", all)?.GetValue(questCtrl) is IEnumerable quests))
+		{
+			return source + ":no-quests";
+		}
+		foreach (object item in quests)
+		{
+			if (item == null)
+			{
+				continue;
+			}
+			object tmpl = item.GetType().GetProperty("Template", all)?.GetValue(item);
+			string id = tmpl?.GetType().GetProperty("Id", all)?.GetValue(tmpl) as string;
+			if (string.IsNullOrEmpty(id))
+			{
+				continue;
+			}
+			object statusObj = item.GetType().GetProperty("QuestStatus", all)?.GetValue(item)
+				?? item.GetType().GetField("QuestStatus", all)?.GetValue(item)
+				?? item.GetType().GetProperty("Status", all)?.GetValue(item);
+			if (statusObj != null)
+			{
+				onQuest(id!, Convert.ToInt32(statusObj));
+			}
+		}
+		return source;
+	}
+
+	// 读取原生任务状态（最准，含外部 WTT 任务）。拿不到返回 null。门控查询前用它刷新缓存。
+	internal static Dictionary<string, int>? ReadNativeStatuses()
+	{
+		Dictionary<string, int> map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+		ForEachNativeQuest(delegate(string id, int status) { map[id] = status; });
+		return map.Count > 0 ? map : null;
+	}
+
+	// 调试探针（F7）：把原生任务的 id→状态打到日志。日志用英文避免 Player.log 乱码。
+	internal static void DumpAllQuests()
+	{
+		int total = 0;
+		Dictionary<int, int> byStatus = new Dictionary<int, int>();
+		VisitPlugin.Log.LogInfo((object)"[QuestDump] ===== dump start =====");
+		string source = ForEachNativeQuest(delegate(string id, int status)
+		{
+			total++;
+			byStatus[status] = (byStatus.TryGetValue(status, out int c) ? c : 0) + 1;
+			VisitPlugin.Log.LogInfo((object)$"[QuestDump]   {id}  status={status}({StatusName(status)})");
+		});
+		VisitPlugin.Log.LogInfo((object)$"[QuestDump] ===== source={source}, total={total}, {string.Join(", ", byStatus.Select(kv => StatusName(kv.Key) + "=" + kv.Value))} =====");
+	}
+
+	private static string StatusName(int s)
+	{
+		switch (s)
+		{
+		case 0: return "Locked";
+		case 1: return "AvailableForStart";
+		case 2: return "Started";
+		case 3: return "AvailableForFinish";
+		case 4: return "Success";
+		case 5: return "Fail";
+		default: return "?";
+		}
+	}
+
 	private static void TryNativeHandoverScreen(string questId, Action<bool> onResult)
 	{
 		string questId2 = questId;
 		Action<bool> onResult2 = onResult;
+		// 统一退路：仅当原生上交窗口确实无法呈现时才转服务端 /quest/handover
+		void Fallback(string reason)
+		{
+			VisitPlugin.Log.LogWarning((object)("[NativeQuest] " + reason + "; falling back to server handover"));
+			FallbackHandover(questId2, onResult2);
+		}
 		object questCtrl = TraderDealScreenVisitButton._cachedQuestCtrl;
 		if (questCtrl == null)
 		{
-			VisitPlugin.Log.LogWarning((object)"[NativeQuest] No questCtrl; falling back to server handover");
-			FallbackHandover(questId2, onResult2);
+			Fallback("No questCtrl");
 			return;
 		}
 		object questObj = FindQuestInBook(questCtrl, questId2);
 		if (questObj == null)
 		{
-			VisitPlugin.Log.LogWarning((object)("[NativeQuest] Quest " + questId2 + " not found; falling back"));
-			FallbackHandover(questId2, onResult2);
+			Fallback("Quest " + questId2 + " not in QuestBook");
 			return;
 		}
-		object handoverCond = null;
-		if (questObj.GetType().GetProperty("NecessaryConditions", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(questObj) is IEnumerable enumerable)
-		{
-			foreach (object item in enumerable)
-			{
-				if (item?.GetType().Name == "ConditionHandoverItem")
-				{
-					handoverCond = item;
-					break;
-				}
-			}
-		}
+		object handoverCond = FindHandoverCondition(questObj);
 		if (handoverCond == null)
 		{
-			VisitPlugin.Log.LogWarning((object)("[NativeQuest] No ConditionHandoverItem in " + questId2 + "; falling back"));
-			FallbackHandover(questId2, onResult2);
+			Fallback("No ConditionHandoverItem in " + questId2);
 			return;
 		}
-		MethodInfo method = questCtrl.GetType().GetMethod("GetItemsForCondition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-		if (method == null)
+		MethodInfo getItems = questCtrl.GetType().GetMethod("GetItemsForCondition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+		if (getItems == null)
 		{
-			VisitPlugin.Log.LogWarning((object)"[NativeQuest] GetItemsForCondition not found; falling back");
-			FallbackHandover(questId2, onResult2);
+			Fallback("GetItemsForCondition not found");
 			return;
 		}
-		object obj = method.Invoke(questCtrl, new object[1] { handoverCond });
-		if (obj is Array { Length: 0 })
+		object eligibleItems = getItems.Invoke(questCtrl, new object[1] { handoverCond });
+		if (eligibleItems is Array { Length: 0 })
 		{
-			VisitPlugin.Log.LogWarning((object)"[NativeQuest] No eligible items for handover; falling back");
-			FallbackHandover(questId2, onResult2);
+			Fallback("No eligible items for handover");
 			return;
 		}
-		object obj2 = questCtrl.GetType().GetField("Profile", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(questCtrl);
-		if (obj2 == null)
+		object profile = questCtrl.GetType().GetField("Profile", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(questCtrl);
+		if (profile == null)
 		{
-			VisitPlugin.Log.LogWarning((object)"[NativeQuest] No profile on questCtrl; falling back");
-			FallbackHandover(questId2, onResult2);
+			Fallback("No profile on questCtrl");
 			return;
 		}
-		object obj3 = TraderDealScreenVisitButton._cachedInvCtrl;
-		if (obj3 == null && VisitPlugin.TryGetInRaidControllers(out object _, out object _, out object invCtrl))
+		object inventoryCtrl = TraderDealScreenVisitButton._cachedInvCtrl;
+		if (inventoryCtrl == null && VisitPlugin.TryGetInRaidControllers(out object _, out object _, out object raidInvCtrl))
 		{
-			obj3 = invCtrl;
+			inventoryCtrl = raidInvCtrl;
 		}
-		if (obj3 == null)
+		if (inventoryCtrl == null)
 		{
-			VisitPlugin.Log.LogWarning((object)"[NativeQuest] No inventory controller; falling back");
-			FallbackHandover(questId2, onResult2);
+			Fallback("No inventory controller");
 			return;
 		}
-		Type type = TraderDealScreenVisitButton.FindType("EFT.UI.HandoverQuestItemsWindow");
-		if (type == null)
+		Type windowType = TraderDealScreenVisitButton.FindType("EFT.UI.HandoverQuestItemsWindow");
+		if (windowType == null)
 		{
-			VisitPlugin.Log.LogWarning((object)"[NativeQuest] HandoverQuestItemsWindow type not found; falling back");
-			FallbackHandover(questId2, onResult2);
+			Fallback("HandoverQuestItemsWindow type not found");
 			return;
 		}
-		MonoBehaviour val = null;
-		MonoBehaviour[] array2 = Resources.FindObjectsOfTypeAll<MonoBehaviour>();
-		foreach (MonoBehaviour val2 in array2)
+		// 在商人 Deal 界面的对话里，原生上交窗口通常尚未实例化到场景中。旧逻辑直接拿
+		// FindObjectsOfTypeAll 的首个匹配（往往是 prefab 资产）调 Show，prefab 不在任何
+		// Canvas 层级里 → 窗口不可见。这里优先用场景活实例，没有则从 prefab 实例化一个。
+		MonoBehaviour window = ResolveHandoverWindow(windowType);
+		if ((UnityEngine.Object)(object)window == (UnityEngine.Object)null)
 		{
-			if ((UnityEngine.Object)(object)val2 != (UnityEngine.Object)null && ((object)val2).GetType() == type)
-			{
-				val = val2;
-				break;
-			}
-		}
-		if ((UnityEngine.Object)(object)val == (UnityEngine.Object)null)
-		{
-			VisitPlugin.Log.LogWarning((object)"[NativeQuest] HandoverQuestItemsWindow not found in scene; falling back");
-			FallbackHandover(questId2, onResult2);
+			Fallback("HandoverQuestItemsWindow unavailable (no scene instance or prefab)");
 			return;
 		}
-		MethodInfo methodInfo = null;
-		MethodInfo[] methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-		foreach (MethodInfo methodInfo2 in methods)
+		MethodInfo showMethod = FindHandoverShowMethod(windowType);
+		if (showMethod == null)
 		{
-			if (!(methodInfo2.Name != "Show"))
-			{
-				ParameterInfo[] parameters = methodInfo2.GetParameters();
-				if (parameters.Length == 7 && parameters[0].ParameterType.Name == "Condition")
-				{
-					methodInfo = methodInfo2;
-					break;
-				}
-			}
-		}
-		if (methodInfo == null)
-		{
-			VisitPlugin.Log.LogWarning((object)"[NativeQuest] HandoverQuestItemsWindow.Show(Condition...) not found; falling back");
-			FallbackHandover(questId2, onResult2);
+			Fallback("HandoverQuestItemsWindow.Show(Condition...) not found");
 			return;
 		}
-		Type parameterType = methodInfo.GetParameters()[5].ParameterType;
-		Type type2 = parameterType.GetGenericArguments()[0];
+		// Show 的第 6 个参数是 Action<TSelected>：玩家在窗口里确认上交后回调，携带勾选的物品集合
+		Type acceptDelegateType = showMethod.GetParameters()[5].ParameterType;
+		Type selectedItemsType = acceptDelegateType.GetGenericArguments()[0];
 		MethodInfo handoverItemMethod = questCtrl.GetType().GetMethod("HandoverItem", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-		Action<object> value = delegate(object selectedItemsObj)
+		Action<object> onAccept = delegate(object selectedItemsObj)
 		{
+			// onAccept 由原生窗口的“上交”按钮在 Unity 主线程触发。
 			try
 			{
-				if (handoverItemMethod != null && handoverItemMethod.Invoke(questCtrl, new object[4] { questObj, handoverCond, selectedItemsObj, true }) is Task task)
+				if (handoverItemMethod == null)
+				{
+					VisitPlugin.Log.LogWarning((object)"[NativeQuest] HandoverItem method not found; cannot submit");
+					onResult2(false);
+					return;
+				}
+				// HandoverItem 返回的 Task 跑原生网络事务，其 ContinueWith 在后台线程执行——
+				// 里面只能记日志，绝不能回调 onResult2（它会驱动对话刷新=Unity UI，跨线程会崩溃）。
+				// onResult2 在此（主线程）同步回调，与原生 accept/complete 一致。
+				if (handoverItemMethod.Invoke(questCtrl, new object[4] { questObj, handoverCond, selectedItemsObj, true }) is Task task)
 				{
 					task.ContinueWith(delegate(Task t3)
 					{
@@ -373,33 +486,120 @@ internal static class NativeQuestController
 						}
 					});
 				}
-				onResult2(obj: true);
+				onResult2(true);
 			}
 			catch (Exception ex)
 			{
-				VisitPlugin.Log.LogWarning((object)("[NativeQuest] acceptWrapper error: " + (ex.InnerException?.Message ?? ex.Message)));
-				onResult2(obj: false);
+				VisitPlugin.Log.LogWarning((object)("[NativeQuest] onAccept error: " + (ex.InnerException?.Message ?? ex.Message)));
+				onResult2(false);
 			}
 		};
-		ParameterExpression parameterExpression = Expression.Parameter(type2, "selectedItems");
-		ConstantExpression expression = Expression.Constant(value, typeof(Action<object>));
-		UnaryExpression unaryExpression = Expression.Convert(parameterExpression, typeof(object));
-		InvocationExpression body = Expression.Invoke(expression, unaryExpression);
-		Delegate @delegate = Expression.Lambda(parameterType, body, parameterExpression).Compile();
-		((Component)val).gameObject.SetActive(true);
-		methodInfo.Invoke(val, new object[7] { handoverCond, 0.0, obj, obj2, obj3, @delegate, true });
-		Canvas val3 = ((Component)val).GetComponent<Canvas>();
-		if ((UnityEngine.Object)(object)val3 == (UnityEngine.Object)null)
+		// 把 Action<object> 适配成 Show 需要的强类型 Action<TSelected>
+		ParameterExpression selectedParam = Expression.Parameter(selectedItemsType, "selectedItems");
+		ConstantExpression callbackConst = Expression.Constant(onAccept, typeof(Action<object>));
+		InvocationExpression invokeBody = Expression.Invoke(callbackConst, Expression.Convert(selectedParam, typeof(object)));
+		Delegate typedAccept = Expression.Lambda(acceptDelegateType, invokeBody, selectedParam).Compile();
+		((Component)window).gameObject.SetActive(true);
+		showMethod.Invoke(window, new object[7] { handoverCond, 0.0, eligibleItems, profile, inventoryCtrl, typedAccept, true });
+		// 让窗口渲染在对话之上且能接收点击
+		Canvas canvas = ((Component)window).GetComponent<Canvas>() ?? ((Component)window).gameObject.AddComponent<Canvas>();
+		canvas.overrideSorting = true;
+		canvas.sortingOrder = 2000;
+		if ((UnityEngine.Object)(object)((Component)window).GetComponent<GraphicRaycaster>() == (UnityEngine.Object)null)
 		{
-			val3 = ((Component)val).gameObject.AddComponent<Canvas>();
-		}
-		val3.overrideSorting = true;
-		val3.sortingOrder = 2000;
-		if ((UnityEngine.Object)(object)((Component)val).GetComponent<GraphicRaycaster>() == (UnityEngine.Object)null)
-		{
-			((Component)val).gameObject.AddComponent<GraphicRaycaster>();
+			((Component)window).gameObject.AddComponent<GraphicRaycaster>();
 		}
 		VisitPlugin.Log.LogInfo((object)("[NativeQuest] HandoverQuestItemsWindow shown for quest " + questId2 + " (sortingOrder=2000)"));
+	}
+
+	// 任务的 NecessaryConditions 里找 ConditionHandoverItem（上交条件）
+	private static object? FindHandoverCondition(object questObj)
+	{
+		if (questObj.GetType().GetProperty("NecessaryConditions", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(questObj) is IEnumerable conditions)
+		{
+			foreach (object cond in conditions)
+			{
+				if (cond?.GetType().Name == "ConditionHandoverItem")
+				{
+					return cond;
+				}
+			}
+		}
+		return null;
+	}
+
+	// 找 HandoverQuestItemsWindow.Show(Condition, double, items, profile, invCtrl, Action<TSelected>, bool) 这个 7 参重载
+	private static MethodInfo? FindHandoverShowMethod(Type windowType)
+	{
+		foreach (MethodInfo m in windowType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+		{
+			if (m.Name == "Show")
+			{
+				ParameterInfo[] parameters = m.GetParameters();
+				if (parameters.Length == 7 && parameters[0].ParameterType.Name == "Condition")
+				{
+					return m;
+				}
+			}
+		}
+		return null;
+	}
+
+	// 优先返回场景里的活实例；没有就从 prefab 资产实例化一个并挂到当前界面 Canvas 下，
+	// 这样在对话上下文（上交窗口尚未被原生任务界面创建）时也能把窗口真正显示出来。
+	private static MonoBehaviour? ResolveHandoverWindow(Type windowType)
+	{
+		MonoBehaviour? sceneInstance = null;
+		MonoBehaviour? prefab = null;
+		foreach (MonoBehaviour mb in Resources.FindObjectsOfTypeAll<MonoBehaviour>())
+		{
+			if ((UnityEngine.Object)(object)mb == (UnityEngine.Object)null || ((object)mb).GetType() != windowType)
+			{
+				continue;
+			}
+			if (((Component)mb).gameObject.scene.IsValid())
+			{
+				sceneInstance = mb;
+				break;
+			}
+			prefab = mb;
+		}
+		if ((UnityEngine.Object)(object)sceneInstance != (UnityEngine.Object)null)
+		{
+			VisitPlugin.Log.LogInfo((object)"[NativeQuest] Using existing HandoverQuestItemsWindow scene instance");
+			return sceneInstance;
+		}
+		if ((UnityEngine.Object)(object)prefab == (UnityEngine.Object)null)
+		{
+			return null;
+		}
+		Transform? parent = GetActiveUiParent();
+		if ((UnityEngine.Object)(object)parent == (UnityEngine.Object)null)
+		{
+			VisitPlugin.Log.LogWarning((object)"[NativeQuest] No active UI parent to host HandoverQuestItemsWindow");
+			return null;
+		}
+		GameObject go = UnityEngine.Object.Instantiate<GameObject>(((Component)prefab).gameObject, parent, false);
+		VisitPlugin.Log.LogInfo((object)"[NativeQuest] Instantiated HandoverQuestItemsWindow from prefab");
+		return go.GetComponent(windowType) as MonoBehaviour;
+	}
+
+	// 拿一个当前场景里活动的 UI 父节点来挂载实例化出来的窗口
+	private static Transform? GetActiveUiParent()
+	{
+		Component screensGroup = TraderDealScreenHook.ScreensGroup;
+		if ((UnityEngine.Object)(object)screensGroup != (UnityEngine.Object)null)
+		{
+			return ((Component)screensGroup).transform;
+		}
+		foreach (Canvas canvas in Resources.FindObjectsOfTypeAll<Canvas>())
+		{
+			if ((UnityEngine.Object)(object)canvas != (UnityEngine.Object)null && ((Component)canvas).gameObject.scene.IsValid() && ((Behaviour)canvas).isActiveAndEnabled)
+			{
+				return ((Component)canvas).transform;
+			}
+		}
+		return null;
 	}
 
 	private static object? FindQuestInBook(object questCtrl, string questId)

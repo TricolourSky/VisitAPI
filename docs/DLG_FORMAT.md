@@ -4,6 +4,7 @@
 
 One trader = one `BepInEx/config/VisitAPI/<traderId>.dlg` file (UTF-8).
 A `.dlg` takes priority over a `.json` of the same name; on a parse error it falls back to the `.json`, and errors are written to the BepInEx log with line numbers.
+Full example: [sora.dlg](sora.dlg).
 
 ## Header (before the first node)
 
@@ -17,14 +18,15 @@ when: level>=4 -> <node>                          # pick the start node by loyal
 when: level>=3, standing>=0.05 -> <node>          # conditions can be comma-joined
 random: 10% <node1> <node2> ...                   # random dialogue after a raid
 quest <alias> = <24-hex questId>                  # quest alias, multiple lines, anywhere
-tab: if quest=status[/status]                     # the "Visit" tab only shows in these states
+tab: always                                       # the "Visit" tab always shows (ignores unlock/quest gates)
+tab: if quest=status[/status]                     # show only while the quest is in these states (replaces the default unlock gate)
 ```
 
 - In a `trigger` line only the **type** and the **map / area** are required; everything else is in any order and optional (defaults: `dist 3` / `radius 1.2` / `level 1` / prompt `"Visit"`; door collider height defaults to `2.2`).
 - `trigger: hideout` replaces the old `hideout_triggers.json` (the old file still works; for the same trader + area the `.dlg` wins).
 - Area enum names: `IntelligenceCenter` / `Generator` / `MedStation` / `Workbench` … (`EAreaType`).
 - `trigger: hideout ... if quest=status` — a trigger with a quest condition is **gated by quest status**: while the status matches it appears every time you enter the hideout (not limited to "already visited"), and disappears once the status no longer matches. A trigger without `if` keeps the old behaviour (appears once, on first visit only).
-- When `tab:` is not configured the tab always shows, and it **only affects the trader that has this line**.
+- **By default the Visit tab only shows once the trader is unlocked** (applies to every trader that has a `.dlg`). Use `tab: always` to force it to always show (even while locked), or `tab: if quest=status` to gate on quest status instead.
 
 ## Nodes
 

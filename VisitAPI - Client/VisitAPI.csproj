@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <Compile Remove="Server\**" />
+    <Compile Remove="release\**" />
   </ItemGroup>
 
   <ItemGroup>

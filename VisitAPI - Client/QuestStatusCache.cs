@@ -107,6 +107,25 @@ internal static class QuestStatusCache
 		{
 			return;
 		}
+		// 原生任务状态优先：客户端 QuestController 是最准的来源（含外部 WTT 任务），覆盖写入缓存。
+		// 下面的 HTTP 只补原生读不到的——多为锁定/未接触的任务，服务端会给 Locked，正合预期。
+		Dictionary<string, int>? native = NativeQuestController.ReadNativeStatuses();
+		if (native != null)
+		{
+			lock (s_lock)
+			{
+				foreach (KeyValuePair<string, int> entry in native)
+				{
+					// 取更靠后的状态：任务状态单调推进。原生（客户端任务书）可能滞后于
+					// VisitAPI 旁路接取/完成（先改的是服务端档案），直接覆盖会把已接取的任务
+					// 错误退回"可接取"。只在原生状态更靠后时才采用，兼顾 WTT 读取与旁路驱动。
+					if (!s_cache.TryGetValue(entry.Key, out int cur) || entry.Value > cur)
+					{
+						s_cache[entry.Key] = entry.Value;
+					}
+				}
+			}
+		}
 		List<string> list = new List<string>();
 		lock (s_lock)
 		{
@@ -124,11 +143,20 @@ internal static class QuestStatusCache
 		}
 		try
 		{
-			string data = JsonConvert.SerializeObject((object)new
+			// 手写序列化：不走 JsonConvert.SerializeObject，避免被其他 mod 篡改的
+			// Newtonsoft 全局 DefaultSettings 影响（曾对普通 List<string> 误报 "Self referencing loop" 致查询失败）
+			StringBuilder sb = new StringBuilder();
+			sb.Append("{\"ProfileId\":").Append(JsonConvert.ToString(profileId)).Append(",\"QuestIds\":[");
+			for (int i = 0; i < list.Count; i++)
 			{
-				ProfileId = profileId,
-				QuestIds = list
-			});
+				if (i > 0)
+				{
+					sb.Append(",");
+				}
+				sb.Append(JsonConvert.ToString(list[i]));
+			}
+			sb.Append("]}");
+			string data = sb.ToString();
 			using WebClient webClient = new WebClient
 			{
 				Encoding = Encoding.UTF8

@@ -130,13 +130,19 @@ internal static class DialogScriptParser
 		}
 	}
 
-	// tab: if 任务=状态[/状态] —— 商人界面"拜访"页签仅在任务处于指定状态时显示
+	// tab: always              —— "拜访"页签始终显示（无视解锁/任务门控）
+	// tab: if 任务=状态[/状态]  —— 仅当任务处于指定状态时显示（取代默认的"商人解锁后才显示"）
 	private static void ParseTabGate(string val, DialogTree tree, string src, int lineNo, List<string> errors)
 	{
+		if (string.Equals(val.Trim(), "always", StringComparison.OrdinalIgnoreCase))
+		{
+			tree.TabAlways = true;
+			return;
+		}
 		Match m = Regex.Match(val, @"^if\s+(\S+?)=(\S+)$");
 		if (!m.Success)
 		{
-			errors.Add($"{src}:{lineNo}: tab 格式应为 'tab: if 任务=状态[/状态]'");
+			errors.Add($"{src}:{lineNo}: tab 格式应为 'tab: always' 或 'tab: if 任务=状态[/状态]'");
 			return;
 		}
 		tree.TabQuestId = m.Groups[1].Value;
@@ -326,7 +332,8 @@ internal static class DialogScriptParser
 	private static DialogOption? ParseOption(string s, string src, int lineNo, List<string> errors)
 	{
 		string? directives = null;
-		int pipe = s.LastIndexOf(" | ", StringComparison.Ordinal);
+		// 第一个 " | " 之后全部当指令区，避免多个 | 指令时把中间段误并进目标节点名
+		int pipe = s.IndexOf(" | ", StringComparison.Ordinal);
 		if (pipe >= 0)
 		{
 			directives = s.Substring(pipe + 3).Trim();
@@ -367,7 +374,7 @@ internal static class DialogScriptParser
 		string? autoStatus = null;
 		bool always = false;
 		List<string>? explicitShow = null;
-		foreach (string rawDirective in directives!.Split(','))
+		foreach (string rawDirective in directives!.Split(new[] { '|', ',' }, StringSplitOptions.RemoveEmptyEntries))
 		{
 			string d = rawDirective.Trim();
 			if (d.Length == 0)

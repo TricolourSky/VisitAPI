@@ -40,6 +40,10 @@ internal sealed class DialogTree
 	[JsonConverter(typeof(StringOrListConverter))]
 	public List<string>? TabShowWhenStatus { get; set; }
 
+	// tab: always —— 无视解锁/任务门控，始终显示"拜访"页签
+	[JsonProperty("tabAlways")]
+	public bool TabAlways { get; set; }
+
 	[JsonProperty("nodes")]
 	public Dictionary<string, DialogNode> Nodes { get; set; } = new Dictionary<string, DialogNode>();
 }

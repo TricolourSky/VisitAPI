@@ -72,8 +72,10 @@ internal sealed class TraderDealScreenVisitButton : MonoBehaviour
 		}
 	}
 
-	// 商人界面"拜访"页签门控：对话树配置了 tab 条件（如 SORA 的存储装置任务）时，
-	// 仅在任务状态匹配时显示页签；未配置的商人不受影响
+	// 商人界面"拜访"页签门控（按优先级）：
+	//   1) tab: always       → 始终显示
+	//   2) tab: if 任务=状态  → 由模组用任务状态显式控制可见性（取代默认解锁门控）
+	//   3) 未配置 tab         → 默认仅在商人已解锁时显示（修复 SORA 未解锁仍显示拜访页签）
 	private static bool IsVisitTabAllowed(string? traderId)
 	{
 		if (string.IsNullOrEmpty(traderId))
@@ -81,15 +83,90 @@ internal sealed class TraderDealScreenVisitButton : MonoBehaviour
 			return false;
 		}
 		DialogTree? tree = DialogTreeLoader.TryLoad(traderId);
-		if (tree == null || string.IsNullOrEmpty(tree.TabQuestId) || tree.TabShowWhenStatus == null || tree.TabShowWhenStatus.Count == 0)
+		if (tree != null && tree.TabAlways)
 		{
 			return true;
 		}
-		if (!string.IsNullOrEmpty(_cachedProfileId))
+		if (tree != null && !string.IsNullOrEmpty(tree.TabQuestId) && tree.TabShowWhenStatus != null && tree.TabShowWhenStatus.Count > 0)
 		{
-			QuestStatusCache.BatchFetch(_cachedProfileId, new string[1] { tree.TabQuestId });
+			if (!string.IsNullOrEmpty(_cachedProfileId))
+			{
+				QuestStatusCache.BatchFetch(_cachedProfileId, new string[1] { tree.TabQuestId });
+			}
+			return QuestStatusCache.AnyMatches(tree.TabShowWhenStatus, QuestStatusCache.GetStatus(tree.TabQuestId));
 		}
-		return QuestStatusCache.AnyMatches(tree.TabShowWhenStatus, QuestStatusCache.GetStatus(tree.TabQuestId));
+		return IsTraderUnlocked(traderId);
+	}
+
+	// 读取商人是否已解锁（profile.TradersInfo[traderId].Unlocked）。
+	// 拿不到档案/条目/字段（未知商人或反射失败）一律返回 true，避免误隐藏其它正常商人的页签。
+	private static bool IsTraderUnlocked(string traderId)
+	{
+		object? profile = _cachedProfile;
+		if (profile == null)
+		{
+			return true;
+		}
+		try
+		{
+			object? tradersInfo = null;
+			Type? t = profile.GetType();
+			while (t != null && tradersInfo == null)
+			{
+				try
+				{
+					tradersInfo = t.GetProperty("TradersInfo", BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Public)?.GetValue(profile);
+				}
+				catch
+				{
+				}
+				t = t.BaseType;
+			}
+			if (tradersInfo == null)
+			{
+				return true;
+			}
+			object? key = null;
+			Type? mongoType = FindType("MongoID") ?? FindType("EFT.MongoID");
+			if (mongoType != null)
+			{
+				try
+				{
+					key = Activator.CreateInstance(mongoType, traderId);
+				}
+				catch
+				{
+				}
+			}
+			MethodInfo? getItem = tradersInfo.GetType().GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+			object? info;
+			try
+			{
+				info = getItem?.Invoke(tradersInfo, new object[1] { key ?? traderId });
+			}
+			catch
+			{
+				return true;
+			}
+			if (info == null)
+			{
+				return true;
+			}
+			Type it = info.GetType();
+			object? unlocked = it.GetProperty("Unlocked", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(info)
+				?? it.GetField("Unlocked", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(info);
+			if (unlocked is bool b)
+			{
+				VisitPlugin.Log.LogInfo((object)$"[VisitTab] trader {traderId} unlocked={b}");
+				return b;
+			}
+			return true;
+		}
+		catch (Exception ex)
+		{
+			VisitPlugin.Log.LogWarning((object)("IsTraderUnlocked: " + ex.Message));
+			return true;
+		}
 	}
 
 	internal static void SetCachedControllers(object? profile, object? questCtrl, object? invCtrl)
@@ -168,6 +245,9 @@ internal sealed class TraderDealScreenVisitButton : MonoBehaviour
 		{
 			val.interactable = true;
 		}
+		// 拜访页签克隆自"服务"页签；该商人服务不可用时其页签是变灰/禁用视觉态，克隆体会继承这层灰。
+		// 强制重置成"正常启用"亮度，避免拜访页签比别的页签暗。
+		NormalizeTabVisuals(_tabGo);
 		VisitPlugin.Log.LogInfo((object)("Visit tab injected next to '" + ((UnityEngine.Object)servicesAnchor.gameObject).name + "'"));
 		try
 		{
@@ -2008,7 +2088,7 @@ internal sealed class TraderDealScreenVisitButton : MonoBehaviour
 			{
 				componentInChildren.isOn = false;
 			}
-			SetTabTextColor(new Color(0.65f, 0.65f, 0.65f, 1f));
+			SetTabTextColor(new Color(0.94f, 0.91f, 0.8f, 1f));
 		}
 	}
 
@@ -2024,6 +2104,46 @@ internal sealed class TraderDealScreenVisitButton : MonoBehaviour
 				componentInChildren.isOn = true;
 			}
 			SetTabTextColor(Color.white);
+		}
+	}
+
+	// 把克隆出来的拜访页签视觉强制重置成"正常启用"亮度：CanvasGroup 透明度拉满、
+	// Selectable 强制可交互且禁用色=正常色（即使被切到禁用态也不再变灰）。
+	private static void NormalizeTabVisuals(GameObject tab)
+	{
+		try
+		{
+			foreach (CanvasGroup cg in tab.GetComponentsInChildren<CanvasGroup>(true))
+			{
+				if ((UnityEngine.Object)(object)cg != (UnityEngine.Object)null)
+				{
+					cg.alpha = 1f;
+					cg.interactable = true;
+					cg.blocksRaycasts = true;
+				}
+			}
+			foreach (Selectable sel in tab.GetComponentsInChildren<Selectable>(true))
+			{
+				if ((UnityEngine.Object)(object)sel == (UnityEngine.Object)null)
+				{
+					continue;
+				}
+				sel.interactable = true;
+				ColorBlock cb = sel.colors;
+				cb.disabledColor = cb.normalColor;
+				sel.colors = cb;
+				Graphic tg = sel.targetGraphic;
+				if ((UnityEngine.Object)(object)tg != (UnityEngine.Object)null)
+				{
+					Color c = tg.color;
+					c.a = 1f;
+					tg.color = c;
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			VisitPlugin.Log.LogWarning((object)("NormalizeTabVisuals: " + ex.Message));
 		}
 	}
 

@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace VisitAPI;
 
-[BepInPlugin("com.spt.visitapi", "VisitAPI", "0.2.3")]
+[BepInPlugin("com.spt.visitapi", "VisitAPI", "0.2.4")]
 public sealed class VisitPlugin : BaseUnityPlugin
 {
 	private static class CursorLockBlockerPatch
@@ -27,9 +27,11 @@ public sealed class VisitPlugin : BaseUnityPlugin
 
 	public const string PluginName = "VisitAPI";
 
-	public const string PluginVersion = "0.2.3";
+	public const string PluginVersion = "0.2.4";
 
 	private ConfigEntry<KeyCode>? _coordKey;
+
+	private ConfigEntry<KeyCode>? _questDumpKey;
 
 	private Harmony? _harmony;
 
@@ -73,6 +75,7 @@ public sealed class VisitPlugin : BaseUnityPlugin
 		Log = Logger;
 		Enabled = Config.Bind<bool>("General", "Enabled", true, "Enable/Disable Visit override");
 		_coordKey = Config.Bind<KeyCode>("Debug", "CoordLogKey", (KeyCode)289, "Press in-raid to log current player position to BepInEx console");
+		_questDumpKey = Config.Bind<KeyCode>("Debug", "QuestDumpKey", (KeyCode)288, "Press to dump all native quests' id->status to BepInEx console (verify external WTT quests are readable)");
 		if (!Enabled.Value)
 		{
 			Log.LogInfo((object)"VisitAPI disabled");
@@ -165,6 +168,10 @@ public sealed class VisitPlugin : BaseUnityPlugin
 		if (_coordKey != null && Input.GetKeyDown(_coordKey.Value))
 		{
 			LogPlayerPosition();
+		}
+		if (_questDumpKey != null && Input.GetKeyDown(_questDumpKey.Value))
+		{
+			NativeQuestController.DumpAllQuests();
 		}
 		TrackRaidLifecycle();
 		TrackHideoutLifecycle();

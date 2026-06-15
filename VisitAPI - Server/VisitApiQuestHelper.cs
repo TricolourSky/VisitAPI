@@ -51,19 +51,23 @@ public class VisitApiQuestHelper
 			}
 			// 旁路状态文件：供前置联动判定与 ResolveQuestStatus 回填使用
 			SaveQuestAccepted(questRequest.ProfileId, questRequest.QuestId);
-			// 真正把任务写进存档 Quests 列表（状态 Started），否则游戏端只显示"可接取"。
-			// 客户端 NativeQuestController.AcceptQuest 刻意不走原生接取，故档案必须由服务端落地。
-			object pmcData = GetPmcData(questRequest.ProfileId);
-			if (pmcData == null)
+			// Native=true：客户端已走游戏原生接取，档案由游戏写，这里只留旁路文件，避免重复写档冲突。
+			// Native=false：任务不在原生任务书（VisitAPI 隐藏触发任务），由服务端把它写进存档 Quests 列表，
+			// 否则游戏端只显示"可接取"。
+			if (!questRequest.Native)
 			{
-				return Task.FromResult("{\"success\":false,\"error\":\"profile not found\"}");
-			}
-			int questStatusValue = GetQuestStatusValue(pmcData, questRequest.QuestId);
-			// 仅在尚未接取（锁定/可接取）时写档，避免覆盖已有进度（Started/可完成/成功）
-			if (questStatusValue == QuestStatusValue.Locked || questStatusValue == QuestStatusValue.AvailableForStart)
-			{
-				SetQuestStatus(pmcData, questRequest.QuestId, QuestStatusValue.Started);
-				SaveProfile(questRequest.ProfileId);
+				object pmcData = GetPmcData(questRequest.ProfileId);
+				if (pmcData == null)
+				{
+					return Task.FromResult("{\"success\":false,\"error\":\"profile not found\"}");
+				}
+				int questStatusValue = GetQuestStatusValue(pmcData, questRequest.QuestId);
+				// 仅在尚未接取（锁定/可接取）时写档，避免覆盖已有进度（Started/可完成/成功）
+				if (questStatusValue == QuestStatusValue.Locked || questStatusValue == QuestStatusValue.AvailableForStart)
+				{
+					SetQuestStatus(pmcData, questRequest.QuestId, QuestStatusValue.Started);
+					SaveProfile(questRequest.ProfileId);
+				}
 			}
 			return Task.FromResult("{\"success\":true}");
 		}
