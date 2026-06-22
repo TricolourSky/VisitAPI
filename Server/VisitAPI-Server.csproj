@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>VisitAPI-Server</AssemblyName>
+    <RootNamespace>VisitApiServer</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- SPT 4.0 server assemblies are provided by the host; reference, do not copy. -->
+  <ItemGroup>
+    <Reference Include="SPTarkov.Server.Core"><HintPath>D:\SPT\SPT\SPTarkov.Server.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SPTarkov.DI"><HintPath>D:\SPT\SPT\SPTarkov.DI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SPTarkov.Common"><HintPath>D:\SPT\SPT\SPTarkov.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SPTarkov.Reflection"><HintPath>D:\SPT\SPT\SPTarkov.Reflection.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SemanticVersioning"><HintPath>D:\SPT\SPT\SemanticVersioning.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>D:\SPT\SPT\0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <!-- Deploy the dll + db (quests/locales) + images into the live mod folder after build. -->
+  <Target Name="DeployMod" AfterTargets="Build">
+    <ItemGroup>
+      <VisitDb Include="$(ProjectDir)db\**\*.*" />
+      <VisitImages Include="$(ProjectDir)images\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="$(TargetDir)VisitAPI-Server.dll" DestinationFolder="D:\SPT\SPT\user\mods\VisitAPI-Server\" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(VisitDb)" DestinationFiles="@(VisitDb->'D:\SPT\SPT\user\mods\VisitAPI-Server\db\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(VisitImages)" DestinationFiles="@(VisitImages->'D:\SPT\SPT\user\mods\VisitAPI-Server\images\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+  </Target>
+
+</Project>

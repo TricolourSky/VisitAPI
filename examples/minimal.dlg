@@ -1,0 +1,43 @@
+# VisitAPI — minimal example dialogue (client-only; no server/quests needed).
+#
+#   1) Keep the file name = the trader's 24-hex id (the id below is Ragman — change it to your trader).
+#   2) Drop it in   BepInEx/config/VisitAPI/
+#   3) Restart the game. Open the trader out of raid -> a "Talk" button appears at the top.
+#
+# Lines starting with # or // are comments. Edit + reopen the dialogue — no game restart.
+# Backgrounds are optional: add  bg: yourfile.png  after a node name and put the file
+# (.png / .jpg or a looping .mp4) in  BepInEx/config/VisitAPI/backgrounds/.
+# Full syntax: ../docs/DLG_FORMAT.md   (quests, hand-over, standing, hideout triggers, ...)
+
+trader: 5ac3b934156ae10c4430e83c "Example Trader"
+start: root
+first: first_meeting
+
+# Pick the root by player level: level 15+ lands on root_regular instead of root.
+# (You can also gate by `standing>=N` — your rep with this trader.)
+when: level>=15 -> root_regular
+
+# An in-world "Talk" point in a Ground Zero raid. Stand on the spot and press F11 to copy the coords.
+trigger: raid Sandbox (120.0, 2.5, -30.0) door 1.5x2.2 "Talk"
+
+<first_meeting>
+> A stranger waves you over.
+First time here, {player}? Keep that weapon pointed down.
+- Just looking around. -> root
+- Who are you? -> root
+
+<root>
+What do you need?
+- Show me your goods. -> @trade
+- Anything going on out there? -> chatter
+- Later.
+
+<root_regular>
+Back again, {player}. The usual?
+- Show me your goods. -> @trade
+- Later.
+
+<chatter>
+> They lower their voice.
+Word is the militia moved into the old factory. Stay sharp.
+- Good to know. -> root
