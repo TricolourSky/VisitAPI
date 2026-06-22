@@ -1,9 +1,0 @@
-{
-  "name": "VisitAPI-Server",
-  "version": "0.2.4",
-  "main": "VisitAPI-Server.dll",
-  "isBundleMod": true,
-  "author": "VisitAPI",
-  "license": "MIT",
-  "sptVersion": "~4.0.13"
-}
