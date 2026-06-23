@@ -46,7 +46,7 @@ A `trigger:` line places an in-world "Visit" interaction. Only the **type** and 
 
 ```
 <nodeName> bg: backgroundFile
-> narration line (subtitle box, click to advance; multiple > lines play one at a time)
+> narration line [| bg: backgroundFile]            # subtitle box, click to advance; trailing | bg: swaps the background for this line
 NPC spoken line
 - option text -> target
 - option text -> target | directive, directive...
@@ -56,6 +56,7 @@ NPC spoken line
 - **Node name** allows only letters / digits / `_` / `.` / `-` (so `[action]` / `<rich text>` inside a line is never mistaken for a node header).
 - **`bg:`** a plain file name is looked up under `config/VisitAPI/backgrounds/`; a value containing `/` or `\` is used as a path relative to `config/VisitAPI/`. Omit `bg:` to keep the previous background. Supported: **images** `.png .jpg .jpeg` and **looping video** `.mp4 .webm .m4v .mov` (muted by default).
 - **`>` narration** plays in the native subtitle box, one line at a time, click to advance; then the NPC line + options render. A node with only `>` lines and a `-> target` auto-continues to that node when narration ends.
+- **Per-line background**: append `| bg: file` to a `>` line (e.g. `> She pushed the door open and stepped in. | bg: Standoff.png`) to switch the background when that line is shown; lines without `| bg:` keep the previous background. The node-header `bg:` is the initial background on entry, and per-line `| bg:` swaps it as narration advances. File-name resolution is the same as `bg:`.
 - **NPC spoken line** = any plain line. If a node has several plain lines, the **last** one is shown as the NPC's text (use `>` narration for multi-line lead-ins).
 - **`- option text -> target`** = a clickable option. **target**: a node name / `@start` (the root) / `@trade` / `@tasks` / `@services` (open that tab of the out-of-raid trade screen) / `@close` (or `@leave`). **Omitting `-> target` closes the dialogue** after running the option's directives.
 - Text supports `{player}` / `{playerName}` (replaced with the character nickname).

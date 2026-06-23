@@ -127,8 +127,15 @@ namespace VisitAPI
         private static void PlayNarration(object window, DialogTree tree, DialogNode node, string nodeName)
         {
             object? screen = DialogUiBinder.FindActiveScreen();
-            Queue<string> lines = new Queue<string>();
-            foreach (string n in node.Narration!) if (!string.IsNullOrEmpty(n)) lines.Enqueue(Substitute(n));
+            Queue<KeyValuePair<string, string?>> lines = new Queue<KeyValuePair<string, string?>>();
+            List<string> narration = node.Narration!;
+            List<string?>? backgrounds = node.NarrationBackgrounds;
+            for (int i = 0; i < narration.Count; i++)
+            {
+                if (string.IsNullOrEmpty(narration[i])) continue;
+                string? lineBg = (backgrounds != null && i < backgrounds.Count) ? backgrounds[i] : null;
+                lines.Enqueue(new KeyValuePair<string, string?>(Substitute(narration[i]), lineBg));
+            }
             if (lines.Count == 0) { RenderBody(window, tree, node, nodeName); return; }
             DialogUiBinder.BeginNarration(screen);
             AdvanceNarration(window, tree, node, nodeName, screen, lines);
@@ -136,9 +143,12 @@ namespace VisitAPI
 
         // Show the next narration line in the subtitle box; the click overlay advances to the line after it, or —
         // on the last line — restores the dialog window and renders the body (or jumps/closes for a pure-narration node).
-        private static void AdvanceNarration(object window, DialogTree tree, DialogNode node, string nodeName, object? screen, Queue<string> lines)
+        private static void AdvanceNarration(object window, DialogTree tree, DialogNode node, string nodeName, object? screen, Queue<KeyValuePair<string, string?>> lines)
         {
-            DialogUiBinder.SetSubtitleText(screen, lines.Dequeue());
+            KeyValuePair<string, string?> current = lines.Dequeue();
+            if (!string.IsNullOrEmpty(current.Value))
+                DialogUiBinder.SetBackground(current.Value);
+            DialogUiBinder.SetSubtitleText(screen, current.Key);
             if (lines.Count > 0)
             {
                 NarrationOverlay.SetClickHandler(() => AdvanceNarration(window, tree, node, nodeName, screen, lines));

@@ -70,6 +70,11 @@ internal sealed class DialogNode
 	[JsonProperty("narration")]
 	public List<string>? Narration { get; set; }
 
+	// Per-narration-line background, index-aligned with Narration (null = keep the current background). Set by a
+	// trailing `| bg: <file>` on a `>` line, so a single node can switch backgrounds between narration lines.
+	[JsonProperty("narrationBg")]
+	public List<string?>? NarrationBackgrounds { get; set; }
+
 	[JsonProperty("npcText")]
 	[JsonConverter(typeof(StringOrListConverter))]
 	public List<string>? NpcTextLines { get; set; }

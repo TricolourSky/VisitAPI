@@ -15,6 +15,8 @@ internal static class DialogScriptParser
 
 	private static readonly Regex QuotedRegex = new Regex("\"([^\"]*)\"");
 
+	private static readonly Regex NarrationBgRegex = new Regex(@"\s*\|\s*bg:\s*(.+)$", RegexOptions.IgnoreCase);
+
 	public static DialogTree? Parse(string[] lines, string sourceName, List<string> errors)
 	{
 		DialogTree tree = new DialogTree();
@@ -60,7 +62,16 @@ internal static class DialogScriptParser
 			}
 			if (line.StartsWith(">"))
 			{
-				(node.Narration ??= new List<string>()).Add(line.Substring(1).Trim());
+				string body = line.Substring(1).Trim();
+				string? lineBg = null;
+				Match bgMatch = NarrationBgRegex.Match(body);
+				if (bgMatch.Success)
+				{
+					lineBg = NormalizeBackground(bgMatch.Groups[1].Value.Trim());
+					body = body.Substring(0, bgMatch.Index).Trim();
+				}
+				(node.Narration ??= new List<string>()).Add(body);
+				(node.NarrationBackgrounds ??= new List<string?>()).Add(lineBg);
 				continue;
 			}
 			(node.NpcTextLines ??= new List<string>()).Add(line);

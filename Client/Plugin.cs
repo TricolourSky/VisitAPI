@@ -9,7 +9,7 @@ using VisitAPI.Native;
 
 namespace VisitAPI
 {
-    [BepInPlugin("com.sora.visitapi", "VisitAPI", "0.3.0")]
+    [BepInPlugin("com.sora.visitapi", "VisitAPI", "0.4.0")]
     public class Plugin : BaseUnityPlugin
     {
         internal static ManualLogSource Log = null!;
@@ -32,7 +32,7 @@ namespace VisitAPI
         {
             Instance = this;
             Log = Logger;
-            Log.LogInfo("VisitAPI 0.3.0 loading (rewrite)");
+            Log.LogInfo("VisitAPI 0.4.0 loading (rewrite)");
 
             LanguageMode = Config.Bind("General", "Language", "auto",
                 "VisitAPI 自身文本(UI/日志)的语言: auto=跟随EFT / zh / en  |  Language for VisitAPI's own text: auto (follow EFT) / zh / en");
