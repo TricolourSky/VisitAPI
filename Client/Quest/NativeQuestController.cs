@@ -129,8 +129,8 @@ namespace VisitAPI
             {
                 if (AccessTools.TypeByName("EFT.UI.HandoverQuestItemsWindow") == null)
                 {
-                    Plugin.Log.LogWarning("[NativeQuest] HandoverQuestItemsWindow missing — falling back to whole-stack auto handover");
-                    HandoverItemAuto(questId); onDone(true); return;
+                    Plugin.Log.LogWarning("[NativeQuest] HandoverQuestItemsWindow type missing — cannot hand over");
+                    onDone(false); return;
                 }
                 object? ctrl = ResolveQuestController() ?? ResolveHideoutQuestController();
                 object? quest = ctrl != null ? FindQuestInBook(ctrl, questId) : null;
@@ -140,7 +140,8 @@ namespace VisitAPI
                 if (conds.Count == 0)
                 {
                     // No window to open: either every hand-over is already satisfied (→ let the dialog proceed to
-                    // its complete node) or the player carries NONE of the needed items (→ not satisfied, stay put).
+                    // its complete node) or the player carries NONE of the needed items (→ onDone(false); the
+                    // dialog CLOSES on that — DialogRunner treats any unfulfilled handover as "come back later").
                     bool done = AllHandoverConditionsDone(quest);
                     Plugin.Log.LogInfo("[NativeQuest] handover: no pending window for " + questId + " (allDone=" + done + ")");
                     onDone(done); return;
@@ -173,18 +174,31 @@ namespace VisitAPI
             return result;
         }
 
-        // Open the handover window for conds[index]; its accept callback opens the next one, until none remain.
+        // Open the handover window for conds[index]; its callback opens the next one, until none remain.
         // allMet stays true only while every window's submitted amount covered that condition's required `value`,
         // so onDone(true) means the player actually handed over enough to finish — not merely that they clicked OK.
+        // A CANCELLED window aborts the rest of the chain (don't pop another window in the player's face). The
+        // next window otherwise opens one frame LATER: re-Show()ing the shared window instance inside the previous
+        // window's Accept call stack lets that Accept's own close swallow the fresh window and submit an EMPTY
+        // handover for its condition (Window.Close captures the CURRENT context after Show swapped it).
         private static void ChainHandoverWindows(object ctrl, object quest, string questId, string? label, List<object> conds, int index, bool allMet, Action<bool> onDone)
         {
             if (index >= conds.Count) { ReevaluateReadyQuests(questId); onDone(allMet); return; }
-            bool opened = TryOpenHandoverWindow(ctrl, quest, questId, label, conds[index],
-                condMet => ChainHandoverWindows(ctrl, quest, questId, label, conds, index + 1, allMet && condMet, onDone));
+            bool opened = TryOpenHandoverWindow(ctrl, quest, questId, label, conds[index], (condMet, cancelled) =>
+            {
+                if (cancelled) { onDone(false); return; }
+                Plugin.Instance.StartCoroutine(ChainNextFrame(ctrl, quest, questId, label, conds, index + 1, allMet && condMet, onDone));
+            });
             if (!opened) onDone(false);
         }
 
-        private static bool TryOpenHandoverWindow(object ctrl, object quest, string questId, string? label, object cond, Action<bool> onAccepted)
+        private static IEnumerator ChainNextFrame(object ctrl, object quest, string questId, string? label, List<object> conds, int index, bool allMet, Action<bool> onDone)
+        {
+            yield return null;
+            ChainHandoverWindows(ctrl, quest, questId, label, conds, index, allMet, onDone);
+        }
+
+        private static bool TryOpenHandoverWindow(object ctrl, object quest, string questId, string? label, object cond, Action<bool, bool> onAccepted)
         {
             Type? windowType = AccessTools.TypeByName("EFT.UI.HandoverQuestItemsWindow");
             if (windowType == null) return false;
@@ -208,8 +222,18 @@ namespace VisitAPI
             // name EFT.InventoryLogic.Item. On accept, submit the player-selected items + chain to the next window.
             Type acceptType = show.GetParameters()[5].ParameterType;
             Type selType = acceptType.IsGenericType ? acceptType.GetGenericArguments()[0] : typeof(object);
+            bool settled = false;
+            Action? onCancelled = null;
+            GClass3834? windowCtx = null;
             Action<object> onAcceptObj = selectedObj =>
             {
+                if (settled) return;
+                settled = true;
+                if (windowCtx != null && onCancelled != null)
+                {
+                    windowCtx.OnDecline -= onCancelled;
+                    windowCtx.OnCloseSilent -= onCancelled;
+                }
                 bool met = false;
                 try
                 {
@@ -226,14 +250,34 @@ namespace VisitAPI
                     Plugin.Log.LogInfo("[NativeQuest] handover submitted for " + questId + " (+" + submitted + ", now " + (currentValue + submitted) + "/" + required + ", met=" + met + ")");
                 }
                 catch (Exception ex) { Plugin.Log.LogWarning("[NativeQuest] handover onAccept: " + (ex.InnerException?.Message ?? ex.Message)); }
-                onAccepted(met);
+                onAccepted(met, false);
             };
             ParameterExpression sp = Expression.Parameter(selType, "selected");
             Delegate typedAccept = Expression.Lambda(acceptType,
                 Expression.Invoke(Expression.Constant(onAcceptObj), Expression.Convert(sp, typeof(object))), sp).Compile();
 
             window.gameObject.SetActive(true);
-            show.Invoke(window, new object[] { cond, currentValue, eligible, profile, invCtrl, typedAccept, true });
+            object? shownCtx = show.Invoke(window, new object[] { cond, currentValue, eligible, profile, invCtrl, typedAccept, true });
+            // The window's close/X button Declines its context WITHOUT ever calling the accept delegate — the
+            // old code left the dialog waiting on a callback that never came. Both events fire on the main
+            // thread. NOTE: the accept path RE-ENTERS the accept delegate a second time (AcceptAndClose raises
+            // the context's OnAccept, which the base window wires back to its own Accept → action_1) — the
+            // `settled` latch is what keeps HandoverItem and the dialog callback exactly-once. Do not remove it.
+            if (shownCtx is GClass3834 ctx)
+            {
+                windowCtx = ctx;
+                onCancelled = () =>
+                {
+                    ctx.OnDecline -= onCancelled;
+                    ctx.OnCloseSilent -= onCancelled;
+                    if (settled) return;
+                    settled = true;
+                    Plugin.Log.LogInfo("[NativeQuest] handover window cancelled");
+                    onAccepted(false, true);
+                };
+                ctx.OnDecline += onCancelled;
+                ctx.OnCloseSilent += onCancelled;
+            }
             Canvas canvas = window.GetComponent<Canvas>() ?? window.gameObject.AddComponent<Canvas>();
             canvas.overrideSorting = true;
             canvas.sortingOrder = 2000;
@@ -297,65 +341,6 @@ namespace VisitAPI
             return null;
         }
 
-        // Fallback only (native window unavailable): whole-stack auto-grab — OVER-hands if the player carries a
-        // bigger stack than required, so it's used solely when EFT.UI.HandoverQuestItemsWindow can't be resolved.
-        private static void HandoverItemAuto(string questId)
-        {
-            if (string.IsNullOrEmpty(questId)) return;
-            Plugin.Log.LogInfo("[NativeQuest] HandoverItemAuto (fallback): " + questId);
-            object? ctrl = ResolveQuestController() ?? ResolveHideoutQuestController();
-            if (ctrl == null) { Plugin.Log.LogWarning("[NativeQuest] no quest controller (handover)"); return; }
-            object? quest = FindQuestInBook(ctrl, questId);
-            if (quest == null) { Plugin.Log.LogInfo("[NativeQuest] " + questId + " not in QuestBook; skip handover"); return; }
-            try
-            {
-                Type? handoverType = AccessTools.TypeByName("EFT.Quests.ConditionHandoverItem");
-                if (!(quest.GetType().GetProperty("NecessaryConditions", All)?.GetValue(quest) is IEnumerable conds))
-                {
-                    Plugin.Log.LogWarning("[NativeQuest] handover: no NecessaryConditions on " + questId);
-                    return;
-                }
-                MethodInfo? getItems = ctrl.GetType().GetMethods(All).FirstOrDefault(m => m.Name == "GetItemsForCondition" && m.GetParameters().Length == 1);
-                MethodInfo? handover = ctrl.GetType().GetMethods(All).FirstOrDefault(m => m.Name == "HandoverItem" && m.GetParameters().Length == 4);
-                if (getItems == null || handover == null) { Plugin.Log.LogWarning("[NativeQuest] handover: GetItemsForCondition/HandoverItem not found"); return; }
-
-                int fired = 0;
-                foreach (object cond in conds)
-                {
-                    if (cond == null || handoverType == null || !handoverType.IsInstanceOfType(cond)) continue;
-                    if (!(getItems.Invoke(ctrl, new[] { cond }) is Array all) || all.Length == 0)
-                    {
-                        Plugin.Log.LogInfo("[NativeQuest] handover: no matching items in inventory for a condition of " + questId);
-                        continue;
-                    }
-                    // CRITICAL: the native HandoverItem gives away the FULL stack count of EVERY item passed
-                    // (EFT.Quests.ConditionHandoverItem.ConvertToHandoverItems uses item.StackObjectsCount with no
-                    // cap, then the quest counter += the sum). GetItemsForCondition returns the player's ENTIRE
-                    // matching inventory — so passing it straight through would over-hand-over. Pass only as many
-                    // whole items/stacks as the condition's `value` needs. (Whole-stack granularity: a single stack
-                    // that already covers the need is handed over IN FULL — we can't split a stack through this API.)
-                    int required = ReadIntMember(cond, "value", 1);
-                    Array items = TakeUpToCount(all, required, out int total);
-                    if (items.Length == 0) continue;
-                    if (total > required)
-                        Plugin.Log.LogWarning("[NativeQuest] handover: stack overshoot — giving " + total + " for a need of " + required + " (whole-stack granularity, no split) on " + questId);
-
-                    if (handover.Invoke(ctrl, new object[] { quest, cond, items, true }) is Task task)
-                        task.ContinueWith(t => Plugin.Log.LogInfo(t.IsFaulted
-                            ? "[NativeQuest] HandoverItem faulted: " + t.Exception?.InnerException?.Message
-                            : "[NativeQuest] HandoverItem completed: " + questId));
-                    Plugin.Log.LogInfo("[NativeQuest] native HandoverItem triggered: " + questId + " (" + items.Length + " stack(s) = " + total + " item(s), need " + required + ")");
-                    fired++;
-                }
-                if (fired == 0) Plugin.Log.LogInfo("[NativeQuest] handover: no pending item-handover condition with items for " + questId);
-                else ReevaluateReadyQuests(questId);
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogWarning("[NativeQuest] handover failed: " + (ex.InnerException?.Message ?? ex.Message));
-            }
-        }
-
         // Already-accumulated progress for a condition: QuestClass.ProgressCheckers[cond].CurrentValue (verified
         // against SPT/EFT QuestClass — IsConditionDone reads the same checker). Returns 0 if it can't be read or
         // the checker has no getter (so a fresh objective still opens with the full amount needed).
@@ -401,27 +386,6 @@ namespace VisitAPI
             }
             catch { }
             return fallback;
-        }
-
-        // Take whole items/stacks from `all` (an Item[]) until their StackObjectsCount sum reaches `required`,
-        // returning a same-element-type array of just those items (so HandoverItem is never handed MORE stacks
-        // than the quest needs) and outputting the summed item count. Whole-stack granularity — the final stack
-        // can push `total` past `required`; splitting a stack isn't possible through HandoverItem(quest,cond,Item[]).
-        private static Array TakeUpToCount(Array all, int required, out int total)
-        {
-            total = 0;
-            Type elem = all.GetType().GetElementType() ?? typeof(object);
-            List<object> picked = new List<object>();
-            foreach (object item in all)
-            {
-                if (item == null) continue;
-                picked.Add(item);
-                total += ReadIntMember(item, "StackObjectsCount", 1);
-                if (total >= required) break;
-            }
-            Array result = Array.CreateInstance(elem, picked.Count);
-            for (int i = 0; i < picked.Count; i++) result.SetValue(picked[i], i);
-            return result;
         }
 
         internal static void SetQuestStatus(string questId, int status) => TryNativeSetQuestStatus(questId, status, true);

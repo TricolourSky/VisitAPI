@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using VisitAPI.Native;
+using VisitAPI.Scene;
 
 namespace VisitAPI
 {
@@ -12,9 +13,17 @@ namespace VisitAPI
 
         // fromMenu = opened by the out-of-raid 对话 button. The menu entry only ever enters via the root family
         // (root / root_high / …), never the first-meeting node — that's in-raid story. Raid/hideout keep the
-        // first-visit gate. Either way the repeat/root entry is chosen by the `when:` conditions (level/standing).
-        internal static IEnumerator Begin(DialogTree tree, bool fromMenu = false)
+        // first-visit gate. forcedNode (a trigger's `node X`) skips both and opens straight onto that node.
+        internal static IEnumerator Begin(DialogTree tree, bool fromMenu = false, string? forcedNode = null)
         {
+            // `scene:` staging — trade-screen entry ONLY (raid/hideout triggers keep their flat/in-world
+            // presentation). Staged before the window renders; failure is non-fatal (flat dialog).
+            if (fromMenu && !string.IsNullOrEmpty(tree.SceneBundle))
+            {
+                IEnumerator stage = SceneStage.OpenForDialog(tree.SceneBundle!, NativeBinder.ActiveTraderId);
+                while (stage.MoveNext()) yield return stage.Current;
+            }
+
             object window = null;
             for (int i = 0; i < 180 && window == null; i++)
             {
@@ -29,20 +38,27 @@ namespace VisitAPI
                 yield break;
             }
 
-            string traderId = NativeBinder.ActiveTraderId;
-            string profileId = NativeBinder.ActiveProfileId;
-            bool firstVisit = !fromMenu && !string.IsNullOrEmpty(tree.FirstVisitNode) && DialogStateStore.IsFirstVisit(traderId, profileId);
             string start;
-            if (firstVisit)
+            if (!string.IsNullOrEmpty(forcedNode) && tree.Nodes.ContainsKey(forcedNode))
             {
-                DialogStateStore.MarkVisited(traderId, profileId);
-                start = tree.FirstVisitNode!;
+                start = forcedNode!;
             }
             else
             {
-                start = ResolveStartNode(tree);
+                string traderId = NativeBinder.ActiveTraderId;
+                string profileId = NativeBinder.ActiveProfileId;
+                bool firstVisit = !fromMenu && !string.IsNullOrEmpty(tree.FirstVisitNode) && DialogStateStore.IsFirstVisit(traderId, profileId);
+                if (firstVisit)
+                {
+                    DialogStateStore.MarkVisited(traderId, profileId);
+                    start = tree.FirstVisitNode!;
+                }
+                else
+                {
+                    start = ResolveStartNode(tree);
+                }
             }
-            Plugin.Log.LogInfo("[DialogRunner] window found; rendering node '" + start + "' (firstVisit=" + firstVisit + ", fromMenu=" + fromMenu + ")");
+            Plugin.Log.LogInfo("[DialogRunner] window found; rendering node '" + start + "' (fromMenu=" + fromMenu + ", forced=" + (forcedNode ?? "-") + ")");
             RenderNode(window, tree, start);
         }
 
@@ -68,33 +84,11 @@ namespace VisitAPI
             return fallback;
         }
 
-        // Open straight onto a specific node (e.g. a hideout trigger resuming a questline mid-story), bypassing
-        // the first-visit/root selection that Begin does.
-        internal static IEnumerator BeginAt(DialogTree tree, string startNode)
-        {
-            object window = null;
-            for (int i = 0; i < 180 && window == null; i++)
-            {
-                object screen = DialogUiBinder.FindActiveScreen();
-                if (screen != null) window = DialogUiBinder.GetWindow(screen);
-                if (window == null) yield return null;
-            }
-            if (window == null)
-            {
-                Plugin.Log.LogWarning("[DialogRunner] dialog window not found after waiting");
-                yield break;
-            }
-            string start = !string.IsNullOrEmpty(startNode) && tree.Nodes.ContainsKey(startNode)
-                ? startNode
-                : (tree.Nodes.ContainsKey(tree.StartNode) ? tree.StartNode : (tree.FirstVisitNode ?? tree.StartNode));
-            Plugin.Log.LogInfo("[DialogRunner] window found; rendering forced node '" + start + "'");
-            RenderNode(window, tree, start);
-        }
-
         internal static void CloseDialog()
         {
             ClearRows();
             DialogUiBinder.CloseActiveScreen();
+            if (SceneStage.IsOpen) SceneStage.Close();
         }
 
         // After CloseDialog reveals the trade screen, switch it to the requested tab (Trade/Tasks/Services). Waits a
@@ -114,7 +108,9 @@ namespace VisitAPI
                 Plugin.Log.LogWarning("[DialogRunner] node not found: '" + nodeName + "'");
                 return;
             }
-            DialogUiBinder.SetBackground(node.Background);
+            // A staged 3D scene IS the backdrop — `bg:` and `scene:` are mutually exclusive by design.
+            if (!SceneStage.IsOpen) DialogUiBinder.SetBackground(node.Background);
+            VisitNpcActor.Play(tree.ActorName, node.Anim);
             // Narration (`>` lines) plays in the native subtitle box — its OWN dialog box — one line at a time
             // (click to advance) with the main dialog window hidden; THEN the NPC line + options render. A pure
             // narration node (no NPC text / options) jumps to its `-> ` target (纯旁白跳转节点) or closes at the end.
@@ -124,31 +120,45 @@ namespace VisitAPI
                 RenderBody(window, tree, node, nodeName);
         }
 
+        private struct NarrationLine
+        {
+            public string Text;
+            public string? Bg;
+            public string? Anim;
+        }
+
         private static void PlayNarration(object window, DialogTree tree, DialogNode node, string nodeName)
         {
             object? screen = DialogUiBinder.FindActiveScreen();
-            Queue<KeyValuePair<string, string?>> lines = new Queue<KeyValuePair<string, string?>>();
+            Queue<NarrationLine> lines = new Queue<NarrationLine>();
             List<string> narration = node.Narration!;
-            List<string?>? backgrounds = node.NarrationBackgrounds;
             for (int i = 0; i < narration.Count; i++)
             {
                 if (string.IsNullOrEmpty(narration[i])) continue;
-                string? lineBg = (backgrounds != null && i < backgrounds.Count) ? backgrounds[i] : null;
-                lines.Enqueue(new KeyValuePair<string, string?>(Substitute(narration[i]), lineBg));
+                lines.Enqueue(new NarrationLine
+                {
+                    Text = Substitute(narration[i]),
+                    Bg = At(node.NarrationBackgrounds, i),
+                    Anim = At(node.NarrationAnims, i)
+                });
             }
             if (lines.Count == 0) { RenderBody(window, tree, node, nodeName); return; }
             DialogUiBinder.BeginNarration(screen);
             AdvanceNarration(window, tree, node, nodeName, screen, lines);
         }
 
-        // Show the next narration line in the subtitle box; the click overlay advances to the line after it, or —
-        // on the last line — restores the dialog window and renders the body (or jumps/closes for a pure-narration node).
-        private static void AdvanceNarration(object window, DialogTree tree, DialogNode node, string nodeName, object? screen, Queue<KeyValuePair<string, string?>> lines)
+        private static string? At(List<string?>? list, int i) => list != null && i < list.Count ? list[i] : null;
+
+        // Show the next narration line in the subtitle box (switching background / playing the line's actor
+        // animation if it carries one); the click overlay advances to the line after it, or — on the last line —
+        // restores the dialog window and renders the body (or jumps/closes for a pure-narration node).
+        private static void AdvanceNarration(object window, DialogTree tree, DialogNode node, string nodeName, object? screen, Queue<NarrationLine> lines)
         {
-            KeyValuePair<string, string?> current = lines.Dequeue();
-            if (!string.IsNullOrEmpty(current.Value))
-                DialogUiBinder.SetBackground(current.Value);
-            DialogUiBinder.SetSubtitleText(screen, current.Key);
+            NarrationLine current = lines.Dequeue();
+            if (!SceneStage.IsOpen && !string.IsNullOrEmpty(current.Bg))
+                DialogUiBinder.SetBackground(current.Bg);
+            VisitNpcActor.Play(tree.ActorName, current.Anim);
+            DialogUiBinder.SetSubtitleText(screen, current.Text);
             if (lines.Count > 0)
             {
                 NarrationOverlay.SetClickHandler(() => AdvanceNarration(window, tree, node, nodeName, screen, lines));
@@ -311,13 +321,22 @@ namespace VisitAPI
                 case "handoverItems":
                 {
                     // Native item-selection window(s) are async (player picks exact amounts; the UI splits stacks).
-                    // Continue the dialog ONLY after every handover window is done; stay on this node if cancelled.
+                    // Continue the dialog ONLY after the player handed over the full amount. Anything less —
+                    // partial submit, nothing left to give, window cancelled — CLOSES the dialog instead of
+                    // staying on the node: ESC is blocked and a node whose options all re-run the handover
+                    // would strand the player (the SORA 8/10 softlock). The quest keeps its progress and the
+                    // trigger/button reopens the node, so "come back with the rest" is the natural flow.
                     object capturedWindow = window;
                     DialogTree capturedTree = tree;
                     string? next = opt.Next;
                     NativeQuestController.HandoverItemViaWindow(opt.QuestId ?? "", opt.HandoverLabel, ok =>
                     {
-                        if (!ok) return;
+                        if (!ok)
+                        {
+                            Plugin.Log.LogInfo("[DialogRunner] handover not fulfilled — closing dialog");
+                            CloseDialog();
+                            return;
+                        }
                         if (!string.IsNullOrEmpty(next))
                             RenderNode(capturedWindow, capturedTree, next == "@start" ? capturedTree.StartNode : next!);
                         else

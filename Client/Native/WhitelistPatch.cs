@@ -1,12 +1,13 @@
 using System;
 using System.Reflection;
 using HarmonyLib;
+using VisitAPI.Scene;
 
 namespace VisitAPI.Native
 {
     internal static class WhitelistPatch
     {
-        private static readonly string[] VanillaTraders =
+        internal static readonly string[] VanillaTraders =
         {
             "638f541a29ffd1183d187f57",
             "656f0f98d80a697f855d34b1",
@@ -26,13 +27,22 @@ namespace VisitAPI.Native
             Plugin.Log.LogInfo("[WhitelistPatch] method_5 finalizer installed");
         }
 
+        // Two callers need the bypass: a registered .dlg trader (VisitAPI's own dialog path) and whichever
+        // trader's 3D vendor scene is currently staged (the retail replay opens non-whitelisted vanilla
+        // traders like Mechanic/Ragman through the same screen).
         private static Exception? Method5Finalizer(Exception __exception, object __instance)
         {
             if (__exception == null) return null;
             string? traderId = NativeBinder.GetScreenTraderId(__instance);
-            if (traderId != null && Plugin.RegisteredTraders.Contains(traderId) && Array.IndexOf(VanillaTraders, traderId) < 0)
+            if (traderId == null) return __exception;
+            if (Plugin.RegisteredTraders.Contains(traderId) && Array.IndexOf(VanillaTraders, traderId) < 0)
             {
                 Plugin.Log.LogInfo("[WhitelistPatch] suppressed whitelist throw for custom trader " + traderId);
+                return null;
+            }
+            if (SceneStage.IsOpen && string.Equals(traderId, SceneStage.CurrentTraderId, StringComparison.OrdinalIgnoreCase))
+            {
+                Plugin.Log.LogInfo("[WhitelistPatch] suppressed whitelist throw for staged vendor scene " + traderId);
                 return null;
             }
             return __exception;

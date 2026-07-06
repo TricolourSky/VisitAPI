@@ -6,9 +6,10 @@ using UnityEngine;
 
 namespace VisitAPI.Native
 {
-    // Phase 6 out-of-raid entry. Postfix on TraderScreensGroup.method_6 (per-trader select, also runs on first Show):
-    // for a registered trader that has a `.dlg`, clone the native close button into a single "对话" button that opens
-    // the VisitAPI dialog using the controllers the trade screen already holds. Hidden for traders without a .dlg.
+    // The single out-of-raid entry. Postfix on TraderScreensGroup.method_6 (per-trader select, also runs on
+    // first Show): clone the native close button into ONE visit button, shown for a registered trader with a
+    // `.dlg` (对话 — opens the VisitAPI dialog with the controllers the trade screen already holds) OR a
+    // retail vendor with a scene bundle (拜访 — opens the native retail replay). Hidden for everyone else.
     internal static class TraderScreenEntryPatch
     {
         internal static void Apply(Harmony harmony)
@@ -30,14 +31,20 @@ namespace VisitAPI.Native
                 if (__instance == null) return;
                 object? trader = NativeBinder.GetTsgTrader(__instance);
                 string id = trader != null ? NativeBinder.GetTraderId(trader) : "";
-                bool qualifies = !string.IsNullOrEmpty(id)
+                bool hasDlg = !string.IsNullOrEmpty(id)
                     && Plugin.RegisteredTraders.Contains(id)
                     && DialogTreeLoader.Exists(id);
+                // A retail visit needs BOTH the scene bundle and a captured dialog tree — Peacekeeper's room
+                // ships in the raw pack but his tree only ever lived server-side, so no button for him
+                // (reach his room from a .dlg via `scene:` instead).
+                bool hasScene = !string.IsNullOrEmpty(id)
+                    && VisitAPI.Scene.SceneAssets.FindVendorBundleFile(id) != null
+                    && VisitAPI.Scene.RetailReplay.RetailDialogEngine.HasDialogFor(id);
 
                 VisitTalkButton? marker = EnsureButton(__instance);
                 if (marker == null) return;
-                marker.Configure(__instance, id);
-                marker.gameObject.SetActive(qualifies);
+                marker.Configure(__instance, id, hasDlg, hasScene);
+                marker.gameObject.SetActive(hasDlg || hasScene);
             }
             catch (Exception ex)
             {
@@ -68,9 +75,6 @@ namespace VisitAPI.Native
             {
                 button.OnClick.RemoveAllListeners();
                 button.SetIcon(null, null);
-                // Empty config label → localized default ("对话"/"Talk"); a non-empty config value is the author's override.
-                string label = string.IsNullOrEmpty(Plugin.TalkLabel.Value) ? Loc.DefaultTalkLabel : Plugin.TalkLabel.Value;
-                button.SetRawText(label, Plugin.TalkFontSize.Value);
             }
 
             // Anchor the 对话 button to the top-CENTRE of the (full-width) top bar so it sits dead-centre on screen
@@ -85,8 +89,9 @@ namespace VisitAPI.Native
             }
 
             VisitTalkButton marker = clone.AddComponent<VisitTalkButton>();
+            marker.Button = button;
             if (button != null) button.OnClick.AddListener(marker.OnTalkClicked);
-            Plugin.Log.LogInfo("[TalkButton] Talk button created on trade screen");
+            Plugin.Log.LogInfo("[TalkButton] visit button created on trade screen");
             return marker;
         }
     }

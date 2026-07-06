@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "e:\\项目\\VisitAPI Framework\\dist\\VisitAPI\\Client\\VisitAPI.csproj": {}
+    "e:\\项目\\VisitAPI Framework\\dist\\VisitAPI-0.5-src\\Client\\VisitAPI.csproj": {}
   },
   "projects": {
-    "e:\\项目\\VisitAPI Framework\\dist\\VisitAPI\\Client\\VisitAPI.csproj": {
-      "version": "0.4.0",
+    "e:\\项目\\VisitAPI Framework\\dist\\VisitAPI-0.5-src\\Client\\VisitAPI.csproj": {
+      "version": "0.5.0",
       "restore": {
-        "projectUniqueName": "e:\\项目\\VisitAPI Framework\\dist\\VisitAPI\\Client\\VisitAPI.csproj",
+        "projectUniqueName": "e:\\项目\\VisitAPI Framework\\dist\\VisitAPI-0.5-src\\Client\\VisitAPI.csproj",
         "projectName": "VisitAPI",
-        "projectPath": "e:\\项目\\VisitAPI Framework\\dist\\VisitAPI\\Client\\VisitAPI.csproj",
+        "projectPath": "e:\\项目\\VisitAPI Framework\\dist\\VisitAPI-0.5-src\\Client\\VisitAPI.csproj",
         "packagesPath": "C:\\Users\\17729\\.nuget\\packages\\",
-        "outputPath": "e:\\项目\\VisitAPI Framework\\dist\\VisitAPI\\Client\\obj\\",
+        "outputPath": "e:\\项目\\VisitAPI Framework\\dist\\VisitAPI-0.5-src\\Client\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\17729\\AppData\\Roaming\\NuGet\\NuGet.Config"

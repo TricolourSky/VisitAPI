@@ -12,6 +12,18 @@ internal sealed class DialogTree
 	[JsonProperty("traderName")]
 	public string TraderName { get; set; } = "";
 
+	// 3D scene dialog (Lightkeeper-style): the in-world NPC model whose Animator plays one animation per
+	// dialog line. Set by the `actor:` header; resolved at runtime by nickname (a spawned bot) or GameObject name.
+	[JsonProperty("actor")]
+	public string? ActorName { get; set; }
+
+	// 3D vendor-scene staging (`scene:` header): the trade-screen 对话 entry opens this dialog inside a
+	// staged room (retail-style visit) instead of over a flat background. A bundle file name under
+	// config/VisitAPI/scenes/, or a retail vendor's 24-hex trader id to borrow that vendor's room.
+	// `anim:` directives then drive the staged trader model; `bg:` is skipped while the scene is up.
+	[JsonProperty("scene")]
+	public string? SceneBundle { get; set; }
+
 	[JsonProperty("startNode")]
 	public string StartNode { get; set; } = "root";
 
@@ -51,6 +63,11 @@ internal sealed class DialogTree
 	[JsonProperty("hideoutTriggers")]
 	public List<HideoutAreaTrigger>? HideoutTriggers { get; set; }
 
+	// Experimental (`trigger: item …`): collectible intel items placed in a raid map; picking one up accepts
+	// a quest line (Tarkov-1.0-style). Spawned as REAL native loot via GameWorld.SetupItem.
+	[JsonProperty("itemTriggers")]
+	public List<ItemTrigger>? ItemTriggers { get; set; }
+
 	[JsonProperty("tabQuestId")]
 	public string? TabQuestId { get; set; }
 
@@ -74,6 +91,15 @@ internal sealed class DialogNode
 	// trailing `| bg: <file>` on a `>` line, so a single node can switch backgrounds between narration lines.
 	[JsonProperty("narrationBg")]
 	public List<string?>? NarrationBackgrounds { get; set; }
+
+	// Per-narration-line actor animation (`| anim: <state>`), index-aligned with Narration — one animation per
+	// dialog line, the same per-line pacing the native Lightkeeper dialog uses (null = no animation change).
+	[JsonProperty("narrationAnim")]
+	public List<string?>? NarrationAnims { get; set; }
+
+	// Node-level actor animation (`<X> anim: <state>` in the node header), played when the node body renders.
+	[JsonProperty("anim")]
+	public string? Anim { get; set; }
 
 	[JsonProperty("npcText")]
 	[JsonConverter(typeof(StringOrListConverter))]
@@ -199,6 +225,78 @@ internal sealed class FirstVisitTrigger
 
 	[JsonProperty("once")]
 	public bool Once { get; set; } = true;
+
+	// Experimental (`trigger: npc …`): instead of a fixed point, the trigger follows a live NPC model —
+	// aiming the crosshair at it pops the interaction prompt. Matched against bot nicknames and GameObject names.
+	[JsonProperty("npcName")]
+	public string? NpcName { get; set; }
+
+	[JsonProperty("node")]
+	public string? Node { get; set; }
+
+	[JsonProperty("questId")]
+	public string? QuestId { get; set; }
+
+	[JsonProperty("showWhenStatus")]
+	public List<string>? ShowWhenStatus { get; set; }
+}
+
+internal sealed class ItemTrigger
+{
+	[JsonProperty("map")]
+	public string Map { get; set; } = "*";
+
+	[JsonProperty("position")]
+	public float[]? Position { get; set; }
+
+	[JsonProperty("rotationY")]
+	public float RotationY { get; set; }
+
+	[JsonProperty("tpl")]
+	public string Tpl { get; set; } = "";
+
+	[JsonProperty("acceptQuestId")]
+	public string? AcceptQuestId { get; set; }
+
+	// Empty = localized default notification; a quoted string on the trigger line overrides it.
+	[JsonProperty("note")]
+	public string? Note { get; set; }
+}
+
+internal sealed class HideoutAreaTrigger
+{
+	[JsonProperty("areaType")]
+	public string AreaType { get; set; } = "";
+
+	[JsonProperty("requiredLevel")]
+	public int RequiredLevel { get; set; } = 1;
+
+	[JsonProperty("node")]
+	public string? Node { get; set; }
+
+	// Empty = resolved to a localized default ("拜访"/"Visit") at spawn time; a `trigger: ... "prompt"` overrides it.
+	[JsonProperty("promptText")]
+	public string PromptText { get; set; } = "";
+
+	[JsonProperty("maxDistance")]
+	public float MaxDistance { get; set; } = 3f;
+
+	[JsonProperty("offset")]
+	public float[]? Offset { get; set; }
+
+	[JsonProperty("questId")]
+	public string? QuestId { get; set; }
+
+	[JsonProperty("showWhenStatus")]
+	public List<string>? ShowWhenStatus { get; set; }
+
+	// Free-standing trigger: the spot has no native interaction object to merge into (e.g. open floor next to the
+	// gym), so show the prompt by LOOKING at the point and replace the interaction state — like the raid `door`.
+	[JsonProperty("freeStanding")]
+	public bool FreeStanding { get; set; }
+
+	[JsonProperty("hitRadius")]
+	public float HitRadius { get; set; } = 1.2f;
 }
 
 internal sealed class RandomAfterRaid

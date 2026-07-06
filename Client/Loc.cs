@@ -65,6 +65,7 @@ namespace VisitAPI
         internal static string RowContinue => Pick("继续…", "Continue…");
         internal static string DefaultTalkLabel => Pick("对话", "Talk");
         internal static string DefaultVisitPrompt => Pick("拜访", "Visit");
+        internal static string DefaultItemQuestNote => Pick("获得了重要情报，新的任务已开启", "Intel acquired — a new task is now available");
 
         // ===== .dlg parse diagnostics (author-facing, BepInEx log). The "<src>:<line>: " prefix is added at the
         // call site; these are just the message bodies, both languages interpolated with the same args. =====
@@ -75,7 +76,12 @@ namespace VisitAPI
         internal static string P_BadCondition(string part) => Pick($"无法识别的条件 '{part}'（支持 level>=N / level<=N / standing>=N / standing<=N）", $"Unrecognized condition '{part}' (supported: level>=N / level<=N / standing>=N / standing<=N)");
         internal static string P_BadRandomFormat() => Pick("random 格式应为 'random: 10% 节点1 节点2 ...'", "random format must be 'random: 10% node1 node2 ...'");
         internal static string P_BadTriggerFormat() => Pick("trigger 格式应为 'trigger: raid 地图 (x, y, z) ...' 或 'trigger: hideout 区域 ...'", "trigger format must be 'trigger: raid <map> (x, y, z) ...' or 'trigger: hideout <area> ...'");
-        internal static string P_UnknownTriggerType(string type) => Pick($"未知触发器类型 '{type}'（支持 raid / hideout）", $"Unknown trigger type '{type}' (supported: raid / hideout)");
+        internal static string P_UnknownTriggerType(string type) => Pick($"未知触发器类型 '{type}'（支持 raid / hideout / npc / item）", $"Unknown trigger type '{type}' (supported: raid / hideout / npc / item)");
+        internal static string P_BadNodeHeaderExtra(string seg) => Pick($"节点头无法识别的附加项 '{seg}'（支持 bg: 文件 / anim: 动画状态，用 | 分隔）", $"Unrecognized node-header extra '{seg}' (supported: bg: <file> / anim: <state>, separated by |)");
+        internal static string P_NpcTriggerFormat() => Pick("npc 触发器格式应为 'trigger: npc 地图 名称 [node 节点] [dist N] [radius N] [if 任务=状态] \"提示\"'", "npc trigger format must be 'trigger: npc <map> <name> [node X] [dist N] [radius N] [if quest=status] \"prompt\"'");
+        internal static string P_NpcTriggerUnknownParam(string tok) => Pick($"npc 触发器未知参数 '{tok}'", $"Unknown npc trigger parameter '{tok}'");
+        internal static string P_ItemTriggerFormat() => Pick("item 触发器格式应为 'trigger: item 地图 (x, y, z) tpl 物品模板ID accept 任务ID [rot 角度] \"拾取通知\"'", "item trigger format must be 'trigger: item <map> (x, y, z) tpl <templateId> accept <questId> [rot <deg>] \"notification\"'");
+        internal static string P_ItemTriggerUnknownParam(string tok) => Pick($"item 触发器未知参数 '{tok}'", $"Unknown item trigger parameter '{tok}'");
         internal static string P_RaidTriggerMissingCoords() => Pick("raid 触发器缺少坐标 (x, y, z)", "raid trigger is missing coordinates (x, y, z)");
         internal static string P_RaidTriggerUnknownParam(string tok) => Pick($"raid 触发器未知参数 '{tok}'", $"Unknown raid trigger parameter '{tok}'");
         internal static string P_BadIfCondition() => Pick("if 条件格式应为 '任务=状态[/状态]'", "if condition format must be 'quest=status[/status]'");

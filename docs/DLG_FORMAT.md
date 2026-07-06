@@ -12,10 +12,14 @@ One trader = one `BepInEx/config/VisitAPI/<traderId>.dlg` file (UTF-8). **The fi
 trader: <24-hex traderId> "Display Name"
 start: <repeat-visit root node>                  # default: root
 first: <first-meeting node>                       # optional
+actor: <npc model name>                           # the 3D-scene dialogue actor (see "3D scene dialogue")
+scene: <bundle file or 24-hex trader id>          # 3D visit room (see "3D visit scene")
 when: level>=4 -> <node>                          # pick the root by level / standing (see below)
 when: level>=3, standing>=0.05 -> <node>          # conditions can be comma-joined (all must hold)
 trigger: raid <map> (x, y, z) [door WxH[xRot]] [dist 3] [radius 1.2] [once|repeat] "prompt"
 trigger: hideout <area> (x, y, z) [node <node>] [dist 3] [if quest=status[/status]] [free] "prompt"
+trigger: npc <map> <name> [node <node>] [dist 3.5] [radius 0.8] [if quest=status[/status]] "prompt"   # experimental
+trigger: item <map> (x, y, z) tpl <templateId> accept <quest> [rot <deg>] "pickup notification"        # experimental
 quest <alias> = <24-hex questId>                  # quest alias; use <alias> anywhere a quest id is expected
 ```
 
@@ -40,13 +44,23 @@ A `trigger:` line places an in-world "Visit" interaction. Only the **type** and 
 - `free` (or `door`) = free-standing look-to-interact: for an open spot with no native area menu (the trigger requires you to *look* at the point). Without `free`, the Visit action is **merged into** the native area menu (e.g. the Intelligence Center menu).
 - Two `trigger: hideout` lines at the **same coordinates with different `if` gates** = the "accept the next task here / come back to hand it in here" pattern (the gates are mutually exclusive, so only one shows at a time).
 
+**`trigger: npc <map> <name> …`** (experimental — crosshair-on-NPC interaction)
+- The interaction follows a **live NPC model** instead of a fixed point: `<name>` is matched (case-insensitive substring) against spawned bots' **nicknames** first, then looked up as an exact scene **GameObject name** (a model placed by your trader mod). The name must contain **no spaces**.
+- Aiming the **crosshair** at the model (default hit radius 0.8, distance 3.5) pops the interaction prompt; `node` / `dist` / `radius` / `if` mean the same as on hideout triggers.
+- Spawning/placing the NPC model itself is your mod's job — VisitAPI only adds the look-to-interact.
+
+**`trigger: item <map> (x,y,z) tpl <templateId> accept <quest> …`** (experimental — collectible intel item, Tarkov-1.0 style)
+- Spawns a **real, natively lootable item** at the coordinates (via the game's own `GameWorld.SetupItem` — pickup, inventory and found-in-raid are all vanilla behaviour). `tpl` = an item template id (a server-side cloned custom item works too).
+- The moment the player **picks it up**: the `accept` quest is accepted + a toast notification shows (the quoted text; omit it for the built-in bilingual default).
+- The item only spawns while the quest is **not yet accepted** (status unknown/Locked/AvailableForStart) — once collected and the quest is running, it stops appearing. `rot <deg>` = optional Y-axis facing.
+
 ---
 
 ## Nodes
 
 ```
-<nodeName> bg: backgroundFile
-> narration line [| bg: backgroundFile]            # subtitle box, click to advance; trailing | bg: swaps the background for this line
+<nodeName> bg: backgroundFile | anim: animState
+> narration line [| bg: backgroundFile] [| anim: animState]   # subtitle box, click to advance; trailing suffixes swap the bg / play an animation
 NPC spoken line
 - option text -> target
 - option text -> target | directive, directive...
@@ -57,12 +71,48 @@ NPC spoken line
 - **`bg:`** a plain file name is looked up under `config/VisitAPI/backgrounds/`; a value containing `/` or `\` is used as a path relative to `config/VisitAPI/`. Omit `bg:` to keep the previous background. Supported: **images** `.png .jpg .jpeg` and **looping video** `.mp4 .webm .m4v .mov` (muted by default).
 - **`>` narration** plays in the native subtitle box, one line at a time, click to advance; then the NPC line + options render. A node with only `>` lines and a `-> target` auto-continues to that node when narration ends.
 - **Per-line background**: append `| bg: file` to a `>` line (e.g. `> She pushed the door open and stepped in. | bg: Standoff.png`) to switch the background when that line is shown; lines without `| bg:` keep the previous background. The node-header `bg:` is the initial background on entry, and per-line `| bg:` swaps it as narration advances. File-name resolution is the same as `bg:`.
+- **Per-line animation (3D scene dialogue)**: see the next section. `| bg:` and `| anim:` can both appear on one line, in any order.
+
+---
+
+## 3D scene dialogue (Lightkeeper-style, one animation per line)
+
+The native Lightkeeper visit = no CG background (you see him in 3D through the dialogue box) and one model animation per spoken line. VisitAPI reproduces the same mechanism:
+
+```
+actor: SORA_Model                 # header: the in-world NPC model (a bot nickname or a scene GameObject name)
+<C1> anim: Greeting               # play an animation when the node renders
+> She looks up at you. | anim: LookUp    # each narration line can carry its own animation — one line, one animation
+> "You came." | anim: Nod
+```
+
+- **Omit `bg:` and you have a 3D scene** — the dialogue box floats over the game world, with your NPC model in view (exactly how the native Lightkeeper dialogue looks).
+- `actor:` resolves the same way as a `trigger: npc` name: bot nickname first, then a scene GameObject.
+- `anim: <state>` plays a **state of the model's Animator** (`CrossFadeInFixedTime`, 0.25 s blend). The state name = a state in your AnimatorController. The model and its AnimatorController ship in your trader mod's asset bundle — any standard Unity Animator works; no EFT SequenceReader assets needed.
+- Pairs naturally with `trigger: npc`: aim at the model to start the dialogue, and every line drives its animation.
 - **NPC spoken line** = any plain line. If a node has several plain lines, the **last** one is shown as the NPC's text (use `>` narration for multi-line lead-ins).
 - **`- option text -> target`** = a clickable option. **target**: a node name / `@start` (the root) / `@trade` / `@tasks` / `@services` (open that tab of the out-of-raid trade screen) / `@close` (or `@leave`). **Omitting `-> target` closes the dialogue** after running the option's directives.
 - Text supports `{player}` / `{playerName}` (replaced with the character nickname).
 - Lines starting with `#` or `//` are comments; blank lines are free.
 
 > `@trade` / `@tasks` / `@services` only work **out of raid** (the dialogue opened from the Talk button sits on top of the trade screen). In raid they no-op (the option stays on the node).
+
+---
+
+## 3D visit scene (`scene:`, retail-1.0-visit style)
+
+`scene:` makes the trade-screen entry button open the dialogue inside a **standalone 3D room** (the retail vendor-visit look): your scene bundle loads, the camera cuts to the room's anchor, the menu backdrop hides, and the dialogue box floats over the scene; closing the dialogue tears it all back down.
+
+```
+scene: my_room.bundle            # a bundle file under config/VisitAPI/scenes/
+scene: 54cb50c76803fa8b248b4571  # or: borrow a retail vendor's visit room (needs the scene asset pack)
+```
+
+- **Trade-screen entry only**: dialogues opened by raid / hideout triggers keep their current presentation (flat background / in-world).
+- `scene:` and `bg:` are **mutually exclusive** — while the scene is up every `bg:` is ignored (the scene IS the backdrop).
+- `anim:` directives automatically drive the **trader model inside the scene** (no `actor:` needed); see below for how the model is found.
+- **Custom-scene convention**: pack one scene in the bundle (bring your own geometry + lights), add an empty node named **`Position_Camera`** as the camera anchor, and give the trader-model node an **Animator** (a name containing `Trader`/`Vendor`/`_Model` is safest) with a SkinnedMeshRenderer underneath. Drop the bundle into `BepInEx/config/VisitAPI/scenes/`.
+- A scene that fails to load never blocks the dialogue — it just falls back to the flat-background mode.
 
 ---
 

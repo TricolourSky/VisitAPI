@@ -7,7 +7,7 @@ namespace VisitAPI;
 
 internal static class DialogScriptParser
 {
-	private static readonly Regex NodeHeaderRegex = new Regex(@"^<([A-Za-z0-9_.\-]+)>(?:\s+bg:\s*(.+))?$");
+	private static readonly Regex NodeHeaderRegex = new Regex(@"^<([A-Za-z0-9_.\-]+)>(?:\s+(.+))?$");
 
 	private static readonly Regex QuestAliasRegex = new Regex(@"^quest\s+([A-Za-z0-9_\-]+)\s*=\s*(\S+)$");
 
@@ -15,7 +15,9 @@ internal static class DialogScriptParser
 
 	private static readonly Regex QuotedRegex = new Regex("\"([^\"]*)\"");
 
-	private static readonly Regex NarrationBgRegex = new Regex(@"\s*\|\s*bg:\s*(.+)$", RegexOptions.IgnoreCase);
+	// Trailing `| bg: <file>` / `| anim: <state>` suffixes on a `>` narration line or a node header — parsed
+	// innermost-last in a loop so they can be combined in any order (values may not contain '|').
+	private static readonly Regex LineSuffixRegex = new Regex(@"\s*\|\s*(bg|anim)\s*:\s*([^|]*)$", RegexOptions.IgnoreCase);
 
 	public static DialogTree? Parse(string[] lines, string sourceName, List<string> errors)
 	{
@@ -36,7 +38,7 @@ internal static class DialogScriptParser
 				tree.Nodes[header.Groups[1].Value] = node;
 				if (header.Groups[2].Success)
 				{
-					node.Background = NormalizeBackground(header.Groups[2].Value.Trim());
+					ParseNodeHeaderExtras(header.Groups[2].Value, node, sourceName, i + 1, errors);
 				}
 				continue;
 			}
@@ -64,14 +66,20 @@ internal static class DialogScriptParser
 			{
 				string body = line.Substring(1).Trim();
 				string? lineBg = null;
-				Match bgMatch = NarrationBgRegex.Match(body);
-				if (bgMatch.Success)
+				string? lineAnim = null;
+				Match suffix;
+				while ((suffix = LineSuffixRegex.Match(body)).Success)
 				{
-					lineBg = NormalizeBackground(bgMatch.Groups[1].Value.Trim());
-					body = body.Substring(0, bgMatch.Index).Trim();
+					string value = suffix.Groups[2].Value.Trim();
+					if (suffix.Groups[1].Value.Equals("bg", StringComparison.OrdinalIgnoreCase))
+						lineBg = NormalizeBackground(value);
+					else
+						lineAnim = value;
+					body = body.Substring(0, suffix.Index).TrimEnd();
 				}
 				(node.Narration ??= new List<string>()).Add(body);
 				(node.NarrationBackgrounds ??= new List<string?>()).Add(lineBg);
+				(node.NarrationAnims ??= new List<string?>()).Add(lineAnim);
 				continue;
 			}
 			(node.NpcTextLines ??= new List<string>()).Add(line);
@@ -109,6 +117,12 @@ internal static class DialogScriptParser
 			}
 			break;
 		}
+		case "actor":
+			tree.ActorName = ExtractQuoted(ref val) ?? val.Trim();
+			break;
+		case "scene":
+			tree.SceneBundle = ExtractQuoted(ref val) ?? val.Trim();
+			break;
 		case "start":
 			tree.StartNode = val;
 			break;
@@ -229,10 +243,135 @@ internal static class DialogScriptParser
 		case "hideout":
 			ParseHideoutTrigger(tokens, vector, prompt, tree, src, lineNo, errors);
 			break;
+		case "npc":
+			ParseNpcTrigger(tokens, prompt, tree, src, lineNo, errors);
+			break;
+		case "item":
+			ParseItemTrigger(tokens, vector, prompt, tree, src, lineNo, errors);
+			break;
 		default:
 			errors.Add($"{src}:{lineNo}: " + Loc.P_UnknownTriggerType(tokens[0]));
 			break;
 		}
+	}
+
+	// Node header extras after the `<name>`: `bg: <file>` and/or `anim: <state>`, '|'-separated in any order.
+	private static void ParseNodeHeaderExtras(string rest, DialogNode node, string src, int lineNo, List<string> errors)
+	{
+		foreach (string rawSegment in rest.Split('|'))
+		{
+			string segment = rawSegment.Trim();
+			if (segment.Length == 0) continue;
+			int colon = segment.IndexOf(':');
+			string key = colon > 0 ? segment.Substring(0, colon).Trim().ToLowerInvariant() : "";
+			string value = colon > 0 ? segment.Substring(colon + 1).Trim() : "";
+			switch (key)
+			{
+			case "bg":
+				node.Background = NormalizeBackground(value);
+				break;
+			case "anim":
+				node.Anim = value;
+				break;
+			default:
+				errors.Add($"{src}:{lineNo}: " + Loc.P_BadNodeHeaderExtra(segment));
+				break;
+			}
+		}
+	}
+
+	// Experimental crosshair-on-NPC trigger: `trigger: npc <map|*> <name> [node X] [dist D] [radius R]
+	// [if quest=status] "prompt"`. <name> matches a live bot's nickname or a scene GameObject name (substring).
+	private static void ParseNpcTrigger(string[] tokens, string? prompt, DialogTree tree, string src, int lineNo, List<string> errors)
+	{
+		if (tokens.Length < 3)
+		{
+			errors.Add($"{src}:{lineNo}: " + Loc.P_NpcTriggerFormat());
+			return;
+		}
+		FirstVisitTrigger t = new FirstVisitTrigger
+		{
+			Type = "npc",
+			Map = tokens[1],
+			NpcName = tokens[2],
+			MaxDistance = 3.5f,
+			HitRadius = 0.8f
+		};
+		if (!string.IsNullOrEmpty(prompt))
+		{
+			t.PromptText = prompt!;
+		}
+		for (int i = 3; i < tokens.Length; i++)
+		{
+			switch (tokens[i].ToLowerInvariant())
+			{
+			case "node":
+				if (i + 1 < tokens.Length) t.Node = tokens[++i];
+				break;
+			case "dist":
+				if (i + 1 < tokens.Length) t.MaxDistance = ParseF(tokens[++i]);
+				break;
+			case "radius":
+				if (i + 1 < tokens.Length) t.HitRadius = ParseF(tokens[++i]);
+				break;
+			case "if":
+				if (i + 1 < tokens.Length)
+				{
+					string cond = tokens[++i];
+					int eq = cond.IndexOf('=');
+					if (eq > 0)
+					{
+						t.QuestId = cond.Substring(0, eq);
+						t.ShowWhenStatus = SplitStatuses(cond.Substring(eq + 1));
+					}
+					else
+					{
+						errors.Add($"{src}:{lineNo}: " + Loc.P_BadIfCondition());
+					}
+				}
+				break;
+			default:
+				errors.Add($"{src}:{lineNo}: " + Loc.P_NpcTriggerUnknownParam(tokens[i]));
+				break;
+			}
+		}
+		(tree.RaidTriggers ??= new List<FirstVisitTrigger>()).Add(t);
+	}
+
+	// Experimental collectible intel item: `trigger: item <map|*> (x,y,z) tpl <templateId> accept <questId>
+	// [rot <degY>] "notification"`. Spawns real native loot; picking it up accepts the quest.
+	private static void ParseItemTrigger(string[] tokens, float[]? pos, string? prompt, DialogTree tree, string src, int lineNo, List<string> errors)
+	{
+		if (tokens.Length < 2 || pos == null)
+		{
+			errors.Add($"{src}:{lineNo}: " + Loc.P_ItemTriggerFormat());
+			return;
+		}
+		ItemTrigger t = new ItemTrigger { Map = tokens[1], Position = pos, Note = prompt };
+		for (int i = 2; i < tokens.Length; i++)
+		{
+			switch (tokens[i].ToLowerInvariant())
+			{
+			case "tpl":
+				if (i + 1 < tokens.Length) t.Tpl = tokens[++i];
+				break;
+			case "accept":
+				if (i + 1 < tokens.Length) t.AcceptQuestId = tokens[++i];
+				break;
+			case "rot":
+				if (i + 1 < tokens.Length) t.RotationY = ParseF(tokens[++i]);
+				break;
+			default:
+				errors.Add($"{src}:{lineNo}: " + Loc.P_ItemTriggerUnknownParam(tokens[i]));
+				break;
+			}
+		}
+		if (string.IsNullOrEmpty(t.Tpl))
+		{
+			errors.Add($"{src}:{lineNo}: " + Loc.P_ItemTriggerFormat());
+			return;
+		}
+		(tree.ItemTriggers ??= new List<ItemTrigger>()).Add(t);
 	}
 
 	private static void ParseRaidTrigger(string[] tokens, float[]? pos, string? prompt, DialogTree tree, string src, int lineNo, List<string> errors)
@@ -575,6 +714,20 @@ internal static class DialogScriptParser
 			foreach (HideoutAreaTrigger t in tree.HideoutTriggers)
 			{
 				t.QuestId = Resolve(t.QuestId);
+			}
+		}
+		if (tree.RaidTriggers != null)
+		{
+			foreach (FirstVisitTrigger t in tree.RaidTriggers)
+			{
+				t.QuestId = Resolve(t.QuestId);
+			}
+		}
+		if (tree.ItemTriggers != null)
+		{
+			foreach (ItemTrigger t in tree.ItemTriggers)
+			{
+				t.AcceptQuestId = Resolve(t.AcceptQuestId);
 			}
 		}
 		tree.TabQuestId = Resolve(tree.TabQuestId);
