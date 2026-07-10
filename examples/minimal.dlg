@@ -6,8 +6,9 @@
 #
 # Lines starting with # or // are comments. Edit + reopen the dialogue — no game restart.
 # Backgrounds are optional: add  bg: yourfile.png  after a node name and put the file
-# (.png / .jpg or a looping .mp4) in  BepInEx/config/VisitAPI/backgrounds/.
-# Full syntax: ../docs/DLG_FORMAT.md   (quests, hand-over, standing, hideout triggers, ...)
+# (.png / .jpg or an .mp4 video; append " once" to play a video once) in  BepInEx/config/VisitAPI/backgrounds/.
+# Full syntax: docs/DLG_FORMAT.md in the source repo, https://github.com/TricolourSky/VisitAPI
+# (quests, hand-over, standing, hideout triggers, ...)
 
 trader: 5ac3b934156ae10c4430e83c "Example Trader"
 start: root
@@ -18,7 +19,7 @@ first: first_meeting
 when: level>=15 -> root_regular
 
 # An in-world "Talk" point in a Ground Zero raid. Stand on the spot and press F11 to copy the coords.
-trigger: raid Sandbox (120.0, 2.5, -30.0) door 1.5x2.2 "Talk"
+trigger: raid Sandbox (120.0, 2.5, -30.0) "Talk"
 
 <first_meeting>
 > A stranger waves you over.

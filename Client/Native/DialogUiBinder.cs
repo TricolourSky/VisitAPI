@@ -247,12 +247,26 @@ namespace VisitAPI.Native
         internal static void SetBackground(string? relativePath)
         {
             if (string.IsNullOrEmpty(relativePath)) return;
-            string ext = Path.GetExtension(relativePath).ToLowerInvariant();
+            // `bg: <file> once` plays a video once and holds its last frame; `loop` (or nothing) loops it.
+            // The flag rides in the bg value so narration-line and node-header backgrounds both get it.
+            string spec = relativePath!.Trim();
+            bool loop = true;
+            int lastSpace = spec.LastIndexOf(' ');
+            if (lastSpace > 0)
+            {
+                string flag = spec.Substring(lastSpace + 1).ToLowerInvariant();
+                if (flag == "once" || flag == "loop")
+                {
+                    loop = flag == "loop";
+                    spec = spec.Substring(0, lastSpace).TrimEnd();
+                }
+            }
+            string ext = Path.GetExtension(spec).ToLowerInvariant();
             bool isImage = ext == ".png" || ext == ".jpg" || ext == ".jpeg";
             bool isVideo = ext == ".mp4" || ext == ".webm" || ext == ".m4v" || ext == ".mov";
             if (!isImage && !isVideo)
             {
-                Plugin.Log.LogInfo("[DialogUiBinder] background '" + relativePath + "' skipped (PNG/JPG/MP4 supported)");
+                Plugin.Log.LogInfo("[DialogUiBinder] background '" + spec + "' skipped (PNG/JPG/MP4 supported)");
                 return;
             }
             if (!(FindActiveScreen() is Component screen))
@@ -268,27 +282,29 @@ namespace VisitAPI.Native
             RawImage? img = EnsureBgImage(screen.transform);
             if (img == null) return;
 
-            string full = DialogTreeLoader.ResolveAsset(relativePath!);
+            string full = DialogTreeLoader.ResolveAsset(spec);
             if (isVideo)
             {
-                SetVideoBackground(img, full, relativePath!);
+                SetVideoBackground(img, full, spec, loop);
                 return;
             }
 
-            // Static image: stop any prior video loop, then show the texture.
-            StopVideo();
+            // Static image: decode first so a bad path keeps the current background (video included),
+            // matching the video branch's File.Exists-before-StopVideo order.
             Texture2D? tex = LoadTexture(full);
             if (tex == null) return;
+            StopVideo();
             img.texture = tex;
             img.color = Color.white;
             img.gameObject.SetActive(true);
-            Plugin.Log.LogInfo("[DialogUiBinder] background set: " + relativePath);
+            Plugin.Log.LogInfo("[DialogUiBinder] background set: " + spec);
         }
 
-        // Looping video background: a VideoPlayer renders the mp4 into a RenderTexture shown on the VisitBg RawImage.
-        // Unity's VideoModule decodes H.264 mp4 via Media Foundation on Windows. Audio is muted (it's a background
-        // loop); flip audioOutputMode to Direct if a node's video should be heard.
-        private static void SetVideoBackground(RawImage img, string fullPath, string rel)
+        // Video background: a VideoPlayer renders the mp4 into a RenderTexture shown on the VisitBg RawImage.
+        // Unity's VideoModule decodes H.264 mp4 via Media Foundation on Windows. Audio is muted (it's a
+        // background); flip audioOutputMode to Direct if a node's video should be heard. A non-looping video
+        // holds its last frame when it ends (the player pauses, the RenderTexture keeps the final image).
+        private static void SetVideoBackground(RawImage img, string fullPath, string rel, bool loop)
         {
             if (!File.Exists(fullPath))
             {
@@ -308,7 +324,7 @@ namespace VisitAPI.Native
             vp.renderMode = VideoRenderMode.RenderTexture;
             vp.targetTexture = _bgRT;
             vp.aspectRatio = VideoAspectRatio.Stretch;
-            vp.isLooping = true;
+            vp.isLooping = loop;
             vp.playOnAwake = false;
             vp.waitForFirstFrame = true;
             vp.skipOnDrop = true;
@@ -319,7 +335,7 @@ namespace VisitAPI.Native
             img.color = Color.white;
             img.gameObject.SetActive(true);
             vp.Play();
-            Plugin.Log.LogInfo("[DialogUiBinder] video background playing: " + rel);
+            Plugin.Log.LogInfo("[DialogUiBinder] video background playing: " + rel + (loop ? " (loop)" : " (once)"));
         }
 
         // Stop the current video loop and free its RenderTexture. The VideoPlayer component is left on VisitBg for

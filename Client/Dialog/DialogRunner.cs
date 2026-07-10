@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using VisitAPI.Native;
-using VisitAPI.Scene;
 
 namespace VisitAPI
 {
@@ -16,14 +15,6 @@ namespace VisitAPI
         // first-visit gate. forcedNode (a trigger's `node X`) skips both and opens straight onto that node.
         internal static IEnumerator Begin(DialogTree tree, bool fromMenu = false, string? forcedNode = null)
         {
-            // `scene:` staging — trade-screen entry ONLY (raid/hideout triggers keep their flat/in-world
-            // presentation). Staged before the window renders; failure is non-fatal (flat dialog).
-            if (fromMenu && !string.IsNullOrEmpty(tree.SceneBundle))
-            {
-                IEnumerator stage = SceneStage.OpenForDialog(tree.SceneBundle!, NativeBinder.ActiveTraderId);
-                while (stage.MoveNext()) yield return stage.Current;
-            }
-
             object window = null;
             for (int i = 0; i < 180 && window == null; i++)
             {
@@ -88,7 +79,6 @@ namespace VisitAPI
         {
             ClearRows();
             DialogUiBinder.CloseActiveScreen();
-            if (SceneStage.IsOpen) SceneStage.Close();
         }
 
         // After CloseDialog reveals the trade screen, switch it to the requested tab (Trade/Tasks/Services). Waits a
@@ -108,8 +98,7 @@ namespace VisitAPI
                 Plugin.Log.LogWarning("[DialogRunner] node not found: '" + nodeName + "'");
                 return;
             }
-            // A staged 3D scene IS the backdrop — `bg:` and `scene:` are mutually exclusive by design.
-            if (!SceneStage.IsOpen) DialogUiBinder.SetBackground(node.Background);
+            DialogUiBinder.SetBackground(node.Background);
             VisitNpcActor.Play(tree.ActorName, node.Anim);
             // Narration (`>` lines) plays in the native subtitle box — its OWN dialog box — one line at a time
             // (click to advance) with the main dialog window hidden; THEN the NPC line + options render. A pure
@@ -155,7 +144,7 @@ namespace VisitAPI
         private static void AdvanceNarration(object window, DialogTree tree, DialogNode node, string nodeName, object? screen, Queue<NarrationLine> lines)
         {
             NarrationLine current = lines.Dequeue();
-            if (!SceneStage.IsOpen && !string.IsNullOrEmpty(current.Bg))
+            if (!string.IsNullOrEmpty(current.Bg))
                 DialogUiBinder.SetBackground(current.Bg);
             VisitNpcActor.Play(tree.ActorName, current.Anim);
             DialogUiBinder.SetSubtitleText(screen, current.Text);

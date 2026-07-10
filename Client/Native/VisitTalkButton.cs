@@ -1,46 +1,28 @@
 using EFT.UI;
 using UnityEngine;
-using VisitAPI.Scene;
 
 namespace VisitAPI.Native
 {
     // Tags THE single visit entry button on the out-of-raid trade screen and carries the live
     // TraderScreensGroup + the currently-selected trader id. The entry patch re-points these on every trader
-    // selection; the click reads them live. One button, two content paths: a trader WITH a `.dlg` opens the
-    // VisitAPI dialog (which stages a 3D scene itself when the .dlg declares `scene:`); a retail vendor with
-    // a scene bundle (and no .dlg) opens the native retail replay. A .dlg always wins over a bundle.
+    // selection; the click reads them live and opens the trader's `.dlg` dialog.
     internal sealed class VisitTalkButton : MonoBehaviour
     {
         internal object? Screen;
         internal string TraderId = "";
         internal DefaultUIButton? Button;
-        private bool _hasDlg;
-        private bool _hasScene;
 
-        internal void Configure(object screen, string traderId, bool hasDlg, bool hasScene)
+        internal void Configure(object screen, string traderId)
         {
             Screen = screen;
             TraderId = traderId ?? "";
-            _hasDlg = hasDlg;
-            _hasScene = hasScene;
-            if (Button != null)
-            {
-                // .dlg trader: localized 对话. Retail replay: localized 拜访.
-                string label = hasDlg ? Loc.DefaultTalkLabel : Loc.Pick("拜访", "Visit");
-                Button.SetRawText(label, 24);
-            }
+            if (Button != null) Button.SetRawText(Loc.DefaultTalkLabel, 24);
         }
 
         internal void OnTalkClicked()
         {
             if (Screen == null || string.IsNullOrEmpty(TraderId)) return;
             NativeBinder.ActiveTradeScreen = Screen;
-
-            if (!_hasDlg)
-            {
-                if (_hasScene) SceneStage.TryOpenRetail(TraderId);
-                return;
-            }
 
             DialogTree? tree = DialogTreeLoader.Load(TraderId);
             if (tree == null)

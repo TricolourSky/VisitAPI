@@ -6,12 +6,10 @@ using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
 using VisitAPI.Native;
-using VisitAPI.Scene;
-using VisitAPI.Scene.RetailReplay;
 
 namespace VisitAPI
 {
-    [BepInPlugin("com.sora.visitapi", "VisitAPI", "0.5.0")]
+    [BepInPlugin("com.sora.visitapi", "VisitAPI", "0.5.1")]
     public class Plugin : BaseUnityPlugin
     {
         internal static ManualLogSource Log = null!;
@@ -27,19 +25,13 @@ namespace VisitAPI
         internal static ConfigEntry<float> TalkOffsetX = null!;
         internal static ConfigEntry<float> TalkOffsetY = null!;
 
-        // 3D vendor-scene visits (retail replay): asset root.
-        internal static ConfigEntry<string> SceneAssetsRoot = null!;
-
-        // Optional EFT camera exposure + vignette grading for staged scenes (off by default).
-        internal static ConfigEntry<bool> SceneCameraPostFx = null!;
-
         private const string SoraId = "90726f6a656374536f726132";
 
         private void Awake()
         {
             Instance = this;
             Log = Logger;
-            Log.LogInfo("VisitAPI 0.5.0 loading (dialogue framework + 3D vendor-scene visits)");
+            Log.LogInfo("VisitAPI 0.5.1 loading (dialogue framework)");
 
             LanguageMode = Config.Bind("General", "Language", "auto",
                 "VisitAPI 自身文本(UI/日志)的语言: auto=跟随EFT / zh / en  |  Language for VisitAPI's own text: auto (follow EFT) / zh / en");
@@ -51,11 +43,6 @@ namespace VisitAPI
             TalkOffsetY = Config.Bind("TalkButton", "CenterOffsetY", 0f,
                 "Y 偏移(0=与返回同高,负=下移)  |  Y offset (0=level with the close button, negative=lower)");
 
-            SceneAssetsRoot = Config.Bind("Scene", "AssetsRoot", "",
-                "商人3D场景资源根目录(含 tradermod.shared.dll 和 bundles\\vendors；留空=自动探测)  |  Vendor-scene assets root (holds tradermod.shared.dll + bundles\\vendors; empty = auto-probe)");
-            SceneCameraPostFx = Config.Bind("Scene", "CameraPostFx", false,
-                "启用EFT相机曝光+暗角(更接近零售色调;下次打开场景生效)  |  Enable EFT camera exposure + vignette (closer to retail tone; applies on next scene open)");
-
             // Auto-discover every trader that ships a `<id>.dlg` → whitelist bypass + 对话 button for any modded trader.
             foreach (string id in DialogTreeLoader.ListTraderIds()) RegisteredTraders.Add(id);
             RegisteredTraders.Add(SoraId);
@@ -63,7 +50,6 @@ namespace VisitAPI
 
             Harmony harmony = new Harmony("com.sora.visitapi");
             FavoriteSchemeGuard.Apply(harmony);
-            RetailPatches.Apply(harmony);
 
             if (NativeBinder.Bind())
             {
@@ -72,8 +58,6 @@ namespace VisitAPI
                 OptionRowPatch.Apply(harmony);
                 TraderScreenEntryPatch.Apply(harmony);
             }
-
-            SceneAssets.Resolve(SceneAssetsRoot.Value);
         }
 
         private void Update()

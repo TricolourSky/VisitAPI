@@ -14,7 +14,7 @@ A minimal, **client-only** trader dialogue — no server, no quests, no media re
 
 **Try it:** the file name is Ragman's id, so just drop it in `BepInEx/config/VisitAPI/` and restart. Open Ragman out of raid → a **Talk** button appears. (Rename it to your own trader's 24-hex id to use it elsewhere.) Backgrounds are optional — add `bg: yourfile.png` to a node and put the file in `BepInEx/config/VisitAPI/backgrounds/`.
 
-For quests (`accept:` / `handover:` / `complete:`), trader standing (`standing:`), hideout triggers, and everything else, see **[../docs/DLG_FORMAT.md](../docs/DLG_FORMAT.md)** ([中文](../docs/DLG_FORMAT.zh-CN.md)). Quest directives also need a quest registered by the server mod (`db/quests/*.json`).
+For quests (`accept:` / `handover:` / `complete:`), trader standing (`standing:`), hideout triggers, and everything else, see **docs/DLG_FORMAT.md** in the source repository (<https://github.com/TricolourSky/VisitAPI> — docs are not bundled in the release zip). Quest directives also need a quest registered by the server mod (`db/quests/*.json`).
 
 ---
 
@@ -32,4 +32,4 @@ For quests (`accept:` / `handover:` / `complete:`), trader standing (`standing:`
 
 **试用：** 文件名就是 Ragman 的 id，直接丢进 `BepInEx/config/VisitAPI/` 重启即可。突袭外打开 Ragman → 出现**对话**按钮。（改成你自己商人的 24 位 id 就能用在别处。）背景可选——给节点加 `bg: 你的文件.png`，文件放进 `BepInEx/config/VisitAPI/backgrounds/`。
 
-任务（`accept:` / `handover:` / `complete:`）、好感度（`standing:`）、藏身处触发器等见 **[../docs/DLG_FORMAT.zh-CN.md](../docs/DLG_FORMAT.zh-CN.md)**（[English](../docs/DLG_FORMAT.md)）。任务指令还需要服务端 mod 注册任务（`db/quests/*.json`）。
+任务（`accept:` / `handover:` / `complete:`）、好感度（`standing:`）、藏身处触发器等见源码仓库里的 **docs/DLG_FORMAT.zh-CN.md**（<https://github.com/TricolourSky/VisitAPI>——发布包不带 docs）。任务指令还需要服务端 mod 注册任务（`db/quests/*.json`）。

@@ -8,8 +8,8 @@ namespace VisitAPI.Native
 {
     // The single out-of-raid entry. Postfix on TraderScreensGroup.method_6 (per-trader select, also runs on
     // first Show): clone the native close button into ONE visit button, shown for a registered trader with a
-    // `.dlg` (对话 — opens the VisitAPI dialog with the controllers the trade screen already holds) OR a
-    // retail vendor with a scene bundle (拜访 — opens the native retail replay). Hidden for everyone else.
+    // `.dlg` (对话 — opens the VisitAPI dialog with the controllers the trade screen already holds; hidden while
+    // the .dlg's `tab:` quest-gate is closed). Hidden for everyone else.
     internal static class TraderScreenEntryPatch
     {
         internal static void Apply(Harmony harmony)
@@ -33,18 +33,13 @@ namespace VisitAPI.Native
                 string id = trader != null ? NativeBinder.GetTraderId(trader) : "";
                 bool hasDlg = !string.IsNullOrEmpty(id)
                     && Plugin.RegisteredTraders.Contains(id)
-                    && DialogTreeLoader.Exists(id);
-                // A retail visit needs BOTH the scene bundle and a captured dialog tree — Peacekeeper's room
-                // ships in the raw pack but his tree only ever lived server-side, so no button for him
-                // (reach his room from a .dlg via `scene:` instead).
-                bool hasScene = !string.IsNullOrEmpty(id)
-                    && VisitAPI.Scene.SceneAssets.FindVendorBundleFile(id) != null
-                    && VisitAPI.Scene.RetailReplay.RetailDialogEngine.HasDialogFor(id);
+                    && DialogTreeLoader.Exists(id)
+                    && DialogTreeLoader.TabVisible(id);
 
                 VisitTalkButton? marker = EnsureButton(__instance);
                 if (marker == null) return;
-                marker.Configure(__instance, id, hasDlg, hasScene);
-                marker.gameObject.SetActive(hasDlg || hasScene);
+                marker.Configure(__instance, id);
+                marker.gameObject.SetActive(hasDlg);
             }
             catch (Exception ex)
             {

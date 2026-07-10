@@ -17,7 +17,6 @@ namespace VisitAPI
 
             if (!Singleton<GameWorld>.Instantiated)
             {
-                if (_spawned) QuestItemSpawner.Reset();
                 _spawned = false;
                 return;
             }
@@ -48,12 +47,10 @@ namespace VisitAPI
                     foreach (FirstVisitTrigger t in tree.AllRaidTriggers())
                     {
                         if (!MapMatches(loc, t.Map)) continue;
-                        bool npc = !string.IsNullOrEmpty(t.NpcName);
-                        if (!npc && (t.Position == null || t.Position.Length < 3)) continue;
-                        SpawnRaid(traderId, t, npc);
+                        if (t.Position == null || t.Position.Length < 3) continue;
+                        SpawnRaid(traderId, t);
                         count++;
                     }
-                    count += QuestItemSpawner.SpawnAll(tree, loc);
                 }
             }
             _spawned = true;
@@ -67,25 +64,14 @@ namespace VisitAPI
                 || map.IndexOf(loc, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        private static void SpawnRaid(string traderId, FirstVisitTrigger t, bool npc)
+        private static void SpawnRaid(string traderId, FirstVisitTrigger t)
         {
             VisitTrigger trig = NewTrigger(traderId, t.PromptText);
             trig.MaxDistance = t.MaxDistance;
             trig.HitRadius = t.HitRadius;
             trig.RequireLook = true;
-            if (npc)
-            {
-                trig.NpcName = t.NpcName;
-                trig.Node = t.Node;
-                trig.QuestId = t.QuestId;
-                trig.ShowWhenStatus = t.ShowWhenStatus;
-                Plugin.Log.LogInfo("[VisitTrigger] npc trigger '" + trig.PromptText + "' (" + traderId + ") follows '" + t.NpcName + "' on '" + t.Map + "'");
-            }
-            else
-            {
-                trig.FixedPosition = new Vector3(t.Position![0], t.Position[1], t.Position[2]);
-                Plugin.Log.LogInfo("[VisitTrigger] raid trigger '" + trig.PromptText + "' (" + traderId + ") at " + trig.FixedPosition + " on '" + t.Map + "'");
-            }
+            trig.FixedPosition = new Vector3(t.Position![0], t.Position[1], t.Position[2]);
+            Plugin.Log.LogInfo("[VisitTrigger] raid trigger '" + trig.PromptText + "' (" + traderId + ") at " + trig.FixedPosition + " on '" + t.Map + "'");
         }
 
         private static void SpawnHideout(string traderId, HideoutAreaTrigger h)

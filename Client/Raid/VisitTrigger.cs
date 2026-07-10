@@ -9,11 +9,10 @@ namespace VisitAPI
 {
     // The one in-world interaction trigger, raid AND hideout (HideoutPlayerOwner : GamePlayerOwner, so a single
     // typed FindObjectOfType covers both). Everything runs through the public native interaction state
-    // (GamePlayerOwner.AvailableInteractionState) — no reflection. Four shapes, all the same component:
-    //   - raid point:        fixed position + look-angle gate, REPLACES the interaction state
-    //   - hideout area:      fixed position, MERGES our action into the native area menu (one-frame handshake)
-    //   - free-standing:     fixed position + look-angle gate, replaces (open floor, no native menu to merge into)
-    //   - npc (experimental): follows a live NPC model — crosshair on the model pops the prompt
+    // (GamePlayerOwner.AvailableInteractionState) — no reflection. Three shapes, all the same component:
+    //   - raid point:     fixed position + look-angle gate, REPLACES the interaction state
+    //   - hideout area:   fixed position, MERGES our action into the native area menu (one-frame handshake)
+    //   - free-standing:  fixed position + look-angle gate, replaces (open floor, no native menu to merge into)
     internal sealed class VisitTrigger : MonoBehaviour
     {
         internal string TraderId = "";
@@ -23,18 +22,15 @@ namespace VisitAPI
         internal float HitRadius = 1.2f;
         internal bool MergeIntoNativeMenu;
         internal bool RequireLook;
-        internal string? NpcName;
         internal string? Node;
         internal string? QuestId;
         internal List<string>? ShowWhenStatus;
 
         private GamePlayerOwner? _owner;
         private Camera? _cam;
-        private Transform? _npc;
         private bool _shown;
         private int _nativeFirstSeenFrame = -1;
         private float _ownerFindAt;
-        private float _npcFindAt;
         private float _cooldownUntil;
 
         private void Update()
@@ -57,7 +53,7 @@ namespace VisitAPI
 
         private bool ShouldShow()
         {
-            if (!TryGetTarget(out Vector3 target)) return false;
+            Vector3 target = FixedPosition;
             if (_cam == null || !_cam.isActiveAndEnabled)
             {
                 _cam = Camera.main;
@@ -75,36 +71,8 @@ namespace VisitAPI
             return QuestGatePasses();
         }
 
-        private bool TryGetTarget(out Vector3 target)
-        {
-            if (string.IsNullOrEmpty(NpcName))
-            {
-                target = FixedPosition;
-                return true;
-            }
-            Transform? npc = ResolveNpc();
-            if (npc == null)
-            {
-                target = default;
-                return false;
-            }
-            target = npc.position + Vector3.up * 1.4f;
-            return true;
-        }
-
-        private Transform? ResolveNpc()
-        {
-            if (_npc != null && _npc.gameObject.activeInHierarchy) return _npc;
-            if (Time.unscaledTime < _npcFindAt) return null;
-            _npcFindAt = Time.unscaledTime + 2f;
-            _npc = FindNpcTransform(NpcName!);
-            if (_npc != null)
-                Plugin.Log.LogInfo("[VisitTrigger] npc '" + NpcName + "' resolved: " + _npc.name);
-            return _npc;
-        }
-
         // A live NPC model: first a spawned bot whose nickname contains the name, then an exact-named scene
-        // GameObject (a model placed by the trader's own mod). Shared with the dialog actor animations.
+        // GameObject (a model placed by the trader's own mod). Used by the dialog actor animations (`actor:`).
         internal static Transform? FindNpcTransform(string name)
         {
             try

@@ -17,13 +17,6 @@ internal sealed class DialogTree
 	[JsonProperty("actor")]
 	public string? ActorName { get; set; }
 
-	// 3D vendor-scene staging (`scene:` header): the trade-screen 对话 entry opens this dialog inside a
-	// staged room (retail-style visit) instead of over a flat background. A bundle file name under
-	// config/VisitAPI/scenes/, or a retail vendor's 24-hex trader id to borrow that vendor's room.
-	// `anim:` directives then drive the staged trader model; `bg:` is skipped while the scene is up.
-	[JsonProperty("scene")]
-	public string? SceneBundle { get; set; }
-
 	[JsonProperty("startNode")]
 	public string StartNode { get; set; } = "root";
 
@@ -57,16 +50,8 @@ internal sealed class DialogTree
 		}
 	}
 
-	[JsonProperty("randomAfterRaid")]
-	public RandomAfterRaid? RandomAfterRaid { get; set; }
-
 	[JsonProperty("hideoutTriggers")]
 	public List<HideoutAreaTrigger>? HideoutTriggers { get; set; }
-
-	// Experimental (`trigger: item …`): collectible intel items placed in a raid map; picking one up accepts
-	// a quest line (Tarkov-1.0-style). Spawned as REAL native loot via GameWorld.SetupItem.
-	[JsonProperty("itemTriggers")]
-	public List<ItemTrigger>? ItemTriggers { get; set; }
 
 	[JsonProperty("tabQuestId")]
 	public string? TabQuestId { get; set; }
@@ -195,9 +180,6 @@ internal sealed class NodeCondition
 
 internal sealed class FirstVisitTrigger
 {
-	[JsonProperty("type")]
-	public string Type { get; set; } = "interact";
-
 	[JsonProperty("map")]
 	public string Map { get; set; } = "*";
 
@@ -213,63 +195,12 @@ internal sealed class FirstVisitTrigger
 	// Empty = resolved to a localized default ("拜访"/"Visit") at spawn time; a `trigger: ... "prompt"` overrides it.
 	[JsonProperty("promptText")]
 	public string PromptText { get; set; } = "";
-
-	[JsonProperty("doorWidth")]
-	public float DoorWidth { get; set; }
-
-	[JsonProperty("doorHeight")]
-	public float DoorHeight { get; set; } = 2.2f;
-
-	[JsonProperty("doorRotationY")]
-	public float DoorRotationY { get; set; }
-
-	[JsonProperty("once")]
-	public bool Once { get; set; } = true;
-
-	// Experimental (`trigger: npc …`): instead of a fixed point, the trigger follows a live NPC model —
-	// aiming the crosshair at it pops the interaction prompt. Matched against bot nicknames and GameObject names.
-	[JsonProperty("npcName")]
-	public string? NpcName { get; set; }
-
-	[JsonProperty("node")]
-	public string? Node { get; set; }
-
-	[JsonProperty("questId")]
-	public string? QuestId { get; set; }
-
-	[JsonProperty("showWhenStatus")]
-	public List<string>? ShowWhenStatus { get; set; }
-}
-
-internal sealed class ItemTrigger
-{
-	[JsonProperty("map")]
-	public string Map { get; set; } = "*";
-
-	[JsonProperty("position")]
-	public float[]? Position { get; set; }
-
-	[JsonProperty("rotationY")]
-	public float RotationY { get; set; }
-
-	[JsonProperty("tpl")]
-	public string Tpl { get; set; } = "";
-
-	[JsonProperty("acceptQuestId")]
-	public string? AcceptQuestId { get; set; }
-
-	// Empty = localized default notification; a quoted string on the trigger line overrides it.
-	[JsonProperty("note")]
-	public string? Note { get; set; }
 }
 
 internal sealed class HideoutAreaTrigger
 {
 	[JsonProperty("areaType")]
 	public string AreaType { get; set; } = "";
-
-	[JsonProperty("requiredLevel")]
-	public int RequiredLevel { get; set; } = 1;
 
 	[JsonProperty("node")]
 	public string? Node { get; set; }
@@ -297,15 +228,6 @@ internal sealed class HideoutAreaTrigger
 
 	[JsonProperty("hitRadius")]
 	public float HitRadius { get; set; } = 1.2f;
-}
-
-internal sealed class RandomAfterRaid
-{
-	[JsonProperty("chance")]
-	public float Chance { get; set; } = 10f;
-
-	[JsonProperty("nodes")]
-	public List<string> Nodes { get; set; } = new List<string>();
 }
 
 internal sealed class StringOrListConverter : JsonConverter<List<string>?>

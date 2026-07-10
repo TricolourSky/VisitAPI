@@ -120,9 +120,6 @@ internal static class DialogScriptParser
 		case "actor":
 			tree.ActorName = ExtractQuoted(ref val) ?? val.Trim();
 			break;
-		case "scene":
-			tree.SceneBundle = ExtractQuoted(ref val) ?? val.Trim();
-			break;
 		case "start":
 			tree.StartNode = val;
 			break;
@@ -131,9 +128,6 @@ internal static class DialogScriptParser
 			break;
 		case "when":
 			ParseWhen(val, tree, src, lineNo, errors);
-			break;
-		case "random":
-			ParseRandom(val, tree, src, lineNo, errors);
 			break;
 		case "trigger":
 			ParseTrigger(val, tree, src, lineNo, errors);
@@ -197,23 +191,6 @@ internal static class DialogScriptParser
 		(tree.NodeConditions ??= new List<NodeCondition>()).Add(cond);
 	}
 
-	private static void ParseRandom(string val, DialogTree tree, string src, int lineNo, List<string> errors)
-	{
-		string[] tokens = val.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-		if (tokens.Length < 2 || !tokens[0].EndsWith("%")
-			|| !float.TryParse(tokens[0].TrimEnd('%'), NumberStyles.Float, CultureInfo.InvariantCulture, out float chance))
-		{
-			errors.Add($"{src}:{lineNo}: " + Loc.P_BadRandomFormat());
-			return;
-		}
-		RandomAfterRaid rar = new RandomAfterRaid { Chance = chance };
-		for (int i = 1; i < tokens.Length; i++)
-		{
-			rar.Nodes.Add(tokens[i]);
-		}
-		tree.RandomAfterRaid = rar;
-	}
-
 	private static void ParseTrigger(string val, DialogTree tree, string src, int lineNo, List<string> errors)
 	{
 		string? prompt = ExtractQuoted(ref val);
@@ -242,12 +219,6 @@ internal static class DialogScriptParser
 			break;
 		case "hideout":
 			ParseHideoutTrigger(tokens, vector, prompt, tree, src, lineNo, errors);
-			break;
-		case "npc":
-			ParseNpcTrigger(tokens, prompt, tree, src, lineNo, errors);
-			break;
-		case "item":
-			ParseItemTrigger(tokens, vector, prompt, tree, src, lineNo, errors);
 			break;
 		default:
 			errors.Add($"{src}:{lineNo}: " + Loc.P_UnknownTriggerType(tokens[0]));
@@ -280,100 +251,6 @@ internal static class DialogScriptParser
 		}
 	}
 
-	// Experimental crosshair-on-NPC trigger: `trigger: npc <map|*> <name> [node X] [dist D] [radius R]
-	// [if quest=status] "prompt"`. <name> matches a live bot's nickname or a scene GameObject name (substring).
-	private static void ParseNpcTrigger(string[] tokens, string? prompt, DialogTree tree, string src, int lineNo, List<string> errors)
-	{
-		if (tokens.Length < 3)
-		{
-			errors.Add($"{src}:{lineNo}: " + Loc.P_NpcTriggerFormat());
-			return;
-		}
-		FirstVisitTrigger t = new FirstVisitTrigger
-		{
-			Type = "npc",
-			Map = tokens[1],
-			NpcName = tokens[2],
-			MaxDistance = 3.5f,
-			HitRadius = 0.8f
-		};
-		if (!string.IsNullOrEmpty(prompt))
-		{
-			t.PromptText = prompt!;
-		}
-		for (int i = 3; i < tokens.Length; i++)
-		{
-			switch (tokens[i].ToLowerInvariant())
-			{
-			case "node":
-				if (i + 1 < tokens.Length) t.Node = tokens[++i];
-				break;
-			case "dist":
-				if (i + 1 < tokens.Length) t.MaxDistance = ParseF(tokens[++i]);
-				break;
-			case "radius":
-				if (i + 1 < tokens.Length) t.HitRadius = ParseF(tokens[++i]);
-				break;
-			case "if":
-				if (i + 1 < tokens.Length)
-				{
-					string cond = tokens[++i];
-					int eq = cond.IndexOf('=');
-					if (eq > 0)
-					{
-						t.QuestId = cond.Substring(0, eq);
-						t.ShowWhenStatus = SplitStatuses(cond.Substring(eq + 1));
-					}
-					else
-					{
-						errors.Add($"{src}:{lineNo}: " + Loc.P_BadIfCondition());
-					}
-				}
-				break;
-			default:
-				errors.Add($"{src}:{lineNo}: " + Loc.P_NpcTriggerUnknownParam(tokens[i]));
-				break;
-			}
-		}
-		(tree.RaidTriggers ??= new List<FirstVisitTrigger>()).Add(t);
-	}
-
-	// Experimental collectible intel item: `trigger: item <map|*> (x,y,z) tpl <templateId> accept <questId>
-	// [rot <degY>] "notification"`. Spawns real native loot; picking it up accepts the quest.
-	private static void ParseItemTrigger(string[] tokens, float[]? pos, string? prompt, DialogTree tree, string src, int lineNo, List<string> errors)
-	{
-		if (tokens.Length < 2 || pos == null)
-		{
-			errors.Add($"{src}:{lineNo}: " + Loc.P_ItemTriggerFormat());
-			return;
-		}
-		ItemTrigger t = new ItemTrigger { Map = tokens[1], Position = pos, Note = prompt };
-		for (int i = 2; i < tokens.Length; i++)
-		{
-			switch (tokens[i].ToLowerInvariant())
-			{
-			case "tpl":
-				if (i + 1 < tokens.Length) t.Tpl = tokens[++i];
-				break;
-			case "accept":
-				if (i + 1 < tokens.Length) t.AcceptQuestId = tokens[++i];
-				break;
-			case "rot":
-				if (i + 1 < tokens.Length) t.RotationY = ParseF(tokens[++i]);
-				break;
-			default:
-				errors.Add($"{src}:{lineNo}: " + Loc.P_ItemTriggerUnknownParam(tokens[i]));
-				break;
-			}
-		}
-		if (string.IsNullOrEmpty(t.Tpl))
-		{
-			errors.Add($"{src}:{lineNo}: " + Loc.P_ItemTriggerFormat());
-			return;
-		}
-		(tree.ItemTriggers ??= new List<ItemTrigger>()).Add(t);
-	}
-
 	private static void ParseRaidTrigger(string[] tokens, float[]? pos, string? prompt, DialogTree tree, string src, int lineNo, List<string> errors)
 	{
 		if (pos == null)
@@ -394,26 +271,11 @@ internal static class DialogScriptParser
 		{
 			switch (tokens[i].ToLowerInvariant())
 			{
-			case "door":
-				if (i + 1 < tokens.Length)
-				{
-					string[] dims = tokens[++i].Split('x', 'X', '×');
-					if (dims.Length >= 1) t.DoorWidth = ParseF(dims[0]);
-					if (dims.Length >= 2) t.DoorHeight = ParseF(dims[1]);
-					if (dims.Length >= 3) t.DoorRotationY = ParseF(dims[2]);
-				}
-				break;
 			case "dist":
 				if (i + 1 < tokens.Length) t.MaxDistance = ParseF(tokens[++i]);
 				break;
 			case "radius":
 				if (i + 1 < tokens.Length) t.HitRadius = ParseF(tokens[++i]);
-				break;
-			case "once":
-				t.Once = true;
-				break;
-			case "repeat":
-				t.Once = false;
 				break;
 			default:
 				errors.Add($"{src}:{lineNo}: " + Loc.P_RaidTriggerUnknownParam(tokens[i]));
@@ -438,9 +300,6 @@ internal static class DialogScriptParser
 		{
 			switch (tokens[i].ToLowerInvariant())
 			{
-			case "level":
-				if (i + 1 < tokens.Length) t.RequiredLevel = (int)ParseF(tokens[++i]);
-				break;
 			case "dist":
 				if (i + 1 < tokens.Length) t.MaxDistance = ParseF(tokens[++i]);
 				break;
@@ -716,20 +575,6 @@ internal static class DialogScriptParser
 				t.QuestId = Resolve(t.QuestId);
 			}
 		}
-		if (tree.RaidTriggers != null)
-		{
-			foreach (FirstVisitTrigger t in tree.RaidTriggers)
-			{
-				t.QuestId = Resolve(t.QuestId);
-			}
-		}
-		if (tree.ItemTriggers != null)
-		{
-			foreach (ItemTrigger t in tree.ItemTriggers)
-			{
-				t.AcceptQuestId = Resolve(t.AcceptQuestId);
-			}
-		}
 		tree.TabQuestId = Resolve(tree.TabQuestId);
 	}
 
@@ -770,16 +615,6 @@ internal static class DialogScriptParser
 				if (!tree.Nodes.ContainsKey(cond.Node))
 				{
 					errors.Add($"{src}: " + Loc.P_WhenTargetMissing(cond.Node));
-				}
-			}
-		}
-		if (tree.RandomAfterRaid != null)
-		{
-			foreach (string n in tree.RandomAfterRaid.Nodes)
-			{
-				if (!tree.Nodes.ContainsKey(n))
-				{
-					errors.Add($"{src}: " + Loc.P_RandomTargetMissing(n));
 				}
 			}
 		}

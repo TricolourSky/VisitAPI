@@ -13,7 +13,7 @@ public record VisitApiModMetadata : AbstractModMetadata
     public override string Name { get; init; } = "VisitAPI-Server";
     public override string Author { get; init; } = "SORA";
     public override List<string>? Contributors { get; init; } = null;
-    public override Version Version { get; init; } = new Version("0.4.0");
+    public override Version Version { get; init; } = new Version("0.5.1");
     public override Range SptVersion { get; init; } = new Range("~4.0.0");
     public override List<string>? Incompatibilities { get; init; } = null;
     public override Dictionary<string, Range>? ModDependencies { get; init; } = null;
