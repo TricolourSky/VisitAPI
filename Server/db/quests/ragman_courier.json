@@ -1,0 +1,98 @@
+{
+  "72616d736f72617175657301": {
+    "QuestName": "失踪的补给",
+    "_id": "72616d736f72617175657301",
+    "canShowNotificationsInGame": true,
+    "acceptanceAndFinishingSource": "eft",
+    "progressSource": "eft",
+    "restartable": false,
+    "instantComplete": false,
+    "secretQuest": false,
+    "isKey": false,
+    "side": "Pmc",
+    "type": "Completion",
+    "status": 0,
+    "traderId": "5ac3b934156ae10c4430e83c",
+    "location": "any",
+    "image": "",
+    "name": "72616d736f72617175657301 name",
+    "description": "72616d736f72617175657301 description",
+    "note": "",
+    "startedMessageText": "",
+    "successMessageText": "72616d736f72617175657301 successMessageText",
+    "failMessageText": "",
+    "changeQuestMessageText": "",
+    "acceptPlayerMessage": "",
+    "declinePlayerMessage": "",
+    "completePlayerMessage": "",
+    "arenaLocations": [],
+    "gameModes": [],
+    "rankingModes": [],
+    "conditions": {
+      "AvailableForStart": [],
+      "AvailableForFinish": [
+        {
+          "completeInSeconds": 0,
+          "conditionType": "CounterCreator",
+          "counter": {
+            "conditions": [
+              {
+                "conditionType": "VisitPlace",
+                "dynamicLocale": false,
+                "id": "72616d736f72617175657302",
+                "target": "visitapi_sora_dialog",
+                "value": 1
+              }
+            ],
+            "id": "72616d736f72617175657303"
+          },
+          "doNotResetIfCounterCompleted": false,
+          "dynamicLocale": false,
+          "globalQuestCounterId": "",
+          "id": "72616d736f72617175657304",
+          "index": 0,
+          "oneSessionOnly": false,
+          "parentId": "",
+          "type": "Exploration",
+          "value": 1,
+          "visibilityConditions": []
+        }
+      ],
+      "Fail": []
+    },
+    "rewards": {
+      "Started": [],
+      "Success": [
+        {
+          "id": "72616d736f72617175657305",
+          "index": 0,
+          "type": "Experience",
+          "value": "1000",
+          "availableInGameEditions": [],
+          "unknown": false
+        },
+        {
+          "availableInGameEditions": [],
+          "findInRaid": false,
+          "gameMode": ["regular", "pve"],
+          "id": "72616d736f72617175657306",
+          "index": 1,
+          "isEncoded": false,
+          "isHidden": false,
+          "items": [
+            {
+              "_id": "72616d736f72617175657307",
+              "_tpl": "5449016a4bdc2d6f028b456f",
+              "upd": { "StackObjectsCount": 30000 }
+            }
+          ],
+          "target": "72616d736f72617175657307",
+          "type": "Item",
+          "unknown": false,
+          "value": "30000"
+        }
+      ],
+      "Fail": []
+    }
+  }
+}

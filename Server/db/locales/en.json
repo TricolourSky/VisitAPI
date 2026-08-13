@@ -1,0 +1,22 @@
+{
+  "72616d736f72617175657301 name": "The Missing Supplies",
+  "72616d736f72617175657301 description": "A batch of Ragman's supplies went missing at Ground Zero. Head to the area, recover the cargo, and look into the sniper who has been unusually active nearby.",
+  "72616d736f72617175657304": "Find out what happened to the supply crate",
+  "72616d736f72617175657301 successMessageText": "Got the cargo back? Good work, the rest of your pay is in. As for that 'sniper'... watch yourself.",
+  "5043a1ce90726f6a536f7261 name": "SORA's New Base",
+  "5043a1ce90726f6a536f7261 description": "SORA needs a stable long-term base. Head back to your hideout and use the USB stick she gave you to contact her.",
+  "5043a1ce90726f6a536f7265": "Use the USB stick in your hideout to contact SORA",
+  "5043a1ce90726f6a536f7261 successMessageText": "I keep my word - Ragman's people have already picked up the cargo. Keep the software. Stay in touch.",
+  "5043a1ce90726f6a536f7271 name": "Interchange Cleanup",
+  "5043a1ce90726f6a536f7271 description": "SORA spotted a squad in black gear meeting with a local scav boss. Her idea of an investigation is simple: beat them up first, ask questions while you're at it. Clear out 7 Scavs on Interchange.",
+  "5043a1ce90726f6a536f7272": "Kill 7 Scavs on Interchange",
+  "5043a1ce90726f6a536f7271 successMessageText": "Not bad. I've got a read on the men in black now... Terra Group. Payment's in - stay away from them.",
+  "5043a1ce90726f6a536f7282 name": "SORA Moves In",
+  "5043a1ce90726f6a536f7282 description": "You offered SORA a section of your expanding hideout. Raise your Hideout Management skill to level 10 to prove the new home is in good hands, then wait for her to arrive.",
+  "5043a1ce90726f6a536f7283": "Raise Hideout Management to level 10",
+  "5043a1ce90726f6a536f7282 successMessageText": "The new place will do nicely - I've already settled in. Pleasure doing business... roommate.",
+  "5043a1ce90726f6a536f7286 name": "SORA's Supplies",
+  "5043a1ce90726f6a536f7286 description": "SORA wants to put together a simple table and needs building materials. Gather 10 of them (bolts, nuts, screws, wires - all count). The Idea mall on Interchange is said to be full of them. She says she has something for you afterwards.",
+  "5043a1ce90726f6a536f7288": "Hand over 10 building materials",
+  "5043a1ce90726f6a536f7286 successMessageText": "Materials counted - the table goes up tonight. That thing I promised you... you'll get it soon."
+}

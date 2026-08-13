@@ -1,79 +1,58 @@
-﻿using System;
-using System.Collections.Generic;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
+using EFT;
 using HarmonyLib;
 using UnityEngine;
+using VisitAPI.Dialog;
 using VisitAPI.Native;
 
-namespace VisitAPI
+namespace VisitAPI;
+
+[BepInPlugin("com.sora.visitapi", "VisitAPI", Plugin.Version)]
+public class Plugin : BaseUnityPlugin
 {
-    [BepInPlugin("com.sora.visitapi", "VisitAPI", "0.5.1")]
-    public class Plugin : BaseUnityPlugin
-    {
-        internal static ManualLogSource Log = null!;
-        internal static Plugin Instance = null!;
+	public const string Version = "1.0.0";
 
-        internal static readonly HashSet<string> RegisteredTraders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	public static Plugin Instance;
 
-        // Language for VisitAPI's own UI/log text (auto = follow EFT's current language).
-        internal static ConfigEntry<string> LanguageMode = null!;
+	public static ManualLogSource Log;
 
-        // Out-of-raid button placement (rebuild-free X/Y offset on the trade screen — escape hatch for
-        // when another UI mod overlaps the button).
-        internal static ConfigEntry<float> TalkOffsetX = null!;
-        internal static ConfigEntry<float> TalkOffsetY = null!;
+	public static ConfigEntry<string> Language;
 
-        private const string SoraId = "90726f6a656374536f726132";
+	public static ConfigEntry<float> TalkOffsetX;
 
-        private void Awake()
-        {
-            Instance = this;
-            Log = Logger;
-            Log.LogInfo("VisitAPI 0.5.1 loading (dialogue framework)");
+	public static ConfigEntry<float> TalkOffsetY;
 
-            LanguageMode = Config.Bind("General", "Language", "auto",
-                "VisitAPI 自身文本(UI/日志)的语言: auto=跟随EFT / zh / en  |  Language for VisitAPI's own text: auto (follow EFT) / zh / en");
-            string lm = LanguageMode.Value.Trim().ToLowerInvariant();
-            Loc.SetMode(lm == "zh" ? Loc.Mode.Zh : lm == "en" ? Loc.Mode.En : Loc.Mode.Auto);
+	private void Awake()
+	{
+		Instance = this;
+		Log = base.Logger;
+		Language = base.Config.Bind("General", "Language", "auto", "界面语言 | UI language: auto / zh / en");
+		TalkOffsetX = base.Config.Bind("TalkButton", "OffsetX", 0f, "访问按钮水平偏移 | Visit button X offset");
+		TalkOffsetY = base.Config.Bind("TalkButton", "OffsetY", 0f, "访问按钮垂直偏移 | Visit button Y offset");
+		Loc.Mode = Language.Value;
+		Language.SettingChanged += delegate
+		{
+			Loc.Mode = Language.Value;
+		};
+		Loc.GameCulture = () => LocalizationManager.Instance?.Culture;
+		DlgLoc.Picker = Loc.Pick;
+		new Harmony("com.sora.visitapi").PatchAll();
+		Log.LogInfo($"VisitAPI {Version} loaded (SPT 4.1.1)");
+	}
 
-            TalkOffsetX = Config.Bind("TalkButton", "CenterOffsetX", 0f,
-                "对话按钮相对屏幕顶部中心的 X 偏移(0=居中,负=左,正=右)  |  'Talk' button X offset from screen top-centre (0=centre, -=left, +=right)");
-            TalkOffsetY = Config.Bind("TalkButton", "CenterOffsetY", 0f,
-                "Y 偏移(0=与返回同高,负=下移)  |  Y offset (0=level with the close button, negative=lower)");
-
-            // Auto-discover every trader that ships a `<id>.dlg` → whitelist bypass + 对话 button for any modded trader.
-            foreach (string id in DialogTreeLoader.ListTraderIds()) RegisteredTraders.Add(id);
-            RegisteredTraders.Add(SoraId);
-            Log.LogInfo("[VisitAPI] registered " + RegisteredTraders.Count + " trader(s) with .dlg");
-
-            Harmony harmony = new Harmony("com.sora.visitapi");
-            FavoriteSchemeGuard.Apply(harmony);
-
-            if (NativeBinder.Bind())
-            {
-                WhitelistPatch.Apply(harmony);
-                DialogUiBinder.Bind();
-                OptionRowPatch.Apply(harmony);
-                TraderScreenEntryPatch.Apply(harmony);
-            }
-        }
-
-        private void Update()
-        {
-            RaidTriggerManager.Tick();
-
-            // F11: print the camera position so .dlg authors can find raid/hideout trigger coordinates.
-            if (Input.GetKeyDown(KeyCode.F11))
-            {
-                Camera c = Camera.main;
-                if (c != (UnityEngine.Object)null)
-                {
-                    Vector3 p = c.transform.position;
-                    Log.LogInfo("[Coords] camera position = (" + p.x.ToString("F2") + ", " + p.y.ToString("F2") + ", " + p.z.ToString("F2") + ")  — paste into a hideout/raid trigger");
-                }
-            }
-        }
-    }
+	private void Update()
+	{
+		if (Input.GetKeyDown(KeyCode.F11))
+		{
+			DialogDebug.OnF11();
+		}
+		if (Input.GetKeyDown(KeyCode.F9))
+		{
+			Log.LogWarning("[narrate] F9 pressed");
+			NarrateEntry.Abort();
+		}
+		TriggerManager.Tick();
+	}
 }

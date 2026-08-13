@@ -1,23 +1,20 @@
 using System.Collections.Generic;
+using SemanticVersioning;
 using SPTarkov.Server.Core.Models.Spt.Mod;
-using Version = SemanticVersioning.Version;
-using Range = SemanticVersioning.Range;
 
-namespace VisitApiServer;
+namespace VisitAPI.Server;
 
-// SPT 4.0 mod metadata (replaces the old package.json). All members of AbstractModMetadata are abstract,
-// so every one must be overridden.
-public record VisitApiModMetadata : AbstractModMetadata
+public record ModMetadata : IModMetadata
 {
-    public override string ModGuid { get; init; } = "com.sora.visitapi.server";
-    public override string Name { get; init; } = "VisitAPI-Server";
-    public override string Author { get; init; } = "SORA";
-    public override List<string>? Contributors { get; init; } = null;
-    public override Version Version { get; init; } = new Version("0.5.1");
-    public override Range SptVersion { get; init; } = new Range("~4.0.0");
-    public override List<string>? Incompatibilities { get; init; } = null;
-    public override Dictionary<string, Range>? ModDependencies { get; init; } = null;
-    public override string? Url { get; init; } = null;
-    public override bool? IsBundleMod { get; init; } = false;
-    public override string License { get; init; } = "MIT";
+    public string ModGuid { get; init; } = "com.sora.visitapi.server";
+    public string Name { get; init; } = "VisitAPI-Server";
+    public string Author { get; init; } = "TricolourSky";
+    public List<string> Contributors { get; init; }
+    public Version Version { get; init; } = new("1.0.0");
+    public Range SptVersion { get; init; } = new("~4.1.1");
+    public bool HasPrepatcher { get; init; }
+    public List<string> Incompatibilities { get; init; }
+    public Dictionary<string, Range> ModDependencies { get; init; }
+    public string Url { get; init; }
+    public string License { get; init; } = "MIT";
 }

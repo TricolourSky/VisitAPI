@@ -1,0 +1,133 @@
+{
+  "5043a1ce90726f6a536f7271": {
+    "QuestName": "立交桥清剿",
+    "_id": "5043a1ce90726f6a536f7271",
+    "canShowNotificationsInGame": true,
+    "acceptanceAndFinishingSource": "eft",
+    "progressSource": "eft",
+    "restartable": false,
+    "instantComplete": false,
+    "secretQuest": true,
+    "isKey": false,
+    "side": "Pmc",
+    "type": "Elimination",
+    "status": 0,
+    "traderId": "5a7c2eca46aef81a7ca2145d",
+    "location": "5714dbc024597771384a510d",
+    "image": "",
+    "name": "5043a1ce90726f6a536f7271 name",
+    "description": "5043a1ce90726f6a536f7271 description",
+    "note": "",
+    "startedMessageText": "",
+    "successMessageText": "5043a1ce90726f6a536f7271 successMessageText",
+    "failMessageText": "",
+    "changeQuestMessageText": "",
+    "acceptPlayerMessage": "",
+    "declinePlayerMessage": "",
+    "completePlayerMessage": "",
+    "arenaLocations": [],
+    "gameModes": [],
+    "rankingModes": [],
+    "conditions": {
+      "AvailableForStart": [
+        {
+          "availableAfter": 0,
+          "conditionType": "Quest",
+          "dispersion": 0,
+          "dynamicLocale": false,
+          "globalQuestCounterId": "",
+          "id": "5043a1ce90726f6a536f7279",
+          "index": 0,
+          "parentId": "",
+          "status": [4],
+          "target": "5043a1ce90726f6a536f7261",
+          "visibilityConditions": []
+        }
+      ],
+      "AvailableForFinish": [
+        {
+          "completeInSeconds": 0,
+          "conditionType": "CounterCreator",
+          "counter": {
+            "conditions": [
+              {
+                "bodyPart": [],
+                "compareMethod": ">=",
+                "conditionType": "Kills",
+                "daytime": { "from": 0, "to": 0 },
+                "distance": { "compareMethod": ">=", "value": 0 },
+                "dynamicLocale": false,
+                "enemyEquipmentExclusive": [],
+                "enemyEquipmentInclusive": [],
+                "enemyHealthEffects": [],
+                "id": "5043a1ce90726f6a536f7274",
+                "resetOnSessionEnd": false,
+                "savageRole": [],
+                "target": "Savage",
+                "value": 1,
+                "weapon": [],
+                "weaponCaliber": [],
+                "weaponModsExclusive": [],
+                "weaponModsInclusive": []
+              },
+              {
+                "conditionType": "Location",
+                "dynamicLocale": false,
+                "id": "5043a1ce90726f6a536f7275",
+                "target": ["Interchange"]
+              }
+            ],
+            "id": "5043a1ce90726f6a536f7273"
+          },
+          "doNotResetIfCounterCompleted": false,
+          "dynamicLocale": false,
+          "globalQuestCounterId": "",
+          "id": "5043a1ce90726f6a536f7272",
+          "index": 0,
+          "isNecessary": false,
+          "isResetOnConditionFailed": false,
+          "oneSessionOnly": false,
+          "parentId": "",
+          "type": "Elimination",
+          "value": 7,
+          "visibilityConditions": []
+        }
+      ],
+      "Fail": []
+    },
+    "rewards": {
+      "Started": [],
+      "Success": [
+        {
+          "id": "5043a1ce90726f6a536f7276",
+          "index": 0,
+          "type": "Experience",
+          "value": "2500",
+          "availableInGameEditions": [],
+          "unknown": false
+        },
+        {
+          "availableInGameEditions": [],
+          "findInRaid": false,
+          "gameMode": ["regular", "pve"],
+          "id": "5043a1ce90726f6a536f7277",
+          "index": 1,
+          "isEncoded": false,
+          "isHidden": false,
+          "items": [
+            {
+              "_id": "5043a1ce90726f6a536f7278",
+              "_tpl": "5449016a4bdc2d6f028b456f",
+              "upd": { "StackObjectsCount": 70000 }
+            }
+          ],
+          "target": "5043a1ce90726f6a536f7278",
+          "type": "Item",
+          "unknown": false,
+          "value": "70000"
+        }
+      ],
+      "Fail": []
+    }
+  }
+}

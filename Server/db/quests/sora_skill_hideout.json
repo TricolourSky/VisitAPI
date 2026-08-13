@@ -1,0 +1,78 @@
+{
+  "5043a1ce90726f6a536f7282": {
+    "QuestName": "SORA 的入住",
+    "_id": "5043a1ce90726f6a536f7282",
+    "canShowNotificationsInGame": true,
+    "acceptanceAndFinishingSource": "eft",
+    "progressSource": "eft",
+    "restartable": false,
+    "instantComplete": false,
+    "secretQuest": true,
+    "isKey": false,
+    "side": "Pmc",
+    "type": "Completion",
+    "status": 0,
+    "traderId": "5a7c2eca46aef81a7ca2145d",
+    "location": "any",
+    "image": "",
+    "name": "5043a1ce90726f6a536f7282 name",
+    "description": "5043a1ce90726f6a536f7282 description",
+    "note": "",
+    "startedMessageText": "",
+    "successMessageText": "5043a1ce90726f6a536f7282 successMessageText",
+    "failMessageText": "",
+    "changeQuestMessageText": "",
+    "acceptPlayerMessage": "",
+    "declinePlayerMessage": "",
+    "completePlayerMessage": "",
+    "arenaLocations": [],
+    "gameModes": [],
+    "rankingModes": [],
+    "conditions": {
+      "AvailableForStart": [
+        {
+          "availableAfter": 0,
+          "conditionType": "Quest",
+          "dispersion": 0,
+          "dynamicLocale": false,
+          "globalQuestCounterId": "",
+          "id": "5043a1ce90726f6a536f7285",
+          "index": 0,
+          "parentId": "",
+          "status": [4],
+          "target": "5043a1ce90726f6a536f7271",
+          "visibilityConditions": []
+        }
+      ],
+      "AvailableForFinish": [
+        {
+          "compareMethod": ">=",
+          "conditionType": "Skill",
+          "dynamicLocale": false,
+          "globalQuestCounterId": "",
+          "id": "5043a1ce90726f6a536f7283",
+          "index": 0,
+          "parentId": "",
+          "target": "HideoutManagement",
+          "value": 10,
+          "visibilityConditions": []
+        }
+      ],
+      "Fail": []
+    },
+    "rewards": {
+      "Started": [],
+      "Success": [
+        {
+          "id": "5043a1ce90726f6a536f7284",
+          "index": 0,
+          "type": "Experience",
+          "value": "3000",
+          "availableInGameEditions": [],
+          "unknown": false
+        }
+      ],
+      "Fail": []
+    }
+  }
+}

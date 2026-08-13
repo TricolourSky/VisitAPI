@@ -1,104 +1,94 @@
-using System;
+using System.Collections;
+using System.Linq;
+using Comfort.Common;
+using EFT;
+using EFT.Dialogs;
+using EFT.Hideout;
+using EFT.InventoryLogic;
+using EFT.Quests;
+using EFT.UI;
+using EFT.UI.Screens;
+using VisitAPI.Dialog;
 
-namespace VisitAPI.Native
+namespace VisitAPI.Native;
+
+public static class DialogOpener
 {
-    internal static class DialogOpener
+    public static bool TryOpen(DialogTree tree, out string error) => TryOpenPlayer(tree, null, true, out error);
+
+    public static bool TryOpenTriggered(DialogTree tree, string node, out string error)
     {
-        // Raid / hideout entry: controllers come from the local player (GamePlayerOwner.MyPlayer).
-        internal static bool TryOpen(string traderId, out string error)
+        var player = GamePlayerOwner.MyPlayer;
+        var first = player != null && node == null && tree.First != null && tree.Nodes.ContainsKey(tree.First) && !OnceService.Store(tree.TraderId).SeenFirst(player.Profile.Id);
+        if (first) node = tree.First;
+        var ok = TryOpenPlayer(tree, node, false, out error);
+        if (ok && first) OnceService.Store(tree.TraderId).MarkFirst(player.Profile.Id);
+        return ok;
+    }
+
+    static bool TryOpenPlayer(DialogTree tree, string forceNode, bool scene, out string error)
+    {
+        var player = GamePlayerOwner.MyPlayer;
+        if (player == null) { error = "no player entity - open the dialog INSIDE the hideout or a raid"; return false; }
+        var quests = player.QuestController ?? (QuestController)Singleton<HideoutRepresentation>.Instance?._questController;
+        return TryOpen(tree, player.Profile, quests, player.InventoryController, null, forceNode, scene, out error);
+    }
+
+    public static bool TryOpen(DialogTree tree, Profile profile, QuestController quests, InventoryController inventory, TraderScreensGroup tradeScreen, out string error) =>
+        TryOpen(tree, profile, quests, inventory, tradeScreen, null, true, out error);
+
+    public static bool TryOpenAt(DialogTree tree, string node, Profile profile, QuestController quests, InventoryController inventory, TraderScreensGroup tradeScreen, out string error) =>
+        TryOpen(tree, profile, quests, inventory, tradeScreen, node, false, out error, atOptions: true);
+
+    static bool TryOpen(DialogTree tree, Profile profile, QuestController quests, InventoryController inventory, TraderScreensGroup tradeScreen, string forceNode, bool scene, out string error, bool atOptions = false)
+    {
+        error = null;
+        if (!profile.TradersInfo.ContainsKey(new MongoID(tree.TraderId))) { error = $"trader {tree.TraderId} not found in profile"; return false; }
+        var startNode = ResolveStart(tree, profile);
+        var entryNode = forceNode ?? startNode;
+        if (!tree.Nodes.ContainsKey(entryNode)) { error = $"start node '{entryNode}' not found in .dlg"; return false; }
+        var entry = DialogTemplateBuilder.Register(tree, entryNode, startNode, profile.Nickname, profile.Id, quests);
+        if (atOptions) entry = DialogTemplateBuilder.Id(tree.TraderId, entryNode + "#opt");
+        var dc = new ClientDialogController(profile, quests, inventory);
+        new TraderDialogScreen.TraderDialogScreenController(profile, tree.TraderId, quests,
+            inventory, null, dc, entry).ShowScreen(EScreenState.Queued);
+        RetailDialogs.SeedVariables(dc);
+        TabRouter.Watch(dc, tradeScreen, tree, profile, quests, inventory);
+        QuestRefresh.Watch(dc, tree, quests);
+        StandingService.Watch(dc, profile, tradeScreen);
+        SetStatusService.Watch(dc, quests);
+        HandoverService.Watch(dc, quests, profile, inventory);
+        OnceService.Watch(dc);
+        DialogFuse.Watch(dc);
+        if (scene && tree.Scene != null && !(Singleton<AbstractGame>.Instantiated && Singleton<AbstractGame>.Instance.InRaid))
+            SceneLoader.Open(tree.Scene == "auto" ? tree.TraderId : tree.Scene, dc);
+        DialogBackground.Attach(dc);
+        if (atOptions) Plugin.Instance.StartCoroutine(SeedNpcLine(dc, tree.TraderId, entryNode));
+        return true;
+    }
+
+    static IEnumerator SeedNpcLine(ClientDialogController dc, string traderId, string node)
+    {
+        for (var i = 0; i < 300 && dc.CurrentDialog == null; i++) yield return null;
+        if (dc.CurrentDialog == null) yield break;
+        var say = dc.method_0(DialogTemplateBuilder.Id(traderId, node + "#npc"))?.Lines?.FirstOrDefault();
+        if (say == null) yield break;
+        dc.LastNpcLine = say;
+        dc.History.AddLine(say);
+        dc.SetCurrentDialog(dc.method_0(dc.CurrentDialog.Id));
+    }
+
+    static string ResolveStart(DialogTree tree, Profile profile)
+    {
+        double level = profile.Info.Level;
+        double standing = profile.TradersInfo[new MongoID(tree.TraderId)].Standing;
+        var pick = tree.Start;
+        foreach (var rule in tree.WhenRules)
         {
-            error = "";
-            if (!NativeBinder.Ready)
-            {
-                error = "NativeBinder not ready";
-                return false;
-            }
-
-            EFT.Player player = EFT.GamePlayerOwner.MyPlayer;
-            if (player == null)
-            {
-                error = "GamePlayerOwner.MyPlayer is null (not in raid/hideout?)";
-                return false;
-            }
-
-            object? profile = NativeBinder.GetProfile(player);
-            object? questCtrl = NativeBinder.GetQuestController(player);
-            object? invCtrl = NativeBinder.GetInventoryController(player);
-            // Raid/hideout: there is no out-of-raid trade screen behind us, so @trade/@tasks no-op cleanly.
-            NativeBinder.ActiveTradeScreen = null;
-            return Open(traderId, profile, questCtrl, invCtrl, out error);
+            var ok = rule.Conds.TrueForAll(c => { var v = c.Field == "level" ? level : standing; return c.LessEq ? v <= c.Value : v >= c.Value; });
+            if (ok && tree.Nodes.ContainsKey(rule.Node)) { pick = rule.Node; break; }
         }
-
-        // Out-of-raid entry (menu trade screen): the caller supplies the controllers it already holds
-        // (TraderScreensGroup.Profile_0 / AbstractQuestControllerClass / InventoryController_0). MyPlayer is null here.
-        internal static bool TryOpenOutOfRaid(string traderId, object? profile, object? questCtrl, object? invCtrl, out string error)
-        {
-            error = "";
-            if (!NativeBinder.Ready)
-            {
-                error = "NativeBinder not ready";
-                return false;
-            }
-            return Open(traderId, profile, questCtrl, invCtrl, out error);
-        }
-
-        private static bool Open(string traderId, object? profile, object? questCtrl, object? invCtrl, out string error)
-        {
-            error = "";
-            Plugin.Log.LogInfo($"[DialogOpener] controllers profile={profile != null} quest={questCtrl != null} inv={invCtrl != null}");
-            if (profile == null || invCtrl == null)
-            {
-                error = $"profile/inventory missing (profile={profile != null} inv={invCtrl != null})";
-                return false;
-            }
-
-            object dialogController;
-            try
-            {
-                dialogController = NativeBinder.DialogControllerCtor!.Invoke(new object?[] { profile, questCtrl, invCtrl });
-            }
-            catch (Exception ex)
-            {
-                error = "dialogController ctor: " + (ex.InnerException ?? ex).Message;
-                Plugin.Log.LogError("[DialogOpener] " + (ex.InnerException ?? ex));
-                return false;
-            }
-
-            object btrDialog;
-            try
-            {
-                btrDialog = NativeBinder.BtrDialogCtor!.Invoke(new object?[] { profile, traderId, questCtrl, invCtrl, null, dialogController, null });
-            }
-            catch (Exception ex)
-            {
-                error = "BTRDialogClass ctor: " + (ex.InnerException ?? ex).Message;
-                Plugin.Log.LogError("[DialogOpener] " + (ex.InnerException ?? ex));
-                return false;
-            }
-
-            // Native open: push the screen through EFT's screen manager. The manager runs PrepareEnvironment
-            // (input/framerate/chatbar) and honors the screen's ShouldLockCursor()=>ShowCursor, so the cursor,
-            // input-blocking and ESC are all handled by the game itself. We keep the controller so we can close
-            // it the same way the native dialog does (ScreenController.CloseScreen()), which pops the manager
-            // cleanly and returns to raid.
-            try
-            {
-                NativeBinder.ShowScreenMethod!.Invoke(btrDialog, new object[] { NativeBinder.ScreenStateQueued! });
-            }
-            catch (Exception ex)
-            {
-                error = "ShowScreen: " + (ex.InnerException ?? ex).Message;
-                Plugin.Log.LogError("[DialogOpener] " + (ex.InnerException ?? ex));
-                return false;
-            }
-
-            NativeBinder.ActiveController = btrDialog;
-            NativeBinder.ActiveQuestController = questCtrl;
-            NativeBinder.ActiveProfile = profile;
-            NativeBinder.ActiveTraderId = traderId;
-            NativeBinder.ActiveProfileId = NativeBinder.GetProfileId(profile);
-            Plugin.Log.LogInfo($"[DialogOpener] ShowScreen OK for trader {traderId} (quest controller {(questCtrl != null ? "present" : "NULL")})");
-            return true;
-        }
+        Plugin.Log.LogDebug($"[visit] start={pick} (level={level} standing={standing} whenRules={tree.WhenRules.Count})");
+        return pick;
     }
 }

@@ -1,0 +1,21 @@
+# ═══ 绝不入库：版权/二进制内容 ═══
+# 反编译的 EFT / SPT 源码（BSG 版权，仅本地参考）
+_decomp/
+# IL2CPP 游戏二进制与数据（封存件，BSG/OpenTarkov 资产）
+OT/
+# 打包发布物（走 Releases / SPT Hub 分发，不进源码库）
+release/
+*.zip
+# 零售版 EFT 1.0 对话数据（BSG 版权，用户自备或走提取脚本）
+Server/db/dialogues/dialogue.json
+# 场景资源包（tarkin/bmpq MIT，体积过大，单独分发）
+scenes/
+
+# ═══ 构建产物 ═══
+[Bb]in/
+[Oo]bj/
+*.user
+.vs/
+
+# ═══ 内部协作账本（含本机路径，仅本地保留）═══
+Memory.MD

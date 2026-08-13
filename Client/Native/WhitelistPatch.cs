@@ -1,44 +1,24 @@
 using System;
-using System.Reflection;
+using System.Collections.Generic;
+using EFT;
+using EFT.Dialogs;
+using EFT.UI;
 using HarmonyLib;
 
-namespace VisitAPI.Native
+namespace VisitAPI.Native;
+
+// method_5 = 原生对话屏按商人 id 放行的白名单 switch, 未列入的商人会抛异常
+// finalizer 吞掉该异常并对 RegisteredTraders 里的商人直接 StartDialog 兜底放行
+[HarmonyPatch(typeof(TraderDialogScreen), "method_5")]
+public static class WhitelistPatch
 {
-    internal static class WhitelistPatch
+    public static readonly HashSet<string> RegisteredTraders = new();
+
+    static Exception Finalizer(Exception __exception, ClientDialogController ___dialogController,
+        MongoID ____traderId, MongoID? ____dialogId, ITraderAnimationController ____animationController)
     {
-        internal static readonly string[] VanillaTraders =
-        {
-            "638f541a29ffd1183d187f57",
-            "656f0f98d80a697f855d34b1",
-            "54cb50c76803fa8b248b4571",
-            "54cb57776803fa99248b456e",
-        };
-
-        internal static void Apply(Harmony harmony)
-        {
-            if (NativeBinder.Method5 == null)
-            {
-                Plugin.Log.LogWarning("[WhitelistPatch] method_5 not bound; custom traders will hit the vanilla whitelist");
-                return;
-            }
-            MethodInfo finalizer = typeof(WhitelistPatch).GetMethod(nameof(Method5Finalizer), BindingFlags.Static | BindingFlags.NonPublic);
-            harmony.Patch(NativeBinder.Method5, finalizer: new HarmonyMethod(finalizer));
-            Plugin.Log.LogInfo("[WhitelistPatch] method_5 finalizer installed");
-        }
-
-        // A registered .dlg trader needs the bypass — the native dialog screen throws on any trader id
-        // outside the vanilla whitelist.
-        private static Exception? Method5Finalizer(Exception __exception, object __instance)
-        {
-            if (__exception == null) return null;
-            string? traderId = NativeBinder.GetScreenTraderId(__instance);
-            if (traderId == null) return __exception;
-            if (Plugin.RegisteredTraders.Contains(traderId) && Array.IndexOf(VanillaTraders, traderId) < 0)
-            {
-                Plugin.Log.LogInfo("[WhitelistPatch] suppressed whitelist throw for custom trader " + traderId);
-                return null;
-            }
-            return __exception;
-        }
+        if (__exception == null || !RegisteredTraders.Contains(____traderId.ToString())) return __exception;
+        ___dialogController.StartDialog(____traderId, ____dialogId, ____animationController);
+        return null;
     }
 }

@@ -1,0 +1,78 @@
+{
+  "5043a1ce90726f6a536f7261": {
+    "QuestName": "SORA 的新据点",
+    "_id": "5043a1ce90726f6a536f7261",
+    "canShowNotificationsInGame": true,
+    "acceptanceAndFinishingSource": "eft",
+    "progressSource": "eft",
+    "restartable": false,
+    "instantComplete": false,
+    "secretQuest": true,
+    "isKey": false,
+    "side": "Pmc",
+    "type": "Completion",
+    "status": 0,
+    "traderId": "5a7c2eca46aef81a7ca2145d",
+    "location": "any",
+    "image": "",
+    "name": "5043a1ce90726f6a536f7261 name",
+    "description": "5043a1ce90726f6a536f7261 description",
+    "note": "",
+    "startedMessageText": "",
+    "successMessageText": "5043a1ce90726f6a536f7261 successMessageText",
+    "failMessageText": "",
+    "changeQuestMessageText": "",
+    "acceptPlayerMessage": "",
+    "declinePlayerMessage": "",
+    "completePlayerMessage": "",
+    "arenaLocations": [],
+    "gameModes": [],
+    "rankingModes": [],
+    "conditions": {
+      "AvailableForStart": [],
+      "AvailableForFinish": [
+        {
+          "completeInSeconds": 0,
+          "conditionType": "CounterCreator",
+          "counter": {
+            "conditions": [
+              {
+                "conditionType": "VisitPlace",
+                "dynamicLocale": false,
+                "id": "5043a1ce90726f6a536f7263",
+                "target": "visitapi_sora_dialog",
+                "value": 1
+              }
+            ],
+            "id": "5043a1ce90726f6a536f7264"
+          },
+          "doNotResetIfCounterCompleted": false,
+          "dynamicLocale": false,
+          "globalQuestCounterId": "",
+          "id": "5043a1ce90726f6a536f7265",
+          "index": 0,
+          "oneSessionOnly": false,
+          "parentId": "",
+          "type": "Exploration",
+          "value": 1,
+          "visibilityConditions": []
+        }
+      ],
+      "Fail": []
+    },
+    "rewards": {
+      "Started": [],
+      "Success": [
+        {
+          "id": "5043a1ce90726f6a536f7262",
+          "index": 0,
+          "type": "Experience",
+          "value": "1500",
+          "availableInGameEditions": [],
+          "unknown": false
+        }
+      ],
+      "Fail": []
+    }
+  }
+}

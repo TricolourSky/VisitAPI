@@ -19,3 +19,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+NOTICE
+
+This repository contains only original code. It does NOT include any game
+assets from Battlestate Games' Escape from Tarkov.
+
+The 3D trader scene bundles (distributed separately) are derived from
+bmpq/spt-tradermod (https://github.com/bmpq/spt-tradermod), MIT licensed —
+their copyright notice must be retained when redistributing those bundles.
