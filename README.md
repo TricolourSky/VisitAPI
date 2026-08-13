@@ -19,8 +19,8 @@ An open-source framework that brings EFT 1.0-style trader **Visit** dialogues to
 
 1. `VisitAPI.dll` → `<SPT>\BepInEx\plugins\VisitAPI\`
 2. `VisitAPI-Server\` → `<SPT>\user\mods\`
-3. **场景包（单独下载）** → `<SPT>\BepInEx\plugins\VisitAPI\scenes\`
-   场景资源源自 [bmpq/spt-tradermod](https://github.com/bmpq/spt-tradermod)（MIT），体积原因不随源码分发
+3. **场景包**（[Releases](https://github.com/TricolourSky/VisitAPI/releases) 页的 `VisitAPI-scenes-tarkin.zip`）→ 解压到 SPT 根目录
+   场景资源源自 [bmpq/spt-tradermod](https://github.com/bmpq/spt-tradermod)（MIT），体积原因作为 Release 附件分发
 4. `.dlg` 剧本放 `<SPT>\BepInEx\config\VisitAPI\<traderId>.dlg`
 
 ## 从源码构建 / Build from source
