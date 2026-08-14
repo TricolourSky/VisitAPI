@@ -4,7 +4,7 @@
 
 An open-source framework that brings EFT 1.0-style trader **Visit** dialogues to SPT — write plain-text `.dlg` scripts to give any trader (including custom traders) a 3D scene conversation, story quests, standing rewards and in-raid dialogue triggers.
 
-> Target: **SPT 4.1.1** (EFT 0.16.9.5) · Client: BepInEx 5.4.23 plugin (net472) · Server: SPT mod (net10.0)
+> Target: **SPT 4.1.1**
 
 ## Features
 
