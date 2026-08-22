@@ -1,0 +1,57 @@
+{
+  "7482a1eb2401288f408104f0": {
+    "_id": "7482a1eb2401288f408104f0",
+    "QuestName": "偶遇",
+    "traderId": "90726f6a656374536f726132",
+    "location": "5714dbc024597771384a510d",
+    "type": "Completion",
+    "side": "Pmc",
+    "image": "",
+    "restartable": false,
+    "instantComplete": false,
+    "secretQuest": false,
+    "isKey": false,
+    "canShowNotificationsInGame": false,
+    "status": 0,
+    "name": "7482a1eb2401288f408104f0 name",
+    "description": "7482a1eb2401288f408104f0 description",
+    "note": "",
+    "startedMessageText": "",
+    "successMessageText": "7482a1eb2401288f408104f0 successMessageText",
+    "failMessageText": "",
+    "changeQuestMessageText": "",
+    "acceptPlayerMessage": "",
+    "declinePlayerMessage": "",
+    "completePlayerMessage": "",
+    "conditions": {
+      "AvailableForStart": [],
+      "AvailableForFinish": [
+        {
+          "conditionType": "CounterCreator",
+          "id": "2a98dc65800f7449f7922adc",
+          "dynamicLocale": false,
+          "visibilityConditions": [],
+          "index": 0,
+          "value": 1,
+          "counter": {
+            "id": "937d728181a7eec57a2849db",
+            "conditions": [
+              {
+                "conditionType": "VisitPlace",
+                "id": "bfb549c00bc747015c1475a1",
+                "target": "visitapi_new_trigger",
+                "value": 1
+              }
+            ]
+          }
+        }
+      ],
+      "Fail": []
+    },
+    "rewards": {
+      "Started": [],
+      "Success": [],
+      "Fail": []
+    }
+  }
+}
