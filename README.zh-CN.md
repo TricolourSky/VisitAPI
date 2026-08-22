@@ -4,7 +4,7 @@
 
 给 SPT 商人（含自定义商人）加上 EFT 1.0 正式版风格「拜访」对话系统的开源框架——用纯文本 `.dlg` 剧本，让任何商人拥有 3D 场景对话、剧情任务、好感度与战局内对话触发点。
 
-> 目标版本：**SPT 4.1.1**
+> 目标版本：**SPT 4.1.3**（EFT 0.16.9.5）· 客户端：BepInEx 5.4.23 插件（net472）· 服务端：SPT 模组（net10.0）
 
 ## 功能
 
@@ -12,7 +12,9 @@
 - **.dlg 剧本** —— 节点、选项、条件门、一次性选项（once/always/first）、图片/视频/3D 场景背景、语音+BGM、好感度（`standing:`）、任务状态推进（`setstatus:`）
 - **原生 Narrate 管线** —— 原版商人走 EFT 内置的休眠拜访系统 + 零售对话数据回放（口型/字幕/分支变量全原生）
 - **任务系统** —— 自定义任务 JSON，接取/上交/完成全部走原生网络事务，附任务图片路由
-- **战局内/藏身处触发点** —— `trigger:` 语法在地图坐标放置对话点（距离+视角锥+任务门控）
+- **战局内/藏身处触发点** —— `trigger:` 语法在地图坐标放置对话点（距离+视角锥+任务门控）；也可以写 `enter <秒>` 按时间起爆（不用坐标），进图落地几秒后自动接取任务
+- **原生字幕框旁白** —— `>` 旁白行走游戏自己的字幕条（`SubtitlesView`），不再挤在商人对话框里；点击或按空格推进
+- **任务横幅** —— 任务开始 / 达成要求 / 完成 / 失败用正式版观感的横幅播报，借的是原生通知底盘（立起躺下动画、音效、排队全原生），SPT 自己的通知一根毛都不动
 - **进度持久化** —— 对话变量经服务端回放写入档案，跨会话不丢
 
 ## 剧本编辑器
@@ -22,14 +24,16 @@
 ## 安装
 
 1. 从 [Releases](https://github.com/TricolourSky/VisitAPI/releases) 下载两个包：
-   - `VisitAPI-x.y.z-spt4.1.1.zip` —— 客户端插件 + 服务端模组，解压到 SPT 根目录
+   - `VisitAPI-x.y.z-spt4.1.3.zip` —— 客户端插件 + 服务端模组，解压到 SPT 根目录
    - `VisitAPI-scenes-tarkin.zip` —— 3D 商人房间，解压到 SPT 根目录
      场景资源源自 [bmpq/spt-tradermod](https://github.com/bmpq/spt-tradermod)（MIT），体积原因作为 Release 附件分发
 2. `.dlg` 剧本放 `<SPT>\BepInEx\config\VisitAPI\<商人id>.dlg`
+3. 发布包含框架本体和它所需的零售对话数据（`db/dialogues/dialogue.json`，用于原版商人的台词回放）。
+   **不包含**任何剧本、任务和文案 —— 只有它们该放的空目录。
 
 ## 从源码构建
 
-需要本机 SPT 4.1.1 安装（取引用 DLL），以及与本仓库并列 checkout 的 [VisitAPI Editor](https://github.com/TricolourSky/VisitAPI-Editor) 仓库（`.dlg` 解析器源码链编自它）：
+需要本机 SPT 4.1.3 安装（取引用 DLL），以及与本仓库并列 checkout 的 [VisitAPI Editor](https://github.com/TricolourSky/VisitAPI-Editor) 仓库（`.dlg` 解析器源码链编自它）：
 
 ```
 dotnet build Client\VisitAPI.csproj  -c Release -p:EftDir=<你的SPT目录> [-p:DlgSrc=<VisitAPI.Dlg源码目录>]
@@ -41,16 +45,19 @@ dotnet build Server\VisitAPI-Server.csproj -c Release -p:SptDir=<你的SPT服务
 ## .dlg 快速上手
 
 ```
-@start hello
+trader: 5ac3b934156ae10c4430e83c "示例商人"
+start: root
 
-[hello]
-npc: 你来了。今天要点什么？
-opt: 看看货 -> openTrade
-opt: 有活给我吗？ -> openTasks
-opt: 没事，走了 -> @close
+<root> bg: room.png
+> 旁白 —— 走游戏自己的字幕条。
+你来了。今天要点什么？
+- 看看货。 -> @trade
+- 有活给我吗？ -> @tasks
+- 没事，走了。
 ```
 
-完整语法（条件门/触发点/好感度/多媒体）见 `docs/` 与 [`examples/`](examples/)。
+文件名取商人的 24 位十六进制 id，放进 `BepInEx\config\VisitAPI\` 即可。
+完整语法（条件门/触发点/任务/好感度/多媒体）见 [`examples/minimal.dlg`](examples/minimal.dlg)。
 
 ## 免责声明
 
