@@ -5,7 +5,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>VisitAPI</AssemblyName>
     <RootNamespace>VisitAPI</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <!-- 本机 SPT 安装目录; 外部构建用 dotnet build -p:EftDir=<路径> 覆写 -->
     <EftDir Condition="'$(EftDir)' == ''">D:\EFT</EftDir>
     <Managed>$(EftDir)\EscapeFromTarkov_Data\Managed</Managed>

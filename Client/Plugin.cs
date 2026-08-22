@@ -12,7 +12,7 @@ namespace VisitAPI;
 [BepInPlugin("com.sora.visitapi", "VisitAPI", Plugin.Version)]
 public class Plugin : BaseUnityPlugin
 {
-	public const string Version = "1.0.0";
+	public const string Version = "1.1.0";
 
 	public static Plugin Instance;
 
@@ -39,7 +39,7 @@ public class Plugin : BaseUnityPlugin
 		Loc.GameCulture = () => LocalizationManager.Instance?.Culture;
 		DlgLoc.Picker = Loc.Pick;
 		new Harmony("com.sora.visitapi").PatchAll();
-		Log.LogInfo($"VisitAPI {Version} loaded (SPT 4.1.1)");
+		Log.LogInfo($"VisitAPI {Version} loaded (SPT 4.1.3)");
 	}
 
 	private void Update()

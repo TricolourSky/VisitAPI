@@ -82,7 +82,9 @@ public static class TriggerManager
 		visitTrigger.TraderId = traderId;
 		visitTrigger.Data = tr;
 		visitTrigger.Merge = hideout && !tr.Free;
-		visitTrigger.RequireLook = !hideout || tr.Free;
+		bool auto = tr.Auto || tr.Enter >= 0f;
+		visitTrigger.Auto = auto;
+		visitTrigger.RequireLook = (!hideout || tr.Free) && !auto;
 		_live.Add(gameObject);
 	}
 

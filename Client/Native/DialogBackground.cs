@@ -44,6 +44,7 @@ public class DialogBackground : MonoBehaviour
             KeepAlive = false;
             bg._controller = controller; controller.OnDialogChanged += bg.OnDialog; bg.OnDialog(controller.CurrentDialog);
             DialogAudio.Attach(controller, screen.gameObject);
+            NarrationView.Attach(controller, screen);
             yield break;
         }
     }

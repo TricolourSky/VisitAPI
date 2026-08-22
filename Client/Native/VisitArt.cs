@@ -8,7 +8,7 @@ public static class VisitArt
 {
     static readonly Dictionary<string, Sprite> _cache = new();
 
-    public static Sprite Load(string file)
+    public static Sprite Load(string file, Vector4 border = default)
     {
         if (_cache.TryGetValue(file, out var hit)) return hit;
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("VisitAPI.art." + file);
@@ -23,6 +23,6 @@ public static class VisitArt
         }
         var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
         tex.LoadImage(bytes);
-        return _cache[file] = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+        return _cache[file] = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect, border);
     }
 }

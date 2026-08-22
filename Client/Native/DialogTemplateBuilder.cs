@@ -16,6 +16,9 @@ public static class DialogTemplateBuilder
     public static readonly Dictionary<MongoID, string> BgmByDialog = new();
     public static readonly Dictionary<MongoID, string> NodeByDialog = new();
 
+    /// <summary>旁白拍（#nc，就是那条"继续…"玩家行）→ 要写进原生字幕框的文字。见 NarrationView。</summary>
+    public static readonly Dictionary<MongoID, string> NarrationByDialog = new();
+
     public static MongoID Register(DialogTree tree, string entryNode, string startNode, string playerName, string profileId, QuestController quests)
     {
         WhitelistPatch.RegisteredTraders.Add(tree.TraderId);
@@ -23,23 +26,40 @@ public static class DialogTemplateBuilder
         var built = new List<(MongoID id, List<DialogLineTemplate> lines)>();
         foreach (var node in tree.Nodes.Values)
         {
-            for (var i = 0; i < node.Narration.Count; i++)
-            {
-                var next = i + 1 < node.Narration.Count ? Id(tree.TraderId, node.Name + "#nar" + (i + 1)) : Id(tree.TraderId, node.Name + "#npc");
-                built.Add((Id(tree.TraderId, node.Name + "#nar" + i), new List<DialogLineTemplate> { Line(Id(tree.TraderId, node.Name + "#nl" + i), EDialogSide.Npc, DialogLineTemplate.EDialogLineIconType.DialogBubble, new DialogSwitchDialogAction(Id(tree.TraderId, node.Name + "#nc" + i)), Key(loc, tree.TraderId, node.Name, "nar" + i, node.Narration[i].Text, playerName)) }));
-                built.Add((Id(tree.TraderId, node.Name + "#nc" + i), new List<DialogLineTemplate> { Line(Id(tree.TraderId, node.Name + "#ncl" + i), EDialogSide.Player, DialogLineTemplate.EDialogLineIconType.IndexFinger, new DialogSwitchDialogAction(next), Key(loc, tree.TraderId, node.Name, "cont" + i, Loc.Pick("继续…", "Continue..."), playerName)) }));
-                Put(BgByDialog, Id(tree.TraderId, node.Name + "#nar" + i), i == 0 ? node.Narration[0].Bg ?? node.Bg : node.Narration[i].Bg);
-                Put(VoiceByDialog, Id(tree.TraderId, node.Name + "#nar" + i), node.Narration[i].Audio);
-            }
+            // 一屏的播放顺序：旁白 [0, NpcSlot) → 台词 → 旁白 [NpcSlot, 末尾)。
+            // slots 里 -1 代表台词那一拍，其余是 Narration 的下标 —— 对话 id 仍按下标起名，
+            // 作者换个顺序不会让 id 满天飞（存档里的 once 记号是按 id 存的）。
+            var slots = new List<int>();
+            for (var i = 0; i < node.NpcSlot; i++) slots.Add(i);
+            slots.Add(-1);
+            for (var i = node.NpcSlot; i < node.Narration.Count; i++) slots.Add(i);
             NodeByDialog[Id(tree.TraderId, node.Name + "#npc")] = node.Name;
             NodeByDialog[Id(tree.TraderId, node.Name + "#opt")] = node.Name;
-            Put(BgByDialog, Id(tree.TraderId, node.Name + "#npc"), node.Narration.Count == 0 ? node.Bg : null);
             Put(VoiceByDialog, Id(tree.TraderId, node.Name + "#npc"), node.NpcAudio);
-            Put(BgmByDialog, Id(tree.TraderId, node.Name + (node.Narration.Count > 0 ? "#nar0" : "#npc")), node.Bgm);
+            // 节点级的背景和 BGM 挂在**真正的第一拍**上，那一拍不一定还是旁白
+            Put(BgmByDialog, SlotId(tree, node, slots[0]), node.Bgm);
             var after = node.JumpTo != null && tree.Nodes.ContainsKey(node.JumpTo) ? OptionMap.Entry(tree, node.JumpTo) : Id(tree.TraderId, node.Name + "#opt");
-            var say = Line(Id(tree.TraderId, node.Name + "#say"), EDialogSide.Npc, DialogLineTemplate.EDialogLineIconType.DialogBubble,
-                new DialogSwitchDialogAction(after), Key(loc, tree.TraderId, node.Name, "npc", node.NpcText ?? "……", playerName));
-            built.Add((Id(tree.TraderId, node.Name + "#npc"), new List<DialogLineTemplate> { say }));
+            for (var p = 0; p < slots.Count; p++)
+            {
+                var s = slots[p];
+                var next = p + 1 < slots.Count ? SlotId(tree, node, slots[p + 1]) : after;
+                Put(BgByDialog, SlotId(tree, node, s), p == 0 ? (s < 0 ? node.Bg : node.Narration[s].Bg ?? node.Bg) : (s < 0 ? null : node.Narration[s].Bg));
+                if (s < 0)
+                {
+                    var say = Line(Id(tree.TraderId, node.Name + "#say"), EDialogSide.Npc, DialogLineTemplate.EDialogLineIconType.DialogBubble,
+                        new DialogSwitchDialogAction(next), Key(loc, tree.TraderId, node.Name, "npc", node.NpcText ?? "……", playerName));
+                    built.Add((Id(tree.TraderId, node.Name + "#npc"), new List<DialogLineTemplate> { say }));
+                    continue;
+                }
+                var narKey = Key(loc, tree.TraderId, node.Name, "nar" + s, node.Narration[s].Text, playerName);
+                // NPC 拍(#nar)和玩家拍(#nc)都登记：引擎过 #nar 时是一次异步网络往返，
+                // 只登记 #nc 的话那段时间字幕会掉、商人对话窗会闪出来
+                NarrationByDialog[Id(tree.TraderId, node.Name + "#nar" + s)] = loc[narKey];
+                NarrationByDialog[Id(tree.TraderId, node.Name + "#nc" + s)] = loc[narKey];
+                built.Add((Id(tree.TraderId, node.Name + "#nar" + s), new List<DialogLineTemplate> { Line(Id(tree.TraderId, node.Name + "#nl" + s), EDialogSide.Npc, DialogLineTemplate.EDialogLineIconType.DialogBubble, new DialogSwitchDialogAction(Id(tree.TraderId, node.Name + "#nc" + s)), narKey) }));
+                built.Add((Id(tree.TraderId, node.Name + "#nc" + s), new List<DialogLineTemplate> { Line(Id(tree.TraderId, node.Name + "#ncl" + s), EDialogSide.Player, DialogLineTemplate.EDialogLineIconType.IndexFinger, new DialogSwitchDialogAction(next), Key(loc, tree.TraderId, node.Name, "cont" + s, Loc.Pick("继续…", "Continue..."), playerName)) }));
+                Put(VoiceByDialog, Id(tree.TraderId, node.Name + "#nar" + s), node.Narration[s].Audio);
+            }
             var rows = new List<DialogLineTemplate>();
             for (var i = 0; i < node.Options.Count; i++)
             {
@@ -82,6 +102,10 @@ public static class DialogTemplateBuilder
         loc[k] = text.Replace("{playerName}", nick).Replace("{player}", nick);
         return k;
     }
+
+    /// <summary>一拍的对话 id。s &lt; 0 是台词那一拍，其余是 Narration 的下标。</summary>
+    internal static MongoID SlotId(DialogTree t, DialogNode n, int s) =>
+        Id(t.TraderId, n.Name + (s < 0 ? "#npc" : "#nar" + s));
 
     internal static MongoID Id(string traderId, string name)
     {

@@ -6,8 +6,9 @@ namespace VisitAPI.Native;
 
 public static class OptionMap
 {
+    // 入口＝这一屏的**第一拍**。台词可以排在旁白前面（NpcSlot==0），那第一拍就是 #npc
     public static MongoID Entry(DialogTree t, string nodeName) =>
-        t.Nodes.TryGetValue(nodeName, out var n) && n.Narration.Count > 0
+        t.Nodes.TryGetValue(nodeName, out var n) && n.Narration.Count > 0 && n.NpcSlot > 0
             ? DialogTemplateBuilder.Id(t.TraderId, nodeName + "#nar0")
             : DialogTemplateBuilder.Id(t.TraderId, nodeName + "#npc");
 
