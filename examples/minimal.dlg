@@ -7,7 +7,8 @@
 # Lines starting with # or // are comments. Edit + reopen the dialogue — no game restart.
 # Backgrounds are optional: add  bg: yourfile.png  after a node name and put the file
 # (.png / .jpg or an .mp4 video; append " once" to play a video once) in  BepInEx/config/VisitAPI/backgrounds/.
-# Full syntax: docs/DLG_FORMAT.md in the source repo, https://github.com/TricolourSky/VisitAPI
+# Full syntax: the README in the source repo, https://github.com/TricolourSky/VisitAPI
+# (or let VisitAPI Editor write it for you: https://github.com/TricolourSky/VisitAPI-Editor)
 # (quests, hand-over, standing, hideout triggers, ...)
 
 trader: 5ac3b934156ae10c4430e83c "Example Trader"

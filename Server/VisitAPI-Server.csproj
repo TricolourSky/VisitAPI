@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>VisitAPI-Server</AssemblyName>
+    <RootNamespace>VisitAPI.Server</RootNamespace>
+    <Version>1.2.0</Version>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- 本机 SPT 服务端目录; 外部构建用 dotnet build -p:SptDir=<路径> 覆写 -->
+    <SptDir Condition="'$(SptDir)' == ''">D:\EFT\SPT_Runtime</SptDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 剧情页界面文案（UI/MainQuests/*）：框架自己的字，嵌进 DLL，启动时 UiLocales 塞进全局文案表 -->
+    <EmbeddedResource Include="ui\*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Reference Include="SPTarkov.Server.Core" HintPath="$(SptDir)\SPTarkov.Server.Core.dll" Private="false" />
+    <Reference Include="SPTarkov.DI" HintPath="$(SptDir)\SPTarkov.DI.dll" Private="false" />
+    <Reference Include="SPTarkov.Common" HintPath="$(SptDir)\SPTarkov.Common.dll" Private="false" />
+    <Reference Include="SPTarkov.Reflection" HintPath="$(SptDir)\SPTarkov.Reflection.dll" Private="false" />
+    <Reference Include="SemanticVersioning" HintPath="$(SptDir)\SemanticVersioning.dll" Private="false" />
+  </ItemGroup>
+
+  <!-- ⚠️ 构建只部署 DLL，**绝不往游戏目录写 db 和 images**。
+       原来这里还会把仓库的 db\**\*.json 和 images\**\*.png 拷过去，本意是"顺手把演示数据装上"，
+       实际后果是：作者用编辑器在游戏目录里现写的任务和文案，会被仓库里那份更旧的静默覆盖掉——
+       不报错、不提示，只有时间戳能看出来。2026-08-30 真出过一次：一次 dotnet build 把作者当晚
+       写的章节文案和一条任务整个回滚了一代，全靠编辑器自己的 .bak 才救回来。
+       演示内容住在 examples\，要装的人自己拷。见 DEV_NOTES #81。 -->
+  <Target Name="Deploy" AfterTargets="Build" Condition="Exists('$(SptDir)\user')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(SptDir)\user\mods\VisitAPI-Server" />
+    <Message Importance="high" Text="已部署: VisitAPI-Server.dll → $(SptDir)\user\mods\VisitAPI-Server（不含 db / images）" />
+  </Target>
+
+</Project>

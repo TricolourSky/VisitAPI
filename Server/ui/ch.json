@@ -1,0 +1,13 @@
+{
+  "UI/MainQuests/ChapterTitle": "章节",
+  "UI/MainQuests/ChapterActive": "激活",
+  "UI/MainQuests/ChapterComplete": "已完成",
+  "UI/MainQuests/ChapterFailed": "已失败",
+  "UI/MainQuests/MainTasks": "主要目标",
+  "UI/MainQuests/OptionalTasks": "可选目标",
+  "UI/MainQuests/LinkedItems": "相关物品",
+  "UI/MainQuests/NoQuestsAvailable": "没有进行中的剧情",
+  "UI/MainQuests/TabName": "剧情",
+  "UI/MainQuests/FailedTask": "已失败",
+  "UI/MainQuests/ChapterUnavailable": "未开放"
+}

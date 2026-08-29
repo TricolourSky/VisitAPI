@@ -1,0 +1,13 @@
+{
+  "UI/MainQuests/ChapterTitle": "CHAPTER",
+  "UI/MainQuests/ChapterActive": "ACTIVE",
+  "UI/MainQuests/ChapterComplete": "COMPLETE",
+  "UI/MainQuests/ChapterFailed": "FAILED",
+  "UI/MainQuests/MainTasks": "Main objectives",
+  "UI/MainQuests/OptionalTasks": "Optional objectives",
+  "UI/MainQuests/LinkedItems": "Related items",
+  "UI/MainQuests/NoQuestsAvailable": "NO ACTIVE TASKS",
+  "UI/MainQuests/TabName": "STORY",
+  "UI/MainQuests/FailedTask": "FAILED",
+  "UI/MainQuests/ChapterUnavailable": "UNAVAILABLE"
+}
