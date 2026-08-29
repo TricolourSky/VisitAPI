@@ -1,0 +1,75 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>VisitAPI</AssemblyName>
+    <RootNamespace>VisitAPI</RootNamespace>
+    <Version>1.2.0</Version>
+    <!-- 1.2.0 之三：`.dlg` 新指令 **ifitems** —— 背包里有这条任务要交的东西时，这个选项才显示。
+         宽松口径（有一件就算，不要求凑齐剩余数量，否则"先交 3 个剩下 2 个"就做不了）。
+         判定走引擎自己的 GetItemsForCondition，和真正上交时 HandoverService 同一条路，
+         所以"看得到"和"点进去有东西选"永远一致。它是**追加**的一条门控，不替换 handover: 自动补的
+         「任务处于进行中」；不写任务就用同一选项 handover: 的那条。外部作者 abbi/mia 提的需求。 -->
+    <!-- 1.2.0 之二：剧情线实机联调（DEV_NOTES #78/#79）。触发点新增 finish/fail（可与 accept 同写，静默执行不弹对话）；
+         目标行按 1.1 五态画勾/叉/减号 +「(已失败)」前缀；子任务失败不再判死整章；
+         子任务的 autoStart 要等所属章节先开始（ChapterOpen），想整章自动开始就把 autoStart 标在章节上；
+         未开放的章节默认不列在剧情页（Chapter.ShowUnstartedChapters 可开）；
+         finish 走「可提交 → FinishQuest 真事务」（引擎不认 Started→Success）；章节图标提前预载；
+         完成/失败角标按原始像素贴右下角；触发点诊断日志（生成数/距离/触发/状态，Info 级）。 -->
+    <!-- 本机 SPT 安装目录; 外部构建用 dotnet build -p:EftDir=<路径> 覆写 -->
+    <EftDir Condition="'$(EftDir)' == ''">D:\EFT</EftDir>
+    <Managed>$(EftDir)\EscapeFromTarkov_Data\Managed</Managed>
+    <!-- .dlg 解析库源码所在的 VisitAPI Editor 仓库路径(两仓库并列 checkout); 可 -p:DlgSrc=<路径> 覆写 -->
+    <DlgSrc Condition="'$(DlgSrc)' == ''">..\..\VisitAPI Editor\src\VisitAPI.Dlg</DlgSrc>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="art\*.png" />
+  </ItemGroup>
+
+  <!-- ══ 共享 .dlg 解析库 ══
+       唯一一份源码在 VisitAPI Editor\src\VisitAPI.Dlg，编辑器按正常工程引用它；
+       插件这边用 <Compile Link> 把同一批源码直接编进来，不走 ProjectReference。
+
+       为什么不引用 DLL：插件是发给玩家的，走引用就变成 VisitAPI.dll + VisitAPI.Dlg.dll 两个文件，
+       少拷一个就炸；而且 netstandard2.0 程序集在 Unity 的 Mono 下要多担一层门风险。
+       链源码则是零风险，且照样只有一份源码——两边永远不会解析不一致。 -->
+  <ItemGroup>
+    <Compile Include="$(DlgSrc)\*.cs" LinkBase="Dialog\Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx" HintPath="$(EftDir)\BepInEx\core\BepInEx.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(EftDir)\BepInEx\core\0Harmony.dll" Private="false" />
+    <Reference Include="UnityEngine" HintPath="$(Managed)\UnityEngine.dll" Private="false" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(Managed)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(Managed)\UnityEngine.InputLegacyModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UI" HintPath="$(Managed)\UnityEngine.UI.dll" Private="false" />
+    <Reference Include="UnityEngine.UIModule" HintPath="$(Managed)\UnityEngine.UIModule.dll" Private="false" />
+    <Reference Include="UnityEngine.ImageConversionModule" HintPath="$(Managed)\UnityEngine.ImageConversionModule.dll" Private="false" />
+    <Reference Include="UnityEngine.VideoModule" HintPath="$(Managed)\UnityEngine.VideoModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AudioModule" HintPath="$(Managed)\UnityEngine.AudioModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UnityWebRequestModule" HintPath="$(Managed)\UnityEngine.UnityWebRequestModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UnityWebRequestAudioModule" HintPath="$(Managed)\UnityEngine.UnityWebRequestAudioModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AssetBundleModule" HintPath="$(Managed)\UnityEngine.AssetBundleModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AnimationModule" HintPath="$(Managed)\UnityEngine.AnimationModule.dll" Private="false" />
+    <Reference Include="Assembly-CSharp" HintPath="$(Managed)\Assembly-CSharp.dll" Private="false" />
+    <Reference Include="Sirenix.Serialization" HintPath="$(Managed)\Sirenix.Serialization.dll" Private="false" />
+    <Reference Include="Comfort" HintPath="$(Managed)\Comfort.dll" Private="false" />
+    <Reference Include="Comfort.Unity" HintPath="$(Managed)\Comfort.Unity.dll" Private="false" />
+    <Reference Include="Newtonsoft.Json" HintPath="$(Managed)\Newtonsoft.Json.dll" Private="false" />
+    <Reference Include="Unity.TextMeshPro" HintPath="$(Managed)\Unity.TextMeshPro.dll" Private="false" />
+    <Reference Include="spt-common" HintPath="$(EftDir)\BepInEx\plugins\spt\spt-common.dll" Private="false" />
+  </ItemGroup>
+
+  <Target Name="Deploy" AfterTargets="Build" Condition="Exists('$(EftDir)\BepInEx')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(EftDir)\BepInEx\plugins\VisitAPI" />
+    <RemoveDir Directories="$(EftDir)\BepInEx\plugins\VisitAPI\art" />
+    <!-- 章节屏等 UI bundle（SDK 工程 Tools/VisitAPI 打出来的）随插件一起部署 -->
+    <ItemGroup><BundleFiles Include="art\bundles\*.bundle" /></ItemGroup>
+    <Copy SourceFiles="@(BundleFiles)" DestinationFolder="$(EftDir)\BepInEx\plugins\VisitAPI\bundles" SkipUnchangedFiles="true" Condition="'@(BundleFiles)' != ''" />
+    <Message Importance="high" Text="已部署: VisitAPI.dll → $(EftDir)\BepInEx\plugins\VisitAPI" />
+  </Target>
+
+</Project>
