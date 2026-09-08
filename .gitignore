@@ -1,0 +1,34 @@
+# ═══ Never commit: game-derived data, binaries, work dirs ═══
+# Decompiled EFT / SPT sources (BSG copyright, local reference only)
+_decomp/
+# Release artifacts (distributed via GitHub Releases / SPT Hub)
+release/
+*.zip
+*.7z
+# Retail dialogue data and scene bundles (game-derived, shipped as release assets)
+Server/db/
+Server/images/
+Client/art/bundles/
+Client/art/bayer_matrix.png
+Client/art/grayscale_ramp.png
+scenes/
+# Asset extraction / packaging work dirs and tools (never source)
+.work/
+tools/
+# Parked (non-compiled) sources kept locally only
+*.parked
+*.merged
+
+# ═══ Build output ═══
+[Bb]in/
+[Oo]bj/
+*.user
+.vs/
+*.log
+
+# ═══ Local working notes (contain machine paths) ═══
+Memory.MD
+Dev_Note.MD
+Refactor_Plan.MD
+*.bak
+*.bak-*

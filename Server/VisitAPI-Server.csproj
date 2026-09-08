@@ -5,9 +5,9 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>VisitAPI-Server</AssemblyName>
     <RootNamespace>VisitAPI.Server</RootNamespace>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
     <EnableDynamicLoading>true</EnableDynamicLoading>
-    <!-- 本机 SPT 服务端目录; 外部构建用 dotnet build -p:SptDir=<路径> 覆写 -->
+    <!-- 实机环境 2026-09-05 起是 D:\EFT（SPT 4.1.4，SORA 定；原干净安装 D:\SPT 已不存在）; 外部构建用 dotnet build -p:SptDir=<路径> 覆写 -->
     <SptDir Condition="'$(SptDir)' == ''">D:\EFT\SPT_Runtime</SptDir>
   </PropertyGroup>
 
@@ -31,7 +31,8 @@
        不报错、不提示，只有时间戳能看出来。2026-08-30 真出过一次：一次 dotnet build 把作者当晚
        写的章节文案和一条任务整个回滚了一代，全靠编辑器自己的 .bak 才救回来。
        演示内容住在 examples\，要装的人自己拷。见 DEV_NOTES #81。 -->
-  <Target Name="Deploy" AfterTargets="Build" Condition="Exists('$(SptDir)\user')">
+  <!-- 与客户端同款：-p:SkipDeploy=true 只编不部署（服务端在跑时 DLL 被占用，拷贝会让构建报错） -->
+  <Target Name="Deploy" AfterTargets="Build" Condition="Exists('$(SptDir)\user') And '$(SkipDeploy)' != 'true'">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(SptDir)\user\mods\VisitAPI-Server" />
     <Message Importance="high" Text="已部署: VisitAPI-Server.dll → $(SptDir)\user\mods\VisitAPI-Server（不含 db / images）" />
   </Target>

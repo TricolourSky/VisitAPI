@@ -9,7 +9,8 @@ public class DialogLoader
 {
     public readonly string BaseDir;
     readonly Dictionary<string, (DateTime mtime, DialogTree tree)> _cache = new();
-    List<string> _ids; DateTime _idsStamp;
+    List<string> _ids;
+    DateTime _idsStamp;
 
     public DialogLoader(string baseDir)
     {
@@ -17,7 +18,7 @@ public class DialogLoader
         Directory.CreateDirectory(baseDir);
     }
 
-    /// 目录里所有商人 id；目录 mtime 没变就不重新列文件（章节屏每行目标都要问一遍，扫目录太贵）
+    /// 目录里所有商人 id；目录 mtime 没变就不重新列文件
     public IEnumerable<string> TraderIds()
     {
         var stamp = Directory.GetLastWriteTimeUtc(BaseDir);

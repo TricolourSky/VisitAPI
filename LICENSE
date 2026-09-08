@@ -24,9 +24,8 @@ SOFTWARE.
 
 NOTICE
 
-This repository contains only original code. It does NOT include any game
-assets from Battlestate Games' Escape from Tarkov.
+This repository contains only original source code. It does NOT include any
+game assets, data or binaries from Battlestate Games' Escape from Tarkov.
 
-The 3D trader scene bundles (distributed separately) are derived from
-bmpq/spt-tradermod (https://github.com/bmpq/spt-tradermod), MIT licensed —
-their copyright notice must be retained when redistributing those bundles.
+The retail dialogue data and the 3D trader room bundles used at runtime are
+distributed separately as release assets and are not part of this repository.
