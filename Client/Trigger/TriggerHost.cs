@@ -21,6 +21,7 @@ public static class TriggerHost
     {
         if (Time.unscaledTime < _next) return;
         _next = Time.unscaledTime + 1f;
+        InputGuard.Tick();   // 09-10：对话屏没走 Close 就没了的话，把锁住的玩家视角放开（每秒一次，O(1)）
         if (!Singleton<GameWorld>.Instantiated) { _spawnedFor = null; return; }
         var world = Singleton<GameWorld>.Instance;
         if (world is NarrateGameWorld || ReferenceEquals(world, _spawnedFor)) return;

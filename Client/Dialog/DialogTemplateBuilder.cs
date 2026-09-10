@@ -102,7 +102,13 @@ public static class DialogTemplateBuilder
         {
             var s = slots[p];
             var next = p + 1 < slots.Count ? SlotId(tree, node, slots[p + 1]) : after;
-            Put(BgByDialog, SlotId(tree, node, s), p == 0 ? (s < 0 ? node.Bg : node.Narration[s].Bg ?? node.Bg) : (s < 0 ? null : node.Narration[s].Bg));
+            // 背景按编辑器预览（curBg）的口径：每一拍 = 自己的 bg，没写就是节点的 bg；台词那一拍也回到节点 bg
+            // （09-10 SORA 实机：旁白后的台词拍还挂着上一拍的图——原来 p>0 的台词拍登记 null = 沿用上一拍）。
+            // NPC 拍和玩家「继续…」拍登记同一张：开屏时引擎往往已经自动过完 NPC 拍，DialogBackground.Find 拿到的 CurrentDialog
+            // 是玩家拍，只登记 NPC 拍的话开屏第一拍永远没背景。同一张连着登记不会重载（DialogBackground 按文件名去重）。
+            var bg = s < 0 ? node.Bg : node.Narration[s].Bg ?? node.Bg;
+            Put(BgByDialog, SlotId(tree, node, s), bg);
+            if (s >= 0) Put(BgByDialog, Id(tree.TraderId, node.Name + "#nc" + s), bg);
             if (s < 0)
             {
                 var say = Line(Id(tree.TraderId, node.Name + "#say"), EDialogSide.Npc, DialogLineTemplate.EDialogLineIconType.DialogBubble,
@@ -134,7 +140,7 @@ public static class DialogTemplateBuilder
             var lineId = Id(tree.TraderId, $"{node.Name}#el{option}_{s}");
             NodeByDialog[id] = node.Name;
             NarrationByDialog[id] = loc[Key(loc, tree.TraderId, node.Name, $"e{option}_{s}", node.Narration[s].Text, playerName)];
-            Put(BgByDialog, id, node.Narration[s].Bg);
+            Put(BgByDialog, id, node.Narration[s].Bg ?? node.Bg);   // 收尾旁白同样：没写自己的 bg 就回到节点 bg（和预览一致，09-10）
             Put(VoiceByDialog, id, node.Narration[s].Audio);
             built.Add((id, new List<DialogLineTemplate> { Line(lineId, EDialogSide.Player, DialogLineTemplate.EDialogLineIconType.IndexFinger, last ? final : new DialogSwitchDialogAction(BeatId(s + 1)), Key(loc, tree.TraderId, node.Name, $"econt{option}_{s}", Loc.Pick("继续…", "Continue..."), playerName)) }));
             LineEffects.For(lineId).Tab = last && effect != null ? effect.Tab : null;   // 全字段赋值：重开对话旧值整条覆盖

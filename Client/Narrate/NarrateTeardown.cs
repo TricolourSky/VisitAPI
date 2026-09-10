@@ -30,10 +30,12 @@ public static class NarrateHideGuard
 
     // Harmony 规则：原方法抛异常时 Postfix 不执行、只有 Finalizer 执行（09-07 终审）。下面的残留清理原本只挂在 Postfix 上，
     // 恰恰在它要救的那种情况（Hide 半途炸掉）不会跑：_game 残留 → GameExist 恒真 → Narrating.Now 全局卡死，
-    // 之后进战局 FOV 锁 / FiR 拦截 / 对话条件篡改 / 曝光钉住全部在战局里生效。所以正常路和异常路都调同一份 Cleanup。
-    static void Postfix(TarkovApplication.NarrateController __instance) => Cleanup(__instance);
+    // 之后进战局 FOV 锁 / FiR 拦截 / 对话条件篡改 / 曝光钉住全部在战局里生效。所以正常路和异常路都调同一份 Teardown。
+    // ⚠️ 这个共用方法**不能叫 Cleanup**：那是 Harmony 保留的钩子名，挂补丁时会拿空参数调它 → 空引用 → 日志报「NarrateHideGuard 挂载失败」
+    // （09-10 从日志抓到，38/39；进/出补丁其实已挂上，只是收尾钩子炸了）。同理别用 Prepare / TargetMethod / Cleanup 当普通方法名。
+    static void Postfix(TarkovApplication.NarrateController __instance) => Teardown(__instance);
 
-    static void Cleanup(TarkovApplication.NarrateController __instance)
+    static void Teardown(TarkovApplication.NarrateController __instance)
     {
         var game = __instance._game;
         var gameWorld = __instance._gameWorld;
@@ -73,8 +75,8 @@ public static class NarrateHideGuard
     {
         if (__exception == null) { Plugin.Log.LogDebug("[narrate] <<< controller.Hide ok"); return null; }
         Plugin.Log.LogWarning("[narrate] <<< controller.Hide faulted (swallowed): " + __exception.Message);
-        try { Cleanup(__instance); }
-        catch (Exception ex) { Plugin.Log.LogError("[narrate] cleanup after faulted Hide failed: " + ex); }
+        try { Teardown(__instance); }
+        catch (Exception ex) { Plugin.Log.LogError("[narrate] teardown after faulted Hide failed: " + ex); }
         return null;
     }
 }

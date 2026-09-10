@@ -15,6 +15,7 @@ public class DialogBackground : MonoBehaviour
     public static bool KeepAlive;
     ClientDialogController _controller;
     RawImage _image;
+    string _file;   // 当前挂着的背景（文件里的原文，含 once/loop 尾缀）
 
     public static void Attach(ClientDialogController controller) => Plugin.Instance.StartCoroutine(Find(controller));
 
@@ -56,6 +57,9 @@ public class DialogBackground : MonoBehaviour
     {
         if (dialog == null) { if (!KeepAlive) { SceneLoader.Close(); Destroy(gameObject); } return; }
         if (SceneLoader.Requested || !DialogTemplateBuilder.BgByDialog.TryGetValue(dialog.Id, out var file)) return;
+        // 同一张连着来（NPC 拍和「继续…」拍、没写自己 bg 的几拍都登记节点 bg）不重载：视频会从头再播、图会闪一下（09-10）
+        if (file == _file) return;
+        _file = file;
         // 背景文件名可带 " once"/" loop" 尾缀控制视频是否循环, 默认循环(.dlg 作者约定)。
         // JS 侧的对照实现在 VisitAPI Editor 的 index.html bgCut/bgOnce/bgVid —— 改这里必须同时改那里。
         var loop = !file.EndsWith(" once", StringComparison.Ordinal);

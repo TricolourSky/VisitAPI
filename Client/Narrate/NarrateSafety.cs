@@ -29,6 +29,7 @@ public static class DialogScreenCloseGuard
     static Exception Finalizer(Exception __exception)
     {
         DialogScreenTracker.Clear();
+        InputGuard.Release();   // 09-10：触发点开的对话锁过玩家视角的，这里放开
         if (__exception == null) Plugin.Log.LogInfo("[dlg] 对话屏关闭");
         else Plugin.Log.LogWarning("[narrate] <<< dialog screen close faulted (swallowed): " + __exception.Message);
         return null;

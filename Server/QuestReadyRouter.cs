@@ -37,12 +37,12 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, Trader
                     .Select(q => (id: q.Id.ToString(), vx: Visit(q.ExtensionData), notes: Notes(q), subs: Subs(q), story: Story(q.ExtensionData), noCounter: NoCounter(q)))
                     .Select(x => new
                     {
-                        x.id, x.notes, anyOf = Flag(x.vx, "anyOf"), unlock = Flag(x.vx, "unlockTraderOnReady"), chapter = Flag(x.vx, "chapter"),
+                        x.id, x.notes, anyOf = AnyOf(x.vx), unlock = Flag(x.vx, "unlockTraderOnReady"), chapter = Flag(x.vx, "chapter"),
                         autoStart = Flag(x.vx, "autoStart"), autoFinish = Flag(x.vx, "autoFinish"), dialogOnly = Flag(x.vx, "dialogOnly"), icon = Str(x.vx, "icon"), items = Items(x.vx),
                         startAfter = Str(x.vx, "startAfter"), order = Num(x.vx, "order"), noteLinks = Obj(x.vx, "noteLinks"), x.subs, x.story, x.noCounter,
                         unlockDialogue = StrList(x.vx, "unlockDialogue")
                     })
-                    .Where(x => x.anyOf || x.unlock || x.chapter || x.autoStart || x.autoFinish || x.dialogOnly || x.icon != null || x.notes != null || x.items.Count > 0 || x.startAfter != null || x.order != null || x.noteLinks != null || x.story || x.noCounter != null || x.unlockDialogue.Count > 0)
+                    .Where(x => x.anyOf != null || x.unlock || x.chapter || x.autoStart || x.autoFinish || x.dialogOnly || x.icon != null || x.notes != null || x.items.Count > 0 || x.startAfter != null || x.order != null || x.noteLinks != null || x.story || x.noCounter != null || x.unlockDialogue.Count > 0)
                     .ToDictionary(x => x.id, x => new { x.anyOf, x.unlock, x.chapter, x.autoStart, x.autoFinish, x.dialogOnly, x.icon, x.notes, x.items, x.startAfter, x.order, x.noteLinks, x.story, x.noCounter, x.unlockDialogue, subs = x.chapter ? x.subs : null })),
             typeof(QuestReadyRequest)),
         new RouteAction("/visitapi/quest/ready",
@@ -69,6 +69,11 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, Trader
         ext != null && ext.TryGetValue("visitapi", out var v) && v is JsonElement e && e.ValueKind == JsonValueKind.Object ? e : null;
 
     static bool Flag(JsonElement? vx, string name) => vx?.TryGetProperty(name, out var p) == true && p.ValueKind == JsonValueKind.True;
+
+    /// `visitapi.anyOf`：true = 任一目标达成即可交（老写法）；数组 = 「二选一组」的目标 id（组内任一达成算组达成，组外照旧全要；09-10）。
+    /// 原样下发（bool 或字符串数组），客户端 QuestFlags 两种都认；别的写法当没开（null，flags 表里不占位）
+    static object AnyOf(JsonElement? vx) => Flag(vx, "anyOf") ? (object)true
+        : vx?.TryGetProperty("anyOf", out var p) == true && p.ValueKind == JsonValueKind.Array ? StrList(vx, "anyOf") : null;
 
     /// 1.1 任务自带的 `isStoryQuest`（2026-09-07）：1.1 把剧情任务标在这个字段上、名字留空、不进商人的普通任务列表。
     /// 0.16 客户端不认这个字段 → 塔科夫之旅的前置任务顶着空名字出现在 Prapor 的列表里。原样下发，客户端按「剧情任务」隐藏。

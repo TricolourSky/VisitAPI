@@ -6,7 +6,7 @@ using Newtonsoft.Json.Linq;
 namespace VisitAPI.Native;
 
 /// <summary>任务 JSON 里 VisitAPI 自己的开关（`visitapi.*` + 1.1 格式的 `notes`），启动时从 /visitapi/quest/flags 拉一次（没起来就隔 5 秒再试）。
-/// anyOf=任一达成即可交；unlock=可提交时解锁商人；chapter=这条是章节；icon=章节图标 URL；notes=状态→日记 id；
+/// anyOf=任一达成即可交（true）或「二选一组」的目标 id 数组（组内任一达成算组达成、组外照旧全要，09-10）；unlock=可提交时解锁商人；chapter=这条是章节；icon=章节图标 URL；notes=状态→日记 id；
 /// autoStart/autoFinish=自动接/交（章节链）；dialogOnly=接交只能走对话；items=相关物品（G5 新增 `craft:`/`offer:` 前缀标类型）；
 /// startAfter=自制前置；order=章节显示顺序（G20，小的在前）；subs=章节的子任务表 {子任务id: 是否主线}（服务端从任务模板直读，
 /// **章节还锁着也照发** —— B14 的病根「Locked 时 _subsOf/_chapterOf 永远为空」从数据源上拔掉；G19 的主/可选也从这来）。</summary>
@@ -15,6 +15,7 @@ public static class QuestFlags
     public class Entry
     {
         public bool AnyOf, Unlock, Chapter, AutoStart, AutoFinish, DialogOnly;
+        public List<string> AnyOfGroup;   // anyOf 写成数组时的「二选一组」（目标 id）；null = 老写法 true / 没开
         public bool Story;   // 1.1 任务自带的 isStoryQuest（服务端原样下发，09-07）：不进商人的普通任务列表
         public string Icon, StartAfter;
         public double Order = double.MaxValue;
@@ -35,6 +36,8 @@ public static class QuestFlags
 
     public static Entry Get(string questId) { lock (_byQuest) return _byQuest.TryGetValue(questId ?? "", out var e) ? e : null; }
     public static bool AnyOf(string id) => Get(id)?.AnyOf == true;
+    /// 二选一组（目标 id）；空组当没写，AnyOfQuest / AnyOfVisibility 据此走组规则
+    public static List<string> AnyOfGroup(string id) { var g = Get(id)?.AnyOfGroup; return g != null && g.Count > 0 ? g : null; }
     public static bool Unlock(string id) => Get(id)?.Unlock == true;
     public static bool IsChapter(string id) => Get(id)?.Chapter == true;
     public static bool AutoStart(string id) => Get(id)?.AutoStart == true;
@@ -136,6 +139,7 @@ public static class QuestFlags
             Icon = v["icon"]?.Value<string>(), StartAfter = v["startAfter"]?.Value<string>(),
             Order = v["order"]?.Type == JTokenType.Integer || v["order"]?.Type == JTokenType.Float ? v["order"].Value<double>() : double.MaxValue
         };
+        if (v["anyOf"] is JArray grp) e.AnyOfGroup = grp.Select(x => x.Value<string>()).Where(s => !string.IsNullOrEmpty(s)).ToList();   // 二选一组（09-10）
         if (v["notes"] is JObject notes) foreach (var n in notes.Properties()) e.Notes[n.Name] = n.Value.Value<string>();
         if (v["items"] is JArray items) e.Items = items.Select(x => x.Value<string>()).Where(s => !string.IsNullOrEmpty(s)).ToList();
         if (v["subs"] is JObject subs) foreach (var s in subs.Properties()) e.Subs[s.Name] = s.Value.Value<bool>();
@@ -152,5 +156,6 @@ public static class QuestFlags
         return e;
     }
 
-    static bool On(JToken t, string name) => t[name]?.Value<bool>() == true;
+    // 只认字面 true：anyOf 现在可能是数组，Value<bool>() 碰上数组会抛、整条任务的 flags 作废（09-10）
+    static bool On(JToken t, string name) => t[name]?.Type == JTokenType.Boolean && t[name].Value<bool>();
 }

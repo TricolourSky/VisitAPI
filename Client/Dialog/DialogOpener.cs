@@ -29,7 +29,9 @@ public static class DialogOpener
         var player = GamePlayerOwner.MyPlayer;
         if (player == null) { error = "no player entity - open the dialog INSIDE the hideout or a raid"; return false; }
         // 藏身处必须用 Backend 版控制器——玩家自带的 LocalGame 版接/交只改内存不进档案（坑 #98）
-        return TryOpen(tree, player.Profile, QuestOps.Resolve(), player.InventoryController, null, forceNode, false, out error);
+        var ok = TryOpen(tree, player.Profile, QuestOps.Resolve(), player.InventoryController, null, forceNode, false, out error);
+        if (ok) InputGuard.Block();   // 09-10：对话开着时鼠标不再转玩家视角，对话屏 Close 时放开
+        return ok;
     }
 
     public static bool TryOpen(DialogTree tree, Profile profile, QuestController quests, InventoryController inventory, TraderScreensGroup tradeScreen, out string error) =>

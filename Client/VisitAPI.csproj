@@ -5,8 +5,10 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>VisitAPI</AssemblyName>
     <RootNamespace>VisitAPI</RootNamespace>
-    <Version>1.3.0</Version>
-    <!-- 1.3.0 = 大修重构（阶段一：NarrateSystem）。旧 1.2.1 源码在 E:\项目\VisitAPI Rework（只读参照）。
+    <Version>1.3.1</Version>
+    <!-- 1.3.1（09-10/11）= 二选一组（anyOf 收目标 id 数组：AnyOfQuest 组规则 + AnyOfVisibility 显示条件补丁）、触发点对话锁玩家视角（InputGuard）、
+         触发点对话背景按编辑器预览口径（每拍自己的 bg 没写就节点的、NPC 拍与「继续…」拍同登记、按文件名去重）、NarrateHideGuard 的 Cleanup 改名 Teardown。
+         1.3.0 = 大修重构（阶段一：NarrateSystem）。旧 1.2.1 源码在 E:\项目\VisitAPI Rework（只读参照）。
          实机环境 2026-09-05 起是 D:\EFT（SPT 4.1.4，SORA 定；原干净安装 D:\SPT 已不存在）；外部构建用 dotnet build -p:EftDir=<路径> 覆写。 -->
     <EftDir Condition="'$(EftDir)' == ''">D:\EFT</EftDir>
     <Managed>$(EftDir)\EscapeFromTarkov_Data\Managed</Managed>
