@@ -12,7 +12,7 @@ namespace VisitAPI;
 [BepInPlugin("com.sora.visitapi", "VisitAPI", Version)]
 public class Plugin : BaseUnityPlugin
 {
-    public const string Version = "1.3.1";
+    public const string Version = "1.3.2";
     public static Plugin Instance;
     public static ManualLogSource Log;
     public static ConfigEntry<string> Language;
@@ -29,6 +29,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> AmbientReflection;
     public static ConfigEntry<KeyboardShortcut> CoordKey;
     public static ConfigEntry<KeyboardShortcut> AbortVisitKey;
+    public static ConfigEntry<bool> CallBadge;
 
     void Awake()
     {
@@ -61,6 +62,8 @@ public class Plugin : BaseUnityPlugin
             "打印当前相机坐标到日志（.dlg 触发点填坐标用，与判距同基准）。默认不绑 | Log the camera position for trigger authoring (unbound by default)");
         AbortVisitKey = Config.Bind("Debug", "AbortVisitKey", KeyboardShortcut.Empty,
             "强制退出卡住的商人访问。默认不绑 | Force-exit a stuck trader visit (unbound by default)");
+        CallBadge = Config.Bind("Badge", "CallBadge", true,
+            "商人有话要说时的金色电话角标（商人卡片右上 + 顶栏昵称旁，1.1 同款）| Gold phone badge on trader cards and next to the nickname when a trader has something to say");
         Loc.Mode = Language.Value;
         Language.SettingChanged += delegate { Loc.Mode = Language.Value; };
         Loc.GameCulture = () => LocalizationManager.Instance?.Culture;

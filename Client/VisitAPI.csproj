@@ -5,8 +5,12 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>VisitAPI</AssemblyName>
     <RootNamespace>VisitAPI</RootNamespace>
-    <Version>1.3.1</Version>
-    <!-- 1.3.1（09-10/11）= 二选一组（anyOf 收目标 id 数组：AnyOfQuest 组规则 + AnyOfVisibility 显示条件补丁）、触发点对话锁玩家视角（InputGuard）、
+    <Version>1.3.2</Version>
+    <!-- 1.3.2（09-14/15，SORA 跑自己的章节时暴露）= ① 剧情横幅/音效在对话屏开着时先攒着、关屏后补放（ChapterNotify.Display + NarrateSafety 关屏 Flush）——
+         对话里接/交任务的横幅原来全被对话屏盖住，几秒后自己消失，玩家什么都没看见；② 「已开始」判定统一走 ChapterStates.Begun，
+         别再用 `>= EQuestStatus.Started`（AvailableAfter=9 排在 Success 后面，等定时的任务会被当成已开始，它的目标提前出现在章节页）；
+         ③ 目标行的「去找 X」按钮改成按行来：编辑器给某一行写了 `<条件id> talk` 文案才出按钮、用作者的字，一行都没写保持老行为。
+         1.3.1（09-10/11）= 二选一组（anyOf 收目标 id 数组：AnyOfQuest 组规则 + AnyOfVisibility 显示条件补丁）、触发点对话锁玩家视角（InputGuard）、
          触发点对话背景按编辑器预览口径（每拍自己的 bg 没写就节点的、NPC 拍与「继续…」拍同登记、按文件名去重）、NarrateHideGuard 的 Cleanup 改名 Teardown。
          1.3.0 = 大修重构（阶段一：NarrateSystem）。旧 1.2.1 源码在 E:\项目\VisitAPI Rework（只读参照）。
          实机环境 2026-09-05 起是 D:\EFT（SPT 4.1.4，SORA 定；原干净安装 D:\SPT 已不存在）；外部构建用 dotnet build -p:EftDir=<路径> 覆写。 -->

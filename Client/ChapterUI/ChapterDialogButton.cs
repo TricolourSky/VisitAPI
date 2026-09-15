@@ -26,12 +26,26 @@ namespace VisitAPI.ChapterUI
 
         public static string Label(DialogTree tree) => Loc.Pick("去找 " + (tree.DisplayName ?? tree.TraderId), "VISIT " + (tree.DisplayName ?? tree.TraderId));
 
-        public static void Bind(MainQuestTaskView row, Quest quest, QuestController quests)
+        /// <summary>09-14（SORA：三行目标都挂了「去找 SORA」，只想留在一行、字还要能改）：编辑器给某一行目标写「去找商人提示」= 文案键
+        /// `<条件id> talk`（中英各一份，随任务库文案进游戏）。这条任务有任何一行写了 → 只有写了的行出按钮、用作者的字；一行都没写 → 老行为。
+        /// 文案键缺失时 Localized() 原样吐回键名，拿它当「没写」。</summary>
+        public static string TalkText(Condition cond)
+        {
+            if (cond == null) return null;
+            var key = cond.id + " talk"; var s = key.Localized();
+            return string.IsNullOrEmpty(s) || s == key ? null : s;
+        }
+        static bool AnyTalkText(Quest quest) =>
+            quest.Template?.Conditions != null && quest.Template.Conditions.TryGetValue(EQuestStatus.AvailableForFinish, out var cc) && cc.Any(c => TalkText(c) != null);
+
+        public static void Bind(MainQuestTaskView row, Quest quest, QuestController quests, Condition cond = null)
         {
             var c = row._dialogButtonsContainer; if (c == null) return;
             var active = quest.QuestStatus == EQuestStatus.Started || quest.QuestStatus == EQuestStatus.AvailableForFinish;
             var tree = active ? TraderFor(quest) : null;
-            var lobby = tree != null && !Raid.Now && c._visitTraderButton != null;
+            var any = cond != null && AnyTalkText(quest);
+            var custom = any ? TalkText(cond) : null;
+            var lobby = tree != null && !Raid.Now && c._visitTraderButton != null && (!any || custom != null);
             c.gameObject.SetActive(lobby);
             // 这批 1.1 零件序列化在 0.16 下对不上，第一次激活可能 NRE；异常顺着 FillList 抛出去会把后面填日记的活废掉，所以包起来
             if (c._visitTraderButton != null)
@@ -39,7 +53,7 @@ namespace VisitAPI.ChapterUI
                 try
                 {
                     c._visitTraderButton.gameObject.SetActive(lobby);
-                    if (lobby) { c._visitTraderButton.SetRawText(Label(tree), 14); c._visitTraderButton.OnClick.RemoveAllListeners(); c._visitTraderButton.OnClick.AddListener(() => Open(tree, ChapterTab.Profile, quests, ChapterTab.Inventory)); }
+                    if (lobby) { c._visitTraderButton.SetRawText(custom ?? Label(tree), 14); c._visitTraderButton.OnClick.RemoveAllListeners(); c._visitTraderButton.OnClick.AddListener(() => Open(tree, ChapterTab.Profile, quests, ChapterTab.Inventory)); }
                 }
                 catch (System.Exception e)
                 {

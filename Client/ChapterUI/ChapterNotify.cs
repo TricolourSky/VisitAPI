@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using Comfort.Common;
 using EFT.Communications;
@@ -31,19 +33,38 @@ public static class ChapterNotify
     /// 而且作者常给子任务起开发用内部名，露出去就剧透。音效照 1.1 反汇编的表（DEV_NOTES #73）。
     public static void Show(Quest quest, bool chapter, string line, EUISoundType sound)
     {
-        if (!Singleton<NotificationManager>.Instantiated) return;
-        var st = quest.QuestStatus;
+        if (!Singleton<NotificationManager>.Instantiated) { Plugin.Log.LogWarning("[banner] NotificationManager 不在，横幅出不了：" + line); return; }
+        var st = quest.QuestStatus;   // 现在就定格：排队等关屏期间状态可能又往前走
         var chapterId = chapter ? quest.Id : QuestFlags.ChapterOf(quest.Id);
+        var title = ChapterTitle(quest, chapter, chapterId);
         var clip = chapter ? (st == EQuestStatus.Started ? "story_quest_chapter_start" : st == EQuestStatus.Success ? "story_quest_chapter_end" : null)
                            : (st == EQuestStatus.Success ? "story_quest_task_done_and_reward" : ChapterStates.Failed(st) ? "story_quest_task_failed" : null);
-        NotificationManager.DisplayNotification(new ChapterBanner
+        var status = st == EQuestStatus.Success || st == EQuestStatus.AvailableForFinish ? ChapterBanner.EStatus.Success : ChapterStates.Failed(st) ? ChapterBanner.EStatus.Fail : ChapterBanner.EStatus.Started;
+        Display(() => NotificationManager.DisplayNotification(new ChapterBanner
         {
-            Title = ChapterTitle(quest, chapter, chapterId), Text = line, IsChapter = chapter,
+            Title = title, Text = line, IsChapter = chapter,
             Sprite = ChapterImages.Cached(QuestFlags.Get(chapterId)?.Icon),
             Clip = clip != null ? ChapterBundle.Clip(clip) : null, Silent = false,
-            Status = st == EQuestStatus.Success || st == EQuestStatus.AvailableForFinish ? ChapterBanner.EStatus.Success : ChapterStates.Failed(st) ? ChapterBanner.EStatus.Fail : ChapterBanner.EStatus.Started,
-            SoundType = sound, Duration = ENotificationDurationType.Long
-        });
+            Status = status, SoundType = sound, Duration = ENotificationDurationType.Long
+        }), $"{(chapter ? "章节" : "子任务")}「{title}」{line}（{st}）");
+    }
+
+    /// <summary>09-14（SORA 实机：对话里接/交了好几条任务，横幅和音效一个没见着）：接交都发生在对话屏开着的时候，横幅那几秒
+    /// 被对话屏盖住、关屏早没了。对话屏开着就先记账，关屏（NarrateSafety.DialogScreenCloseGuard）后补放；每一步 LogInfo 留证（坑 #98 规矩）。
+    /// 非剧情的 VisitAPI 黑条（QuestNotify）也走这里。</summary>
+    static readonly List<Action> _deferred = new();
+    public static void Display(Action show, string what)
+    {
+        if (DialogScreenTracker.Open) { _deferred.Add(show); Plugin.Log.LogInfo($"[banner] 对话屏开着，先记着（第 {_deferred.Count} 条）：{what}"); return; }
+        Plugin.Log.LogInfo("[banner] 显示：" + what);
+        show();
+    }
+    public static void FlushDeferred()
+    {
+        if (_deferred.Count == 0) return;
+        var list = _deferred.ToArray(); _deferred.Clear();
+        Plugin.Log.LogInfo($"[banner] 对话屏关了，补放 {list.Length} 条横幅");
+        foreach (var show in list) { try { show(); } catch (Exception e) { Plugin.Log.LogWarning("[banner] 补放失败: " + e.Message); } }
     }
 
     /// 横幅标题：一律取所属章节的任务名。捞不到（flags 没到/章节不在书里）才退回这条任务自己的名字——总比空标题强
@@ -113,13 +134,13 @@ public static class QuestNotify
         else return;
         // 章节的子任务走 1.1 章节横幅（子任务底图+对勾）；其余 VisitAPI 任务走自家黑条
         if (sub) { ChapterNotify.Show(quest, false, status, sound); return; }
-        NotificationManager.DisplayNotification(new VisitBanner
+        ChapterNotify.Display(() => NotificationManager.DisplayNotification(new VisitBanner
         {
             Text = $"<color={Name}>{quest.Template.Name?.Trim()}</color>\n<size=88%><color={hue}>{status}</color></size>",
             SoundType = sound,
             Duration = ENotificationDurationType.Long,
             ShowImmediately = true
-        });
+        }), $"黑条「{quest.Template.Name?.Trim()}」{status}");
     }
 
     static void ReportReady(string questId) => VisitHttp.Post("/visitapi/quest/ready", "{\"questId\":\"" + questId + "\"}", "[quest] ready");

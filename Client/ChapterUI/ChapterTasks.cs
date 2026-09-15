@@ -61,7 +61,7 @@ namespace VisitAPI.ChapterUI
             {
                 ids.Add(cond.id.ToString());
                 var row = SpawnRow(pool, quest, cond, chapterOver, null);
-                ChapterDialogButton.Bind(row, quest, _quests);   // 「去找商人」（DEV_NOTES #71/#75/#86）
+                ChapterDialogButton.Bind(row, quest, _quests, cond);   // 「去找商人」（DEV_NOTES #71/#75/#86）；09-14 起按行看 `<条件id> talk` 文案决定出不出、写什么字
             }
             if (list._unreadWarning != null) list._unreadWarning.SetActive(ReadState.AnyUnread(ids));
         }

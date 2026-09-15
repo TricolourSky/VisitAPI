@@ -14,6 +14,12 @@ namespace VisitAPI.ChapterUI
         public static bool Failed(EQuestStatus st) =>
             st == EQuestStatus.Fail || st == EQuestStatus.MarkedAsFailed || st == EQuestStatus.FailRestartable || st == EQuestStatus.Expired;
 
+        /// <summary>「已经开始了」的状态集合（09-14）：进行中 / 可提交 / 完成 / 失败家族。
+        /// ⚠️ 别写 `>= EQuestStatus.Started`：枚举里 AvailableAfter(9，定时没到) 排在 Success 后面，用大小比较会把
+        /// 「等定时的任务」当成已开始——SORA 09-14 实机：章节页展开后，30 分钟没到的「联络」目标提前列出来了。</summary>
+        public static bool Begun(EQuestStatus st) =>
+            st == EQuestStatus.Started || st == EQuestStatus.AvailableForFinish || st == EQuestStatus.Success || Failed(st);
+
         /// 目标行的五态（1.1 MainQuestTaskView.EConditionStatus 同款）：
         /// 任务失败 → Failed；任务完成或该条件已达成 → Done；章节收尾了这条还没着落 → Skipped；其余 Active
         public enum ERow { Active, Done, Failed, Skipped }

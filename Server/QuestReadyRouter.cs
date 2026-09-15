@@ -34,16 +34,16 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, Trader
         new RouteAction("/visitapi/quest/flags",
             async (url, info, sessionId, output, ct) =>
                 httpResponse.GetBody(templates.Quests.Values
-                    .Select(q => (id: q.Id.ToString(), vx: Visit(q.ExtensionData), notes: Notes(q), subs: Subs(q), story: Story(q.ExtensionData), noCounter: NoCounter(q)))
+                    .Select(q => (id: q.Id.ToString(), vx: Visit(q.ExtensionData), notes: Notes(q), subs: Subs(q), story: Story(q.ExtensionData), noCounter: NoCounter(q), talkTo: TalkTo(q, templates)))
                     .Select(x => new
                     {
                         x.id, x.notes, anyOf = AnyOf(x.vx), unlock = Flag(x.vx, "unlockTraderOnReady"), chapter = Flag(x.vx, "chapter"),
                         autoStart = Flag(x.vx, "autoStart"), autoFinish = Flag(x.vx, "autoFinish"), dialogOnly = Flag(x.vx, "dialogOnly"), icon = Str(x.vx, "icon"), items = Items(x.vx),
                         startAfter = Str(x.vx, "startAfter"), order = Num(x.vx, "order"), noteLinks = Obj(x.vx, "noteLinks"), x.subs, x.story, x.noCounter,
-                        unlockDialogue = StrList(x.vx, "unlockDialogue")
+                        unlockDialogue = StrList(x.vx, "unlockDialogue"), x.talkTo
                     })
-                    .Where(x => x.anyOf != null || x.unlock || x.chapter || x.autoStart || x.autoFinish || x.dialogOnly || x.icon != null || x.notes != null || x.items.Count > 0 || x.startAfter != null || x.order != null || x.noteLinks != null || x.story || x.noCounter != null || x.unlockDialogue.Count > 0)
-                    .ToDictionary(x => x.id, x => new { x.anyOf, x.unlock, x.chapter, x.autoStart, x.autoFinish, x.dialogOnly, x.icon, x.notes, x.items, x.startAfter, x.order, x.noteLinks, x.story, x.noCounter, x.unlockDialogue, subs = x.chapter ? x.subs : null })),
+                    .Where(x => x.anyOf != null || x.unlock || x.chapter || x.autoStart || x.autoFinish || x.dialogOnly || x.icon != null || x.notes != null || x.items.Count > 0 || x.startAfter != null || x.order != null || x.noteLinks != null || x.story || x.noCounter != null || x.unlockDialogue.Count > 0 || x.talkTo != null)
+                    .ToDictionary(x => x.id, x => new { x.anyOf, x.unlock, x.chapter, x.autoStart, x.autoFinish, x.dialogOnly, x.icon, x.notes, x.items, x.startAfter, x.order, x.noteLinks, x.story, x.noCounter, x.unlockDialogue, x.talkTo, subs = x.chapter ? x.subs : null })),
             typeof(QuestReadyRequest)),
         new RouteAction("/visitapi/quest/ready",
             async (url, info, sessionId, output, ct) =>
@@ -109,6 +109,28 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, Trader
     static List<string> StrList(JsonElement? vx, string name) =>
         vx?.TryGetProperty(name, out var p) == true && p.ValueKind == JsonValueKind.Array
             ? p.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()).ToList() : new List<string>();
+
+    /// 1.1 任务自带的 `dialogueId`（任务对话模板）属于哪位商人（09-12，电话角标）：对话表里该模板的 MainTrader。
+    /// 剧情任务的 traderId 常常是 1.1 的剧情商人（adapt 临时改指 Prapor），真正要去说话的商人只能从任务对话上看——
+    /// 迷宫的「向商人们打听」任务挂在剧情商人名下，它的对话 68e3b0cf 却是 Jaeger 的。对话表按 id 建一次索引。
+    /// 09-15 发布前审查：SPT 的 Quest 模型自己声明了 `[JsonPropertyName("dialogueId")] MongoId? DialogueId`，这个键反序列化时
+    /// 绑到属性上、进不了 ExtensionData —— 原来从 ExtensionData 取，永远拿不到，角标一律退回任务自己的 traderId。
+    static Dictionary<string, string> _dialogTrader;
+    static string TalkTo(Quest q, TemplateTable templates)
+    {
+        var dialogueId = q.DialogueId?.ToString();   // MongoId 为空时 ToString() 给空串
+        if (string.IsNullOrEmpty(dialogueId)) return null;
+        // 索引建一次就够（所有对话加载器都在 OnLoad 阶段灌完，和 DialogueReplayRouter 同一前提）；
+        // 09-13 审查：原来「查不到就重建」——dialogueId 不在表里的任务每次拉 flags 都把整张对话表重扫一遍
+        var map = _dialogTrader;
+        if (map == null)
+        {
+            map = new Dictionary<string, string>();
+            foreach (var el in templates.Dialogue?.Elements ?? new List<TraderDialogElement>()) map[el.Id.ToString()] = el.MainTrader.ToString();
+            _dialogTrader = map;
+        }
+        return map.TryGetValue(dialogueId, out var trader) && trader.Length == 24 ? trader : null;
+    }
 
     /// 1.1 条件上的 `showCounter:false`（09-08）：「与 X 交谈」这类 GlobalVariableValue 目标在 1.1 里不画计数/进度条；
     /// 0.16 的 Condition 类没这个字段，从条件 JSON 里捞出来下发条件 id 列表，客户端目标行按它不画进度条。没有就 null（省流量）。

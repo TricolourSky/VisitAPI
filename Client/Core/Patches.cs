@@ -35,6 +35,7 @@ public static class VisitPatches
         typeof(QuestNotify), typeof(QuestConditionNotify), typeof(ChapterBanner.SoundPatch),
         typeof(StoryList.SideList), typeof(StoryList.TraderList), typeof(StoryList.TraderQuestList),
         typeof(AnyOfQuest), typeof(AnyOfVisibility), typeof(DialogOnlyButton),   // 09-10：AnyOfVisibility = 二选一组的显示条件
+        typeof(TraderBadge.CardShow), typeof(TraderBadge.CardUpdate), typeof(TraderBadge.TaskBarAwake), typeof(TraderBadge.ScreenChanged),   // 09-12：1.1 的金色电话角标（商人卡片 + 顶栏）
         // 2026-09-05：光影大修的 5 组取证探针 + 现场取证器 NarrateDiag 已随大修结束拆除，
         // 代码封存在 Narrate\NarrateDiag.cs.parked（要再取证就改回 .cs 并把这几行加回来）。
         // 同批封存：DecalArray.cs（坑 #114 已判作废）、PostTransplant.cs（补偿模式专用）。

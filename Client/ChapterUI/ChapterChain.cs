@@ -47,27 +47,65 @@ public static class ChapterChain
         Controller = qc; QuestFlags.MarkStory(quest);
         if (QuestFlags.IsStory(quest.Id)) ChapterEvents.Raise();   // 只有剧情家族才值得章节屏重画一次
         var st = quest.QuestStatus;
-        if (AutoReady(qc, quest.Id) && st == EQuestStatus.AvailableForStart && ChapterOpen(qc, quest.Id)) QuestOps.Accept(qc, quest, "chain");
+        if (AutoReady(qc, quest.Id) && st == EQuestStatus.AvailableForStart && ChapterOpen(qc, quest.Id)) AutoAccept(qc, quest);
         if ((QuestFlags.IsChapter(quest.Id) || QuestFlags.AutoFinish(quest.Id)) && st == EQuestStatus.AvailableForFinish) QuestOps.Finish(qc, quest, "chain");
         // 章节跟着子任务走：任一子任务开始就接章节。子任务先到（状态变化）或章节先到（登录整本扫）都接得住
         var chapterId = QuestFlags.IsChapter(quest.Id) ? quest.Id : QuestFlags.ChapterOf(quest.Id);
         var chapter = chapterId == null ? null : chapterId == quest.Id ? quest : qc.Quests.GetConditional(chapterId);
         if (chapter != null && chapter.QuestStatus == EQuestStatus.AvailableForStart
-            && QuestFlags.SubsOf(chapterId).Any(id => qc.Quests.GetConditional(id)?.QuestStatus >= EQuestStatus.Started)) QuestOps.Accept(qc, chapter, "chain");
+            && QuestFlags.SubsOf(chapterId).Any(id => ChapterUI.ChapterStates.Begun(qc.Quests.GetConditional(id)?.QuestStatus ?? EQuestStatus.Locked))) AutoAccept(qc, chapter);
         // 章节刚开门：把卡在 ChapterOpen 上等开门的 autoStart 子任务放出来（它们自己不会再收到状态变化事件，得由章节主动点名）
-        if (chapter != null && chapter.QuestStatus >= EQuestStatus.Started)
+        // 09-14：「已开始」一律问 ChapterStates.Begun，别用 >=（AvailableAfter=9 排在 Success 后面，等定时的任务会被当成已开始）
+        if (chapter != null && ChapterUI.ChapterStates.Begun(chapter.QuestStatus))
             foreach (var id in QuestFlags.SubsOf(chapterId))
             {
                 var sub = qc.Quests.GetConditional(id);
-                if (sub != null && AutoReady(qc, id) && sub.QuestStatus == EQuestStatus.AvailableForStart) QuestOps.Accept(qc, sub, "chain");
+                if (sub != null && AutoReady(qc, id) && sub.QuestStatus == EQuestStatus.AvailableForStart) AutoAccept(qc, sub);
             }
         // startAfter 是跨任务前置：前置完成时点名等它的任务（可能在别的章节，上面按本章节扫的循环够不着；09-07 终审）
         if (st == EQuestStatus.Success)
             foreach (var id in QuestFlags.WaitingOn(quest.Id))
             {
                 var waiting = qc.Quests.GetConditional(id);
-                if (waiting != null && waiting.QuestStatus == EQuestStatus.AvailableForStart && ChapterOpen(qc, id)) QuestOps.Accept(qc, waiting, "chain");
+                if (waiting != null && waiting.QuestStatus == EQuestStatus.AvailableForStart && ChapterOpen(qc, id)) AutoAccept(qc, waiting);
             }
+    }
+
+    /// <summary>自动接的唯一出口：先按引擎自己的判据把 AvailableForStart 里的 Quest 型前置再核一遍（09-12 迷宫实机）。
+    /// 起因：SPT Developer 版本的档案建档时把库里**所有**任务一律标成「可接」（`QuestHelper.AddAllQuestsToProfile`——档案里六条迷宫任务的
+    /// 可接时间戳全等于建档那一秒），客户端拿档案状态当初始状态 → 前置没完成的 Jaeger 任务一登录就是「可接」→ 自动链当场接下 →
+    /// SPT 接取时照发 Started 奖励，两张门禁卡登录一秒就寄到了、16 小时定时器形同虚设。
+    /// 判据照抄 `ConditionsConnectorsManager` 里 ConditionQuest 的检查：目标任务状态在要求表里；带 `availableAfter` 的还要过了
+    /// 「目标进入该状态的时间 + availableAfter」。没到就不接、记一条日志（同一任务同一原因只记一次）；到点后引擎自己的定时器会再发状态事件。</summary>
+    static readonly System.Collections.Generic.Dictionary<string, string> _held = new();
+    static void AutoAccept(QuestController qc, Quest quest)
+    {
+        if (!PrereqsMet(qc, quest, out var why))
+        {
+            if (!_held.TryGetValue(quest.Id, out var last) || last != why) { _held[quest.Id] = why; Plugin.Log.LogInfo($"[chain] {quest.Id} 引擎说可接，但前置没到，不自动接：{why}"); }
+            return;
+        }
+        _held.Remove(quest.Id);
+        QuestOps.Accept(qc, quest, "chain");
+    }
+
+    static bool PrereqsMet(QuestController qc, Quest quest, out string why)
+    {
+        why = null;
+        if (quest.Template?.Conditions == null || !quest.Template.Conditions.TryGetValue(EQuestStatus.AvailableForStart, out var list) || list == null) return true;
+        foreach (var c in list)
+        {
+            if (c is not ConditionQuest cq || string.IsNullOrEmpty(cq.target)) continue;
+            var target = qc.Quests.GetConditional(cq.target);
+            if (target == null) { why = $"前置 {cq.target} 不在任务书里"; return false; }
+            var wanted = cq.statuses ?? new EQuestStatus[0];
+            if (!wanted.Contains(target.QuestStatus)) { why = $"前置 {cq.target} 现在是 {target.QuestStatus}，要求 {string.Join("/", wanted)}"; return false; }
+            if (cq.availableAfter <= 0) continue;
+            if (!target.StatusStartTimestamps.TryGetValue(target.QuestStatus, out var at)) { why = $"前置 {cq.target} 没有进入 {target.QuestStatus} 的时间戳，定时 {cq.availableAfter}s 无从起算"; return false; }
+            var due = DateTimeExtensions.UniversalDateTimeFromUnixTime(at).AddSeconds(cq.availableAfter);
+            if (DateTimeExtensions.UtcNow < due) { why = $"定时未到（前置 {cq.target} 完成后 {cq.availableAfter}s），还差 {(due - DateTimeExtensions.UtcNow).TotalSeconds:0}s"; return false; }
+        }
+        return true;
     }
 
     /// <summary>子任务的「自动接」是章节内部的接力棒：所属章节没开始就先别发。
@@ -78,7 +116,7 @@ public static class ChapterChain
         var chapterId = QuestFlags.ChapterOf(questId);
         if (chapterId == null) return true;                       // 不是谁的子任务：老行为不变
         var chapter = qc.Quests.GetConditional(chapterId);
-        return chapter != null && chapter.QuestStatus >= EQuestStatus.Started;
+        return chapter != null && ChapterUI.ChapterStates.Begun(chapter.QuestStatus);
     }
 
     /// <summary>这条任务够不够格「自动接」。标了 startAfter 就等指定任务 == Success —— VisitAPI 自己的前置，战局内也算数。

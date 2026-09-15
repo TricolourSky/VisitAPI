@@ -30,6 +30,8 @@ public static class DialogScreenCloseGuard
     {
         DialogScreenTracker.Clear();
         InputGuard.Release();   // 09-10：触发点开的对话锁过玩家视角的，这里放开
+        // 09-14：对话期间攒下的剧情横幅这时候补放（ChapterNotify.Display 在对话屏开着时只记账）
+        try { ChapterNotify.FlushDeferred(); } catch (Exception e) { Plugin.Log.LogWarning("[banner] 关屏补放横幅出错: " + e.Message); }
         if (__exception == null) Plugin.Log.LogInfo("[dlg] 对话屏关闭");
         else Plugin.Log.LogWarning("[narrate] <<< dialog screen close faulted (swallowed): " + __exception.Message);
         return null;

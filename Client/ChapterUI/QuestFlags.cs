@@ -25,6 +25,7 @@ public static class QuestFlags
         public Dictionary<string, List<NoteLink>> NoteLinks = new();   // 日记 id → 这条日记挂的相关物品（1.1 日记表的 links，09-07）
         public HashSet<string> NoCounter = new();   // 1.1 `showCounter:false` 的条件 id：目标行不画计数/进度条（09-08）
         public List<string> UnlockDialogue = new(); // 这条任务完成后开放对话（访问）的商人（1.1 TraderDialogueUnlock 奖励的替身，09-08）
+        public string TalkTo;   // 这条任务的任务对话（dialogueId）属于哪位商人（服务端查对话表下发，09-12）：电话角标挂谁头上
     }
 
     /// 1.1 日记表里一件相关物品：type = item/offer/craft，quests = 哪些任务进行中时算「现在还用得上」（GetActiveLinks 的口径）
@@ -49,6 +50,9 @@ public static class QuestFlags
     /// G19：这条子任务在章节里算不算主线（章节 ConditionQuest 的 IsNecessary；没登记的按主线算）
     public static bool SubNecessary(string chapterId, string subId) =>
         !(Get(chapterId)?.Subs.TryGetValue(subId ?? "", out var n) == true) || n;
+
+    /// 这条任务的任务对话属于哪位商人（电话角标用，09-12）；没登记就 null
+    public static string TalkTo(string id) { var s = Get(id)?.TalkTo; return string.IsNullOrEmpty(s) ? null : s; }
 
     /// 这条目标要不要画计数/进度条：1.1 标了 showCounter:false 的（「与 X 交谈」一族）不画（09-08）
     public static bool HideCounter(string questId, string condId) => Get(questId)?.NoCounter.Contains(condId ?? "") == true;
@@ -136,7 +140,7 @@ public static class QuestFlags
         {
             AnyOf = On(v, "anyOf"), Unlock = On(v, "unlock"), Chapter = On(v, "chapter"),
             AutoStart = On(v, "autoStart"), AutoFinish = On(v, "autoFinish"), DialogOnly = On(v, "dialogOnly"), Story = On(v, "story"),
-            Icon = v["icon"]?.Value<string>(), StartAfter = v["startAfter"]?.Value<string>(),
+            Icon = v["icon"]?.Value<string>(), StartAfter = v["startAfter"]?.Value<string>(), TalkTo = v["talkTo"]?.Value<string>(),
             Order = v["order"]?.Type == JTokenType.Integer || v["order"]?.Type == JTokenType.Float ? v["order"].Value<double>() : double.MaxValue
         };
         if (v["anyOf"] is JArray grp) e.AnyOfGroup = grp.Select(x => x.Value<string>()).Where(s => !string.IsNullOrEmpty(s)).ToList();   // 二选一组（09-10）

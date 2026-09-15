@@ -27,7 +27,7 @@ namespace VisitAPI.ChapterUI
                 // 1.1 实证：「塔科夫之旅」里有一条「(已失败)…」红叉目标，章节右上角照样是「完成」。
                 // 想让一章真的失败，就给章节任务自己写 Fail 条件、或在对话里 setstatus。
                 if (ChapterStates.Failed(Quest.QuestStatus)) return State.Failed;
-                return Quest.QuestStatus >= EQuestStatus.Started || Subs.Any(s => s.QuestStatus >= EQuestStatus.Started) ? State.Active : State.Unavailable;
+                return ChapterStates.Begun(Quest.QuestStatus) || Subs.Any(s => ChapterStates.Begun(s.QuestStatus)) ? State.Active : State.Unavailable;
             }
         }
 
@@ -44,7 +44,7 @@ namespace VisitAPI.ChapterUI
             var active = Subs.Where(s => s.QuestStatus == EQuestStatus.Started || s.QuestStatus == EQuestStatus.AvailableForFinish).ToList();
             var prereq = new HashSet<string>(active.SelectMany(Prerequisites));
             IEnumerable<Quest> shown = all || over
-                ? Subs.Where(s => s.QuestStatus >= EQuestStatus.Started)
+                ? Subs.Where(s => ChapterStates.Begun(s.QuestStatus))   // 09-14：等定时的（AvailableAfter）不算开始，别把它的目标提前列出来
                 : Subs.Where(s => active.Contains(s) || (s.QuestStatus == EQuestStatus.Success && prereq.Contains(s.Id)));
             foreach (var s in shown.Reverse())
             {
@@ -77,8 +77,8 @@ namespace VisitAPI.ChapterUI
             {
                 var e = QuestFlags.Get(q.Id); var notes = e?.Notes; if (notes == null) continue;
                 var st = NoteStatus(q);
-                if (st >= EQuestStatus.Started && notes.TryGetValue("Started", out var a)) yield return (a, a.Localized(), q, Links(e, a, q));
-                if (st >= EQuestStatus.Started && q.Template.Conditions.TryGetValue(EQuestStatus.AvailableForFinish, out var cc))
+                if (ChapterStates.Begun(st) && notes.TryGetValue("Started", out var a)) yield return (a, a.Localized(), q, Links(e, a, q));
+                if (ChapterStates.Begun(st) && q.Template.Conditions.TryGetValue(EQuestStatus.AvailableForFinish, out var cc))
                     foreach (var c in cc)
                         if (notes.TryGetValue("cond:" + c.id, out var n) && (st == EQuestStatus.Success || q.IsConditionDone(c)))
                             yield return (n, n.Localized(), q, Links(e, n, q));
