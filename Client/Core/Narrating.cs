@@ -6,9 +6,20 @@ namespace VisitAPI.Native;
 
 public static class Narrating
 {
+    public const string WorldObjectName = "NarrateWorld";
+
     public static bool Now =>
         (TarkovApplication.Exist(out var app) && app.NarrateControllerAccess != null && app.NarrateControllerAccess.GameExist)
-        || (Singleton<GameWorld>.Instantiated && Singleton<GameWorld>.Instance is NarrateGameWorld);
+        || (Singleton<GameWorld>.Instantiated && IsVisitWorld(Singleton<GameWorld>.Instance));
+
+    public static bool IsVisitWorld(GameWorld world)
+    {
+        if (world == null) return false;
+        if (world is NarrateGameWorld) return true;
+        if (TarkovApplication.Exist(out var app) && app.NarrateControllerAccess != null && ReferenceEquals(app.NarrateControllerAccess._gameWorld, world)) return true;
+        try { return world.name == WorldObjectName; }
+        catch { return false; }
+    }
 }
 
 public static class Raid

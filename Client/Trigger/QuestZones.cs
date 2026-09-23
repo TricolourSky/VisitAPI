@@ -247,7 +247,7 @@ public static class QuestZoneSpawn
     {
         try
         {
-            if (__instance is NarrateGameWorld || Narrating.Now) return;
+            if (Narrating.IsVisitWorld(__instance) || Narrating.Now) return;
             QuestZones.Spawn(__instance);
         }
         catch (Exception e) { Plugin.Log.LogError("[zones] 生成任务区域失败（战局不受影响）: " + e); }

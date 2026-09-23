@@ -23,6 +23,7 @@ public static class VisitPatches
         typeof(NarrateChoiceWindow),
         typeof(NarrateAudioGuard), typeof(DialogScreenCloseGuard), typeof(DialogScreenTracker), typeof(WhitelistPatch),
         typeof(FirGuard), typeof(NarrateNpcGuard),
+        typeof(NarrateLocationIdOnAwake), typeof(NarrateLocationIdOnStart),
         typeof(TalkButton),
         typeof(NarrateLoadingShow), typeof(NarrateLoadingClose),
         typeof(ChapterTab), typeof(ChapterTab.ShowPatch),

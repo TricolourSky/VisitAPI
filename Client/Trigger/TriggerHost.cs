@@ -22,7 +22,7 @@ public static class TriggerHost
         InputGuard.Tick();
         if (!Singleton<GameWorld>.Instantiated) { _spawnedFor = null; return; }
         var world = Singleton<GameWorld>.Instance;
-        if (world is NarrateGameWorld || ReferenceEquals(world, _spawnedFor)) return;
+        if (Narrating.IsVisitWorld(world) || ReferenceEquals(world, _spawnedFor)) return;
         var locationId = world.LocationId ?? "";
         if (locationId.Length == 0) return;
         var stale = 0;
