@@ -5,12 +5,10 @@ using UnityEngine;
 
 namespace VisitAPI.ChapterUI
 {
-    /// <summary>章节屏·日记区。正式版：默认只显示最新一条（短日记），点右上角展开切完整列表。
-    /// G9：完整列表池化增量——本次会话里新解锁的日记淡入 + 滚动条自动落底；1.1 的 _scroll/_mainCanvasGroup 两个零引用槽位就此接上。</summary>
     public partial class MainQuestTabView
     {
-        readonly Dictionary<string, HashSet<string>> _seenNotes = new();   // 章节id → 本会话已见过的日记id（判"哪条是新来的"）
-        readonly List<(string id, MainQuestNoteView v)> _noteViews = new();   // 屏上活着的日记行：4 秒全读/悬停后集中刷绿标
+        readonly Dictionary<string, HashSet<string>> _seenNotes = new();
+        readonly List<(string id, MainQuestNoteView v)> _noteViews = new();
         List<string> _noteIds = new();
         bool _fullHistory;
 
@@ -24,10 +22,10 @@ namespace VisitAPI.ChapterUI
                 TmpFix.Set(_shortHistoryView._text, notes.Count > 0 ? notes.Last().text : "");
                 FillLinks(_shortHistoryView._itemsView, notes.Count > 0 ? notes.Last().links : null);
             }
-            RefreshNoteUnread();   // 正式版：外层 `!` 要打开日记逐条看过才消，短日记本身不响应悬停
+            RefreshNoteUnread();
             var hist = _historyView; if (hist == null || hist._noteViewTemplate == null || hist._container == null) return;
             hist.gameObject.SetActive(_fullHistory);
-            if (!_seenNotes.TryGetValue(ch.Quest.Id, out var seen)) { seen = _seenNotes[ch.Quest.Id] = new HashSet<string>(_noteIds); }   // 首见这一章：全部当旧的，不闪
+            if (!_seenNotes.TryGetValue(ch.Quest.Id, out var seen)) { seen = _seenNotes[ch.Quest.Id] = new HashSet<string>(_noteIds); }
             var pool = ViewPool.For(hist._container, hist._noteViewTemplate.gameObject);
             pool.ReleaseAll();
             _noteViews.Clear();
@@ -37,7 +35,7 @@ namespace VisitAPI.ChapterUI
                 var v = pool.Acquire().GetComponent<MainQuestNoteView>(); if (v == null) continue;
                 _noteViews.Add((id, v));
                 TmpFix.Set(v._text, text);
-                FillLinks(v._itemsView, links);   // 每条日记下面挂它自己的相关物品（1.1 日记表 links + 任务明写的 items）
+                FillLinks(v._itemsView, links);
                 if (v._unreadWarning != null) v._unreadWarning.alpha = ReadState.IsRead(id) ? 0 : 1;
                 var noteId = id;
                 ReadState.OnHover(v.gameObject, () => { ReadState.MarkRead(new[] { noteId }); RefreshUnread(); });
@@ -55,11 +53,10 @@ namespace VisitAPI.ChapterUI
 
         static IEnumerator ScrollToEnd(UnityEngine.UI.ScrollRect scroll)
         {
-            yield return null;   // 等布局把新行排完
+            yield return null;
             if (scroll != null) scroll.verticalNormalizedPosition = 0f;
         }
 
-        // 日记区的 `!` 全家：外层（带 G2 计数）+ 短日记的 + 每条日记行自己的，一律按 ReadState 现状刷
         void RefreshNoteUnread()
         {
             var unread = ReadState.CountUnread(_noteIds);

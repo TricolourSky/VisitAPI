@@ -7,10 +7,6 @@ using UnityEngine;
 
 namespace VisitAPI.Native;
 
-// ══ 「CameraManager 状态不完整时别炸」一组（旧版 4 个文件，主题相同收成一处）══
-// 菜单/访问切换期间 Camera、后处理 profile、_ssaaImpl 都可能是空——
-// 缺哪样就安全跳过哪条原生路径，等相机链就位后一切照旧。
-
 [HarmonyPatch]
 public static class CameraSafety
 {
@@ -30,7 +26,6 @@ public static class CameraSafety
         return false;
     }
 
-    // AmbientLight.Initialize() 每帧问 SSR；相机或后处理 profile 缺失时直接答「没开」让它往下走
     [HarmonyPrefix, HarmonyPatch(typeof(CameraManager), nameof(CameraManager.GetSSREnabled))]
     static bool Ssr(CameraManager __instance, ref bool __result)
     {
@@ -45,7 +40,6 @@ public static class UpscalerGuard
 {
     static readonly FieldInfo SsaaImplField = AccessTools.Field(typeof(CameraManager), "_ssaaImpl");
 
-    // 某个方法名在本 build 不存在时只丢那一条，不让整组挂载失败（09-07 终审）
     static IEnumerable<MethodBase> TargetMethods() => new MethodBase[]
     {
         AccessTools.Method(typeof(CameraManager), "SetFSR"),

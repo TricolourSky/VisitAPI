@@ -6,19 +6,17 @@ using EFT.Communications;
 using EFT.InventoryLogic;
 using EFT.UI;
 using EFT.UI.DragAndDrop;
+using JsonType;
 using UnityEngine;
 using UnityEngine.UI;
 using VisitAPI.Native;
 
 namespace VisitAPI.ChapterUI
 {
-    /// <summary>「相关物品」区（1.1 的 ChapterLinks / 日记下面的 LinksList）：一行物品图标，图标用游戏自己的物品图生成器
-    /// （ItemViewFactory.LoadItemIcon，和仓库格子同源），悬停出原生提示框；每个物品也是"可读"项（新物品挂绿 `!`）。
-    /// G5：`craft:`/`offer:` 型物品加类型角标（借原生藏身处/跳蚤图标，风格不出戏）；G6：点击打开原生物品详情窗。DEV_NOTES #71。</summary>
     public partial class MainQuestTabView
     {
-        static readonly Dictionary<string, Item> _linkItems = new();   // 展示用物品，一个模板造一次
-        readonly Dictionary<GameObject, string> _linkMarkers = new();   // 屏上的物品绿标 → 已读 key（池化复用时同键覆盖，不膨胀）
+        static readonly Dictionary<string, Item> _linkItems = new();
+        readonly Dictionary<GameObject, string> _linkMarkers = new();
 
         void FillLinks(MainQuestLinkedItemsListView v, IEnumerable<(ChapterModel.ELink type, string tpl, string raw)> items)
         {
@@ -34,10 +32,16 @@ namespace VisitAPI.ChapterUI
                 var item = LinkItem(tpl); if (item == null) continue;
                 var view = pool.Acquire();
                 var link = view.GetComponent<MainQuestLinkedItemView>();
-                var image = IconImage(link != null && link._itemIconContainer != null ? link._itemIconContainer : (RectTransform)view.transform);
+                var cell = link != null && link._itemIconContainer != null ? link._itemIconContainer : (RectTransform)view.transform;
+                CellBackground(cell, item);
+                var image = IconImage(cell);
                 var icon = ItemViewFactory.LoadItemIcon(item);
                 if (icon.Sprite != null) image.sprite = icon.Sprite;
-                else { System.Action unsub = null; unsub = icon.Changed.Bind(() => { if (image != null) image.sprite = icon.Sprite; unsub?.Invoke(); }); }   // ItemIcon 是全局缓存件，Bind 返回退订委托，用完就退
+                else
+                {
+                    System.Action unsub = null; unsub = icon.Changed.Bind(() => { if (image != null) image.sprite = icon.Sprite; unsub?.Invoke(); });
+                    if (icon.Sprite != null) { image.sprite = icon.Sprite; unsub?.Invoke(); }
+                }
                 if (ItemUiContext.Instance != null)
                     (view.GetComponent<HoverTooltipArea>() ?? view.AddComponent<HoverTooltipArea>()).Init(ItemUiContext.Instance.Tooltip, item.LocalizedName(), true);
                 TypeBadge(link, type);
@@ -50,7 +54,6 @@ namespace VisitAPI.ChapterUI
             }
         }
 
-        /// G5：类型角标——Craft 借原生"藏身处"通知图标、Offer 借"跳蚤"图标，普通物品不占角
         static void TypeBadge(MainQuestLinkedItemView link, ChapterModel.ELink type)
         {
             if (link == null || link._typeIcon == null) return;
@@ -65,7 +68,6 @@ namespace VisitAPI.ChapterUI
             link._typeIcon.enabled = s != null;
         }
 
-        /// G6：点物品开原生详情窗（和仓库右键"检视"同一扇窗）
         static void Inspect(Item item)
         {
             if (ItemUiContext.Instance == null) return;
@@ -80,13 +82,47 @@ namespace VisitAPI.ChapterUI
             catch (System.Exception e) { Plugin.Log.LogWarning("[chapter/items] bad template " + tpl + ": " + e.Message); return _linkItems[tpl] = null; }
         }
 
+        static readonly Color CellFrame = new Color32(70, 70, 70, 220);
+        static readonly Color CellBase = new Color32(12, 12, 12, 210);
+        static void CellBackground(RectTransform cell, Item item)
+        {
+            var frame = Layer(cell, "CellFrame", 0, CellFrame);
+            var back = Layer(cell, "CellBase", 1, CellBase);
+            var tint = Layer(cell, "CellTint", 2, Color.clear);
+            try
+            {
+                var c = item.BackgroundColor.ToColor(); c.a = 0.3019608f;
+                tint.color = c;
+            }
+            catch (System.Exception e) { Plugin.Log.LogDebug("[chapter/items] 背景色取不到，按默认: " + e.Message); tint.color = new Color(0.4f, 0.4f, 0.4f, 0.3f); }
+            frame.transform.SetAsFirstSibling(); back.transform.SetSiblingIndex(1); tint.transform.SetSiblingIndex(2);
+        }
+
+        static Image Layer(RectTransform parent, string name, int inset, Color color)
+        {
+            var old = parent.Find(name);
+            var img = old != null ? old.GetComponent<Image>() : null;
+            if (img == null)
+            {
+                var rt = (RectTransform)new GameObject(name, typeof(RectTransform), typeof(Image)).transform;
+                rt.SetParent(parent, false);
+                rt.Stretch();
+                rt.offsetMin = new Vector2(inset, inset); rt.offsetMax = new Vector2(-inset, -inset);
+                img = rt.GetComponent<Image>(); img.raycastTarget = false;
+            }
+            img.color = color;
+            return img;
+        }
+
         static Image IconImage(RectTransform parent)
         {
             var old = parent.Find("ItemIcon");
-            if (old != null) return old.GetComponent<Image>();
+            if (old != null) { old.SetAsLastSibling(); return old.GetComponent<Image>(); }
             var rt = (RectTransform)new GameObject("ItemIcon", typeof(RectTransform), typeof(Image)).transform;
             rt.SetParent(parent, false);
-            var img = rt.Stretch().GetComponent<Image>(); img.preserveAspect = true; img.raycastTarget = false; return img;
+            rt.Stretch();
+            rt.offsetMin = new Vector2(4f, 4f); rt.offsetMax = new Vector2(-4f, -4f);
+            var img = rt.GetComponent<Image>(); img.preserveAspect = true; img.raycastTarget = false; return img;
         }
     }
 }

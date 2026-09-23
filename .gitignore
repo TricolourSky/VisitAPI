@@ -1,17 +1,27 @@
 # ═══ Never commit: game-derived data, binaries, work dirs ═══
 # Decompiled EFT / SPT sources (BSG copyright, local reference only)
 _decomp/
-# Release artifacts (distributed via GitHub Releases / SPT Hub)
+# Release artifacts (distributed via GitHub Releases / Forge)
 release/
 *.zip
 *.7z
-# Retail dialogue data and scene bundles (game-derived, shipped as release assets)
+# Published content: trader rooms, UI bundles, the EFT11 pack (game-derived, shipped as release assets)
+content/
+# Legacy locations of the same (pre-1.3.3 layout)
 Server/db/
 Server/images/
 Client/art/bundles/
+scenes/
+# Images and sounds extracted from the game and embedded into the DLL
+# (the plugin builds and runs without them; each missing one logs a line and falls back)
 Client/art/bayer_matrix.png
 Client/art/grayscale_ramp.png
-scenes/
+Client/art/choice_*.png
+Client/art/finish_badge.png
+Client/art/handover_badge.png
+Client/art/start_badge.png
+Client/art/reward_exp.png
+Client/art/audio/
 # Asset extraction / packaging work dirs and tools (never source)
 .work/
 tools/

@@ -4,14 +4,16 @@ using EFT;
 using EFT.InventoryLogic;
 using EFT.Quests;
 using EFT.UI;
+using VisitAPI.Dialog;
 
 namespace VisitAPI.Native;
 
-/// <summary>选项副作用的执行体（由 DialogSession 分发调用）。</summary>
 public static class EffectActions
 {
     public static void Standing(Profile profile, TraderScreensGroup screen, string traderId, double delta)
     {
+        if (!DialogParser.IsQuestId(traderId)) { Plugin.Log.LogWarning("[standing] 商人 id 不是 24 位十六进制，忽略: " + traderId); return; }
+        if (double.IsNaN(delta) || double.IsInfinity(delta)) { Plugin.Log.LogWarning("[standing] delta 不是有效数值，忽略: " + delta); return; }
         profile.TradersInfo.TryGetValue(new MongoID(traderId), out var info);
         var session = screen != null ? screen.TradersList?.FirstOrDefault(t => t.Id == traderId)?.Info : null;
         if (info == null && session == null) { Plugin.Log.LogWarning("[standing] trader not found: " + traderId); return; }
@@ -26,7 +28,8 @@ public static class EffectActions
     {
         var quest = quests?.Quests?.GetConditional(questId);
         if (quest == null) { Plugin.Log.LogWarning("[setstatus] quest not found: " + questId); return; }
-        if (QuestOps.SetStatus(quests, quest, (EQuestStatus)status, "setstatus"))   // T-6 唯一出口：任务事务在途时拒写
+        if (!System.Enum.IsDefined(typeof(EQuestStatus), status)) { Plugin.Log.LogWarning($"[setstatus] {questId}: 状态值 {status} 不是合法的任务状态，忽略"); return; }
+        if (QuestOps.SetStatus(quests, quest, (EQuestStatus)status, "setstatus"))
             Plugin.Log.LogDebug($"[setstatus] {questId} -> {(EQuestStatus)status} (now {quest.QuestStatus})");
     }
 

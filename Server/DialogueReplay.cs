@@ -20,7 +20,6 @@ namespace VisitAPI.Server;
 [Injectable(InjectionType.Transient, 300000)]
 public sealed class DialogueReplayRouter : ItemEventRouter
 {
-	// 首个请求时快照 templates.Dialogue 建索引且永不失效——依赖所有对话加载器都在 OnLoad 阶段完成灌入
 	private static Dictionary<string, TraderDialogElement> _index;
 
 	public DialogueReplayRouter(ProfileHelper profiles, TemplateTable templates, ISptLogger<DialogueReplayRouter> log)
@@ -66,10 +65,7 @@ public sealed class DialogueReplayRouter : ItemEventRouter
 				persisted += Apply(element, step.NodeId, pmc.Variables);
 			}
 		}
-		if (persisted > 0)
-		{
-			log.Debug($"[VisitAPI] dialogue replay: {persisted} profile variable(s) persisted");
-		}
+		if (persisted > 0) VariableGroups.Recompute(pmc.Variables);
 	}
 
 	private static int Apply(TraderDialogElement element, string nodeId, Dictionary<MongoId, int> variables)
@@ -97,7 +93,6 @@ public sealed class DialogueReplayRouter : ItemEventRouter
 					&& action.TryGetProperty("value", out var valueProp) && valueProp.TryGetInt32(out var intValue))
 				{
 					string variableId = variableIdProp.GetString();
-					// 24 = MongoId 长度; 非法 variableId 走隐式转换会抛异常, 提前丢弃
 					if (variableId != null && variableId.Length == 24)
 					{
 						variables[variableId] = intValue;

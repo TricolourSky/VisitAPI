@@ -18,7 +18,6 @@ public class DialogLoader
         Directory.CreateDirectory(baseDir);
     }
 
-    /// 目录里所有商人 id；目录 mtime 没变就不重新列文件
     public IEnumerable<string> TraderIds()
     {
         var stamp = Directory.GetLastWriteTimeUtc(BaseDir);

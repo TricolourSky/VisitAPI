@@ -5,17 +5,6 @@ using UnityEngine;
 
 namespace VisitAPI.Native;
 
-/// <summary>
-/// 包里渲不出来的 shader 按名字换成游戏里的真 shader。两条路：材质一条、组件的 Shader 字段一条
-/// （`AmbientLight` 有 5 个这种字段，空壳会让整套环境光崩掉，坑 #87）。
-///
-/// **能渲的一律不碰。** 2026-09-05 大清理（坑 #122 之后）拆掉的东西：
-/// ① `ShaderSource=game` —— 把包里的 1.1 二进制 shader 换成 0.16 同名的，立论是「1.1 shader 发白的嫌疑」；
-/// ② `FixKeywords` —— 按「有贴图就开」重开 `_EMISSION`/`_NORMALMAP`，现在打包侧已按 1.1 原件逐材质照抄关键字表，
-///    运行时再改就是覆盖 1.1 的授权值；
-/// ③ Unlit→自发光 / 雾片关闭 / 头发兜底 / 默认材质白块 —— 全是「补偿模式」专用，那条路已随 #122 一起作废。
-/// 发白的真因是网格法线被打包剥光，见 Dev_Note #122。
-/// </summary>
 public static class SceneShaders
 {
     static Dictionary<string, Shader> _shaders;
@@ -25,7 +14,6 @@ public static class SceneShaders
     static readonly HashSet<string> _gameSwaps = new(StringComparer.Ordinal);
     static readonly HashSet<string> _noGameTwin = new(StringComparer.Ordinal);
 
-    /// 09-05 从「拆除」改回「保留」（坑 #124）：`game` 是实机验收过的那一档。
     static bool GameShaders => string.Equals(Plugin.ShaderSource.Value.Trim(), "game", StringComparison.OrdinalIgnoreCase);
 
     public static void Snapshot()
@@ -43,8 +31,8 @@ public static class SceneShaders
             foreach (var mat in rend.sharedMaterials)
             {
                 if (mat == null || mat.shader == null) continue;
-                if (mat.shader.isSupported && !GameShaders) continue;       // ShaderSource=bundle：能渲的按包里的来
-                if (mat.shader.isSupported)                                 // ShaderSource=game：同名一律换成 0.16 自己的
+                if (mat.shader.isSupported && !GameShaders) continue;
+                if (mat.shader.isSupported)
                 {
                     if (_shaders.TryGetValue(mat.shader.name, out var own) && own != null && own != mat.shader)
                     { Swap(mat, own); _gameSwaps.Add(own.name); }
@@ -52,17 +40,13 @@ public static class SceneShaders
                     continue;
                 }
                 if (_shaders.TryGetValue(mat.shader.name, out var real) && real != null) { Swap(mat, real); continue; }
-                _missed.Add(mat.shader.name);                               // 换不到真 shader：关掉渲染器，别渲成白板（坑 #92）
+                _missed.Add(mat.shader.name);
                 rend.enabled = false;
                 break;
             }
         FixFields(root);
     }
 
-    /// <summary>换 shader 时保住材质自己的渲染队列（09-07）。Unity 给材质赋新 shader 会把 renderQueue 重置成新 shader 的默认值：
-    /// Mechanic 的镜片 `glasses2`（Standard 透明模式）1.1 授权的是队列 3000（透明阶段），换成 0.16 的 Standard 后掉到 2000（不透明阶段），
-    /// 探针日志实锤（队列=2000、_Mode=3、ZWrite=0）——一块关了深度写入的透明片被塞进不透明阶段画，实机就是一片死黑。
-    /// 队列是材质数据不是 shader 数据，换 shader 不该动它。</summary>
     static void Swap(Material mat, Shader to)
     {
         var queue = mat.renderQueue;
@@ -90,7 +74,6 @@ public static class SceneShaders
                 f.SetValue(mb, native);
                 swapped = true;
             }
-            // 换完要逼组件重新初始化：它可能已经拿空壳建过材质，光换字段不会自己重来
             if (!swapped) continue;
             _fieldSwaps++;
             if (mb.enabled) { mb.enabled = false; mb.enabled = true; }
@@ -107,8 +90,6 @@ public static class SceneShaders
         return list.ToArray();
     }
 
-    /// 贴花材质不挂 Renderer、挂在 StaticDeferredDecal 上，而贴花管理器在注册那一刻就 `new Material` 把 shader 复制走了——
-    /// `Fix` 跑在场景加载之后追不上，所以由 DecalGuard 在注册前调用（坑 #113）。
     internal static void FixDecal(Material mat)
     {
         if (mat == null || mat.shader == null || _shaders == null || !GameShaders) return;

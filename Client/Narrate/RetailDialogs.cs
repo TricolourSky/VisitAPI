@@ -9,19 +9,13 @@ using Newtonsoft.Json.Linq;
 
 namespace VisitAPI.Native;
 
-/// <summary>
-/// 1.0 零售 `dialogue.json` 的客户端侧读取。注意分工（这不是 BUG，是既有事实）：
-/// **原生 narrate 路径的模板由服务端 mod 灌进任务数据库下发**，客户端只需要 `SeedVariables`（种"相识"变量）；
-/// `Load()`（把模板/локale 灌进 DialogStorage）只服务自定义 `.dlg` 的 `@visit` 跳转。
-/// </summary>
 public static class RetailDialogs
 {
     static Dictionary<string, MongoID> _entries;
     static List<MongoID> _seeds;
-    static Dictionary<string, List<MongoID>> _acquaint;   // 商人 id → 他自己的对话读的那些「相识」变量（种子 ∩ 该商人模板用到的）
+    static Dictionary<string, List<MongoID>> _acquaint;
     static bool _loaded;
 
-    // 1.0 里由服务端 profile 同步的"相识"标志, 数据文件内无人写入; 不置 1 则走不进正常对话(缺选项/踩进残缺的初见线)
     static readonly Dictionary<string, int> KnownSeeds = new(StringComparer.Ordinal)
     {
         { "68c81cf8d242d0b184959530", 1 },
@@ -41,18 +35,13 @@ public static class RetailDialogs
         var profile = ((IDialogContext)dc).Profile;
         foreach (var v in _seeds)
         {
-            // 档案里已经有值的（对话推进过的状态机，如 Skier 的 1→4）别用种子盖回去：会话值优先于档案值（09-08）
             if (profile != null && profile.ProfileVariables.GetVariableValue(v) != 0) continue;
+            if (WrittenByLoadedDialog(v)) continue;
             KnownSeeds.TryGetValue(v.ToString(), out var value);
             dc.SetVariableValue(new DialogSetVariableAction.SaveStateData(v, value, DialogLineTemplate.ESaveStateType.Session));
         }
     }
 
-    /// <summary>「与 X 交谈」目标的落实（09-08，SORA 实机：Skier 那条永远做不完）。
-    /// 1.1 的任务条件 GlobalVariableValue 读的是**档案变量**（`Profile.ProfileVariables`，ConditionsConnectorsManager 订阅它的 OnVariableChanged），
-    /// 而写它的是 1.1 那批没抓到的任务对话；插件以前只把「相识」标志种进会话，档案里永远是 0。现在：真正打开这位商人的对话时，
-    /// 把他自己那几个相识变量在档案里从 0 写成 1（写档案作用域 → 条件当场刷新）并同步到服务端 pmc.Variables（重登不丢）。
-    /// 只在 0 → 1 这一步动手；对话自己往后推的状态（2/3/4）一律不碰。</summary>
     public static void MarkAcquainted(BaseTraderDialogController dc, string traderId)
     {
         Scan();
@@ -62,13 +51,32 @@ public static class RetailDialogs
         foreach (var v in vars)
         {
             if (profile.ProfileVariables.GetVariableValue(v) != 0) continue;
+            if (WrittenByLoadedDialog(v)) continue;
             dc.SetVariableValue(new DialogSetVariableAction.SaveStateData(v, 1, DialogLineTemplate.ESaveStateType.Profile));
             Vars.Sync(v, 1);
             Plugin.Log.LogInfo($"[retail] 与 {traderId} 相识：档案变量 {v} 0 -> 1（任务「与其交谈」目标据此达成）");
         }
     }
 
-    static string DialogueJsonPath => Path.Combine(BepInEx.Paths.PluginPath, "VisitAPI", "scenes", "bundles", "vendors", "dialogue.json");
+    static bool WrittenByLoadedDialog(MongoID v)
+    {
+        var templates = DialogStorage.Instance?._dialogTemplates;
+        if (templates == null) return false;
+        foreach (var t in templates.Values)
+            if (t?.Lines != null)
+                foreach (var line in t.Lines)
+                    if (line?.Actions != null)
+                        foreach (var a in line.Actions)
+                            if (a is DialogSetVariableAction set && set.Variable.VariableId == v)
+                            {
+                                Plugin.Log.LogInfo($"[retail] 相识变量 {v} 由对话 {t.Id} 自己写，插件不代写");
+                                return true;
+                            }
+        return false;
+    }
+
+    /// <summary>零售对话表的客户端副本，和房间文件住一起（rooms\，老目录见 VisitPaths）。</summary>
+    static string DialogueJsonPath => Path.Combine(VisitPaths.Rooms, "dialogue.json");
 
     static void Scan()
     {
@@ -90,7 +98,7 @@ public static class RetailDialogs
         var dto = JsonConvert.DeserializeObject<TraderDialogsDTO>(text, settings);
         if (dto?.Elements == null)
         {
-            _loaded = false;   // 解析失败别锁死：文件可能正被替换，下次调用重试（旧 N2）
+            _loaded = false;
             Plugin.Log.LogWarning("[retail] dialogue.json parse failed");
             return;
         }
@@ -114,7 +122,7 @@ public static class RetailDialogs
     {
         var written = new HashSet<string>();
         var used = new HashSet<string>();
-        var usedBy = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);   // 商人 → 他的模板读到的变量
+        var usedBy = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var el in JObject.Parse(text)["elements"] ?? new JArray())
         {
             var trader = el.Value<string>("Trader");

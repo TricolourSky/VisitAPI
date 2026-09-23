@@ -7,15 +7,13 @@ using UnityEngine.UI;
 
 namespace VisitAPI.Native;
 
-/// <summary>自定义背景图/视频的宿主，也是整个自定义会话展示层的生命周期锚点（它一销毁就 SceneLoader.Close()）。</summary>
 public class DialogBackground : MonoBehaviour
 {
     static DialogBackground _live;
-    /// <summary>@trade/@tasks/@services 往返商人页期间保住背景不销毁（TabRouter 置 true，重挂完成置 false）。</summary>
     public static bool KeepAlive;
     ClientDialogController _controller;
     RawImage _image;
-    string _file;   // 当前挂着的背景（文件里的原文，含 once/loop 尾缀）
+    string _file;
 
     public static void Attach(ClientDialogController controller) => Plugin.Instance.StartCoroutine(Find(controller));
 
@@ -34,7 +32,7 @@ public class DialogBackground : MonoBehaviour
     {
         yield return UiWait.Until(() => DialogScreenTracker.Open, 120);
         var screen = DialogScreenTracker.Live;
-        if (screen == null) yield break;   // 屏一直没亮：和旧版一样静默放弃
+        if (screen == null) yield break;
         var bg = _live;
         if (bg == null)
         {
@@ -57,11 +55,8 @@ public class DialogBackground : MonoBehaviour
     {
         if (dialog == null) { if (!KeepAlive) { SceneLoader.Close(); Destroy(gameObject); } return; }
         if (SceneLoader.Requested || !DialogTemplateBuilder.BgByDialog.TryGetValue(dialog.Id, out var file)) return;
-        // 同一张连着来（NPC 拍和「继续…」拍、没写自己 bg 的几拍都登记节点 bg）不重载：视频会从头再播、图会闪一下（09-10）
         if (file == _file) return;
         _file = file;
-        // 背景文件名可带 " once"/" loop" 尾缀控制视频是否循环, 默认循环(.dlg 作者约定)。
-        // JS 侧的对照实现在 VisitAPI Editor 的 index.html bgCut/bgOnce/bgVid —— 改这里必须同时改那里。
         var loop = !file.EndsWith(" once", StringComparison.Ordinal);
         if (!loop || file.EndsWith(" loop", StringComparison.Ordinal)) file = file.Substring(0, file.LastIndexOf(' ')).TrimEnd();
         var path = Path.Combine(DialogFiles.Loader.BaseDir, file.Contains("/") || file.Contains("\\") ? file : Path.Combine("backgrounds", file));

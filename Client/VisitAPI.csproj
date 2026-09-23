@@ -5,23 +5,15 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>VisitAPI</AssemblyName>
     <RootNamespace>VisitAPI</RootNamespace>
-    <Version>1.3.2</Version>
-    <!-- 1.3.2（09-14/15，SORA 跑自己的章节时暴露）= ① 剧情横幅/音效在对话屏开着时先攒着、关屏后补放（ChapterNotify.Display + NarrateSafety 关屏 Flush）——
-         对话里接/交任务的横幅原来全被对话屏盖住，几秒后自己消失，玩家什么都没看见；② 「已开始」判定统一走 ChapterStates.Begun，
-         别再用 `>= EQuestStatus.Started`（AvailableAfter=9 排在 Success 后面，等定时的任务会被当成已开始，它的目标提前出现在章节页）；
-         ③ 目标行的「去找 X」按钮改成按行来：编辑器给某一行写了 `<条件id> talk` 文案才出按钮、用作者的字，一行都没写保持老行为。
-         1.3.1（09-10/11）= 二选一组（anyOf 收目标 id 数组：AnyOfQuest 组规则 + AnyOfVisibility 显示条件补丁）、触发点对话锁玩家视角（InputGuard）、
-         触发点对话背景按编辑器预览口径（每拍自己的 bg 没写就节点的、NPC 拍与「继续…」拍同登记、按文件名去重）、NarrateHideGuard 的 Cleanup 改名 Teardown。
-         1.3.0 = 大修重构（阶段一：NarrateSystem）。旧 1.2.1 源码在 E:\项目\VisitAPI Rework（只读参照）。
-         实机环境 2026-09-05 起是 D:\EFT（SPT 4.1.4，SORA 定；原干净安装 D:\SPT 已不存在）；外部构建用 dotnet build -p:EftDir=<路径> 覆写。 -->
+    <Version>1.3.3</Version>
     <EftDir Condition="'$(EftDir)' == ''">D:\EFT</EftDir>
     <Managed>$(EftDir)\EscapeFromTarkov_Data\Managed</Managed>
-    <!-- .dlg 解析库唯一源码在 VisitAPI Editor 仓库，链源码编进来（不引用 DLL，玩家少拷一个文件就炸） -->
     <DlgSrc Condition="'$(DlgSrc)' == ''">..\..\VisitAPI Editor\src\VisitAPI.Dlg</DlgSrc>
   </PropertyGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="art\*.png" />
+    <EmbeddedResource Include="art\audio\*.ogg" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,6 +29,7 @@
     <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(Managed)\UnityEngine.InputLegacyModule.dll" Private="false" />
     <Reference Include="UnityEngine.UI" HintPath="$(Managed)\UnityEngine.UI.dll" Private="false" />
     <Reference Include="UnityEngine.UIModule" HintPath="$(Managed)\UnityEngine.UIModule.dll" Private="false" />
+    <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(Managed)\UnityEngine.TextRenderingModule.dll" Private="false" />
     <Reference Include="UnityEngine.ImageConversionModule" HintPath="$(Managed)\UnityEngine.ImageConversionModule.dll" Private="false" />
     <Reference Include="UnityEngine.VideoModule" HintPath="$(Managed)\UnityEngine.VideoModule.dll" Private="false" />
     <Reference Include="UnityEngine.AudioModule" HintPath="$(Managed)\UnityEngine.AudioModule.dll" Private="false" />
@@ -60,12 +53,10 @@
 
   <Target Name="Deploy" AfterTargets="Build" Condition="Exists('$(EftDir)\BepInEx') And '$(SkipDeploy)' != 'true'">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(EftDir)\BepInEx\plugins\VisitAPI" />
-    <Copy SourceFiles="art\bundles\visitapi_chapterui.bundle" DestinationFolder="$(EftDir)\BepInEx\plugins\VisitAPI\bundles" Condition="Exists('art\bundles\visitapi_chapterui.bundle')" />
-    <!-- 2026-09-05：1.1 商人加载屏（Narrate\NarrateLoading.cs），IsolatedSDK 的 BuildUiFromCli 打出来后拷进 art\bundles -->
-    <Copy SourceFiles="art\bundles\visitapi_narrateloading.bundle" DestinationFolder="$(EftDir)\BepInEx\plugins\VisitAPI\bundles" Condition="Exists('art\bundles\visitapi_narrateloading.bundle')" />
-    <!-- 2026-09-05 停止部署 art\bundles\visitapi_deferred11：`DeferredShading11` 已拆（坑 #126），没人再加载它。
-         包和源码都留着当底档——要恢复就把 Narrate\DeferredShading11.cs.parked 改回 .cs 并加回这一行。 -->
-    <Message Importance="high" Text="已部署: VisitAPI.dll → $(EftDir)\BepInEx\plugins\VisitAPI" />
+    <!-- 09-23 文件树整理：界面包的源文件住仓库 content\ui\（发布内容和代码分开），游戏里住 ui\（客户端 VisitPaths 先找 ui\，老的 bundles\ 还认） -->
+    <Copy SourceFiles="..\content\ui\visitapi_chapterui.bundle" DestinationFolder="$(EftDir)\BepInEx\plugins\VisitAPI\ui" Condition="Exists('..\content\ui\visitapi_chapterui.bundle')" />
+    <Copy SourceFiles="..\content\ui\visitapi_narrateloading.bundle" DestinationFolder="$(EftDir)\BepInEx\plugins\VisitAPI\ui" Condition="Exists('..\content\ui\visitapi_narrateloading.bundle')" />
+    <Message Importance="high" Text="已部署: VisitAPI.dll → $(EftDir)\BepInEx\plugins\VisitAPI（界面包 → ui\）" />
   </Target>
 
 </Project>

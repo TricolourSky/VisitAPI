@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using EFT;
 using EFT.Quests;
 using UnityEngine;
@@ -5,44 +6,49 @@ using VisitAPI.Dialog;
 
 namespace VisitAPI.Native;
 
-/// <summary>
-/// 单个触发点：距离 + 朝向 + 任务门控 → 弹交互提示/自动起爆 → 接/交/判失败任务或开对话。
-/// 判距基准保持 1.2.1 原样（相机位置）——既有 `.dlg` 的 dist 都是按这个调好的，不动（T-2 定案）。
-/// 任务状态写入走 Core\QuestOps 唯一出口（T-6）；`once` 参数触发成功后记进 seen.json，跨局不再弹（T-3）。
-/// </summary>
 public class VisitTrigger : MonoBehaviour
 {
     public string TraderId;
     public DialogTrigger Data;
     public bool Merge;
     public bool RequireLook;
+    public QuestZones.Subtitle Voice;
+    public Vector3 VoiceAt;
+    public EFT.Interactive.TriggerWithId ZoneToComplete;
     public bool Auto => Data.Auto || Data.Enter >= 0f;
 
     GamePlayerOwner _owner;
-    int _ownerScanAt;         // T-5：找不到 owner 时退避，不再每帧全场景扫
-    int _menuSeenFrame = -1;  // T-4：帧序状态归本实例所有，多个 merge 触发点不再互扰
+    int _ownerScanAt;
+    int _menuSeenFrame = -1;
     float _cooldown;
     bool _shown;
     bool _fired;
-    bool _onceChecked;        // T-3：once 记号只查一次（要等 MyPlayer 就位才知道档案 id）
+    bool _onceChecked;
     float _armed;
     int _misses;
     float _nearLog;
+    bool _onceAtClose;
+    bool _burned;
+    bool _sawDialogOpen;
+    float _onceDeadline;
+    float _closedAt = -1f;
 
-    // once 记号的键：原文留底最稳——作者改了这一行（哪怕只改提示语）就视为新触发点，重新武装
     string OnceKey => Data.Raw ?? $"{Data.Kind}|{Data.Place}|{Data.X},{Data.Y},{Data.Z}|{Data.Node}";
 
-    static QuestController Quests => QuestOps.Resolve();   // 藏身处选 Backend 版（真事务），战局选 LocalGame 版，见 QuestOps
+    static QuestController Quests => QuestOps.Resolve();
 
     void Update()
     {
         if (Data.Once && !_onceChecked && GamePlayerOwner.MyPlayer != null)
         {
             _onceChecked = true;
-            if (OnceService.Store(TraderId).TriggerUsed(GamePlayerOwner.MyPlayer.Profile.Id, OnceKey)) { Destroy(gameObject); return; }
+            if (OnceService.Used(GamePlayerOwner.MyPlayer.Profile, OnceService.TriggerId(TraderId, OnceKey)))
+            {
+                if (!OpensDialog) { Destroy(gameObject); return; }
+                _burned = true;
+            }
         }
-        // 对话屏开着（触发对话/访问按钮开的）时触发器整体静默：不弹菜单、不起爆，防止叠开第二屏。
-        // 判据是 DialogScreenTracker 的 O(1) 开关——绝不定时/每帧扫场景（坑 #99，T-5 同族病）。
+        if (_onceAtClose && PendingOnce()) return;
         if (Narrating.Now || DialogScreenTracker.Open)
         {
             if (_shown && _owner != null) { TriggerMenu.Hide(_owner, Prompt()); _shown = false; }
@@ -64,8 +70,6 @@ public class VisitTrigger : MonoBehaviour
         else if (_shown) { TriggerMenu.Hide(_owner, Prompt()); _shown = false; }
     }
 
-    // 走近了但还没够：每 2 秒报一次实际距离。坐标填错/dist 太小是最难自己发现的，
-    // 现场什么都不会发生，日志里这一行就是唯一的线索。
     void NearLog()
     {
         if (Camera.main == null || Time.unscaledTime < _nearLog) return;
@@ -75,7 +79,6 @@ public class VisitTrigger : MonoBehaviour
         Plugin.Log.LogInfo($"[trigger] 距触发点 {d:F1}m（需要 ≤{Data.Dist}m）@ ({Data.X}, {Data.Y}, {Data.Z})");
     }
 
-    // T-5：找不到 owner 时每 60 帧扫一次，不再每帧全场景扫；访问用的 NarratePlayerOwner 不算
     bool FindOwner()
     {
         if (Time.frameCount < _ownerScanAt) return false;
@@ -87,18 +90,16 @@ public class VisitTrigger : MonoBehaviour
 
     bool ShouldShow()
     {
-        if (Data.Enter >= 0f) return EnterDue() && GatePasses();
+        if (Data.Enter >= 0f) return EnterDue() && GatePasses() && BurnedAllows();
         var main = Camera.main;
         if (main == null) return false;
         var point = new Vector3(Data.X, Data.Y, Data.Z);
         var distance = Vector3.Distance(main.transform.position, point);
         if (distance > Data.Dist) return false;
         if (RequireLook && !LookPasses(main, point)) return false;
-        return GatePasses();
+        return GatePasses() && BurnedAllows();
     }
 
-    // 进图计时型触发点：起表点是"玩家真正可控"那一刻(MyPlayer 就位)，
-    // 不是 GameWorld 生成那一刻——否则读条阶段就把秒数烧完了，落地即触发。
     bool EnterDue()
     {
         if (GamePlayerOwner.MyPlayer == null) return false;
@@ -106,8 +107,6 @@ public class VisitTrigger : MonoBehaviour
         return Time.unscaledTime - _armed >= Data.Enter;
     }
 
-    // 旧 F11 打的是玩家脚底，比摄像机低约 1.6m（新 F11 已改打相机坐标，T-2），既有 .dlg 两种坐标都在跑。
-    // 近距离时这段高度差会把视线角推到远大于视角锥——朝向只比水平分量，高低差交给 dist 距离门槛去挡。
     bool LookPasses(Camera cam, Vector3 point)
     {
         var flat = point - cam.transform.position;
@@ -125,23 +124,40 @@ public class VisitTrigger : MonoBehaviour
         return quest != null && Data.IfStatuses.Contains((int)quest.QuestStatus);
     }
 
-    string Prompt() => string.IsNullOrEmpty(Data.Prompt) ? Loc.Pick("对话", "Talk") : Data.Prompt;
+    /// <summary>提示语按玩家语言取（.dlg 里 trigger: 行下面的译文行，DialogLangs）；没写就是「对话」。OnceKey 仍按原行记，切语言不会多触发一次。</summary>
+    string Prompt() { var p = DialogLangs.Pick(Data.Tr, Loc.Code, Data.Prompt); return string.IsNullOrEmpty(p) ? Loc.Pick("对话", "Talk") : p; }
 
     void Fire()
     {
         if (_owner != null) TriggerMenu.Hide(_owner, Prompt());
         _shown = false;
         _cooldown = Time.unscaledTime + 1.5f;
-        // accept / finish / fail 可以同时写；三者都没有才去开对话
         var acted = false;
-        var handled = true;   // 全部动作都落到实处（任务都找到了/对话开成了）才配打 once 记号
-        Plugin.Log.LogInfo($"[trigger] 触发：accept={Data.AcceptId ?? "-"} finish={Data.FinishId ?? "-"} fail={Data.FailId ?? "-"} node={Data.Node ?? "-"}");
+        var handled = true;
+        Plugin.Log.LogInfo($"[trigger] 触发：accept={Data.AcceptId ?? "-"} finish={Data.FinishId ?? "-"} fail={Data.FailId ?? "-"} node={Data.Node ?? "-"}{(Voice != null ? $" voice(池 {Voice.Pool.Count})" : "")}");
+        if (Voice != null)
+        {
+            var pick = Voice.Pick();
+            if (!string.IsNullOrEmpty(pick.Audio)) RaidVoice.PlayAt(pick.Audio, VoiceAt, Voice.Volume);
+            RaidSubtitles.Play(pick.Lines, "交互触发点 " + TraderId);
+            acted = true;
+        }
+        if (ZoneToComplete != null)
+        {
+            try
+            {
+                var player = Comfort.Common.Singleton<GameWorld>.Instantiated ? Comfort.Common.Singleton<GameWorld>.Instance.MainPlayer : null;
+                if (player != null) { ZoneToComplete.TriggerEnter(player); Plugin.Log.LogInfo($"[trigger] 按下交互，手动触发任务区域 {ZoneToComplete.Id}（到达）"); }
+                else Plugin.Log.LogWarning("[trigger] 主玩家不在，任务区域没触发");
+            }
+            catch (System.Exception e) { Plugin.Log.LogWarning("[trigger] 手动触发任务区域失败: " + e.Message); }
+        }
         if (Data.AcceptId != null) { handled &= AcceptQuest(); acted = true; }
         if (Data.FinishId != null) { handled &= SetStatus(Data.FinishId, EQuestStatus.Success); acted = true; }
         if (Data.FailId != null) { handled &= SetStatus(Data.FailId, EQuestStatus.Fail); acted = true; }
+        var openedDialog = false;
         if (!acted)
         {
-            // 起爆瞬间复查：对话屏已开就放弃这次，回炉重试
             if (DialogScreenTracker.Open)
             { Plugin.Log.LogInfo("[trigger] 对话屏开着，这次不弹（冷却后重试）"); handled = false; _fired = false; }
             else
@@ -150,23 +166,117 @@ public class VisitTrigger : MonoBehaviour
                 if (tree == null) { Plugin.Log.LogWarning("[trigger] no .dlg for " + TraderId); handled = false; }
                 else if (!DialogOpener.TryOpenTriggered(tree, Data.Node, out var error))
                 { Plugin.Log.LogWarning("[trigger] open failed: " + error); handled = false; }
+                else openedDialog = true;
             }
         }
-        if (handled && Data.Once) MarkOnce();
+        if (handled && Data.Once)
+        {
+            if (openedDialog) { _onceAtClose = true; _sawDialogOpen = false; _closedAt = -1f; _onceDeadline = Time.unscaledTime + 10f; }
+            else MarkOnce();
+        }
     }
 
-    // T-3：触发成功才记号；记完自毁，本局也不再弹
+    bool PendingOnce()
+    {
+        if (DialogScreenTracker.Open) { _sawDialogOpen = true; _closedAt = -1f; return true; }
+        if (!_sawDialogOpen)
+        {
+            if (Time.unscaledTime < _onceDeadline) return true;
+            ResetOnce();
+            Plugin.Log.LogWarning($"[trigger] 触发的对话屏 10 秒内没出现，once 不记{(Auto ? "，这个自动触发点本局不再弹" : "，冷却后重新出提示")}");
+            if (!Auto) _cooldown = Time.unscaledTime + 1.5f;
+            return false;
+        }
+        if (_closedAt < 0f) _closedAt = Time.unscaledTime;
+        if (Time.unscaledTime - _closedAt < 2f) return true;
+        ResetOnce();
+        if (DialogLeftGateUnresolved())
+        {
+            Plugin.Log.LogInfo($"[trigger] 对话关了，但它还能推进的任务都没推进（节点 {Data.Node ?? "入口"}）——当成没走完，once 不记{(Auto ? "，下次进图再弹" : "，走过去还能再对话")}");
+            if (!Auto) _cooldown = Time.unscaledTime + 1.5f;
+            return false;
+        }
+        MarkOnce();
+        return true;
+    }
+
+    void ResetOnce() { _onceAtClose = false; _sawDialogOpen = false; _closedAt = -1f; }
+
+    bool BurnedAllows()
+    {
+        if (!_burned) return true;
+        if (DialogLeftGateUnresolved())
+        {
+            _burned = false;
+            Plugin.Log.LogInfo($"[trigger] once 记号已打，但这段对话（节点 {Data.Node ?? "入口"}）还推进得了剧情——按「上次没走完」处理，这次照常可用");
+            return true;
+        }
+        Destroy(gameObject);
+        return false;
+    }
+
+    bool OpensDialog => Voice == null && Data.AcceptId == null && Data.FinishId == null && Data.FailId == null;
+
+    bool DialogLeftGateUnresolved()
+    {
+        if (!OpensDialog) return false;
+        if (Data.IfQuestId != null && !GatePasses()) return false;
+        if (Quests?.Quests == null) return false;
+        var tree = DialogFiles.Loader.Load(TraderId);
+        if (tree == null) return false;
+        var queue = new Queue<string>();
+        void Enqueue(string t)
+        {
+            if (string.IsNullOrEmpty(t)) return;
+            if (t == "@start") { Enqueue(tree.Start); foreach (var w in tree.WhenRules) Enqueue(w.Node); return; }
+            if (t[0] == '@') return;
+            queue.Enqueue(t);
+        }
+        if (Data.Node != null) Enqueue(Data.Node);
+        else { Enqueue(tree.First); Enqueue("@start"); }
+        var seen = new HashSet<string>();
+        while (queue.Count > 0)
+        {
+            var name = queue.Dequeue();
+            if (!seen.Add(name) || !tree.Nodes.TryGetValue(name, out var node)) continue;
+            Enqueue(node.JumpTo);
+            foreach (var o in node.Options)
+            {
+                if (CanAdvance(o)) return true;
+                Enqueue(o.Target);
+            }
+        }
+        return false;
+    }
+
+    Quest Q(string id) => string.IsNullOrEmpty(id) ? null : Quests?.Quests?.GetConditional(id);
+
+    bool CanAdvance(DialogOption o)
+    {
+        var explicitGate = o.Always || o.IfQuestId != null || o.IfNotQuestId != null || o.IfVarName != null;
+        foreach (var id in o.CompleteIds)
+        {
+            var s = Q(id)?.QuestStatus;
+            if (s == EQuestStatus.AvailableForFinish || (explicitGate && s == EQuestStatus.Started)) return true;
+        }
+        foreach (var id in o.AcceptIds)
+            if (Q(id)?.QuestStatus == EQuestStatus.AvailableForStart) return true;
+        var h = Q(o.HandoverId);
+        if (h != null && h.QuestStatus == EQuestStatus.Started && QuestGates.PendingItems(h) != null) return true;
+        var ss = Q(o.SetStatusId);
+        if (ss != null && System.Enum.IsDefined(typeof(EQuestStatus), o.SetStatusValue) && (int)ss.QuestStatus != o.SetStatusValue) return true;
+        return false;
+    }
+
     void MarkOnce()
     {
         var player = GamePlayerOwner.MyPlayer;
         if (player == null) return;
-        OnceService.Store(TraderId).MarkTrigger(player.Profile.Id, OnceKey);
-        Plugin.Log.LogInfo("[trigger] once 记号已打，这个触发点不会再弹");
+        OnceService.Mark(player.Profile, OnceService.TriggerId(TraderId, OnceKey), "trigger");
+        Plugin.Log.LogInfo("[trigger] once 记号已打（档案变量），这个触发点不会再弹");
         Destroy(gameObject);
     }
 
-    // 战局内 LocalGame 版的 AcceptQuest 就是本地 SetConditionalStatus(Started)（SPT 结算时回写）；
-    // 藏身处经 QuestOps.Resolve 拿到的 Backend 版才是发服务端的真事务。返回「任务找到了」。
     bool AcceptQuest()
     {
         var quests = Quests;
@@ -181,7 +291,6 @@ public class VisitTrigger : MonoBehaviour
         return true;
     }
 
-    // 走到/进图就把某条任务判成完成或失败（剧情用）。没接过的任务先接下再改，否则引擎不认这个状态迁移。返回「任务找到了」。
     bool SetStatus(string questId, EQuestStatus want)
     {
         var quests = Quests;
@@ -192,13 +301,9 @@ public class VisitTrigger : MonoBehaviour
             Plugin.Log.LogInfo($"[trigger] {questId} 已经是 {quest.QuestStatus}，不动它");
             return true;
         }
-        if (quest.QuestStatus == EQuestStatus.AvailableForStart) quests.SetConditionalStatus(quest, EQuestStatus.Started);   // 没接过的先接下
+        if (quest.QuestStatus == EQuestStatus.AvailableForStart) quests.SetConditionalStatus(quest, EQuestStatus.Started);
         if (want == EQuestStatus.Success)
         {
-            // ⚠️ 引擎不认 Started → Success 这一跳（实机实证）。必须先落到「可提交」，
-            // 再走 QuestOps.Finish —— 那才是真交任务：发奖励、发邮件、同步服务端。
-            // 上面那次 SetConditionalStatus 会同步惊动 ChapterChain：若它抢先对同一条任务发了 finish，
-            // QuestOps 的在途表会把这里的重复发起吃掉——只交一次（T-6 的双交病根就在这）。
             if (quest.QuestStatus < EQuestStatus.AvailableForFinish) quests.SetConditionalStatus(quest, EQuestStatus.AvailableForFinish);
             QuestOps.Finish(quests, quest, "trigger");
             return true;
@@ -207,7 +312,6 @@ public class VisitTrigger : MonoBehaviour
         return true;
     }
 
-    // 玩家/任务书可能还没就绪(战局刚载入)，别把 auto 点永久锁死——退回去等冷却后重试；20 次还没有就是 id 写错/前置没到，别刷屏
     bool Miss(string questId)
     {
         if (++_misses <= 20) _fired = false;

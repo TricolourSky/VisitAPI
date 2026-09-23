@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Comfort.Common;
 using EFT;
@@ -8,9 +9,6 @@ using HarmonyLib;
 
 namespace VisitAPI.Native;
 
-// ══ 零售对话数据相对正式服的缺口补全（只在访问中生效）══
-
-/// <summary>访问中开新对话：解锁模板 + 播种会话变量（"相识"标志等）。</summary>
 [HarmonyPatch(typeof(BaseTraderDialogController), "InitNewDialog")]
 public static class NarrateDialogEntryGuard
 {
@@ -19,16 +17,12 @@ public static class NarrateDialogEntryGuard
         if (!Narrating.Now) return;
         if (DialogStorage.Instance != null && DialogStorage.Instance.TryGetTemplate(dialogId, out var template))
             template.CanBeFirstDialog = true;
-        RetailDialogs.MarkAcquainted(__instance, __instance.Trader?.Id);   // 先写档案（0→1），再种会话（档案有值的不再盖）
+        RetailDialogs.MarkAcquainted(__instance, __instance.Trader?.Id);
         RetailDialogs.SeedVariables(__instance);
         Plugin.Log.LogDebug("[narrate] dialog entry unlocked + session variables seeded for " + dialogId);
     }
 }
 
-/// <summary>
-/// 1.0 零售数据里存在悬空的 SwitchDialog 目标（模板只在正式服服务端库里）——
-/// 原生 method_0 对缺失模板直接炸且异常被点击管线吞掉，表现为对话转圈假锁。缺失时改道回商人主对话入口。
-/// </summary>
 [HarmonyPatch(typeof(BaseTraderDialogController), "method_0")]
 public static class NarrateSwitchGuard
 {
@@ -51,7 +45,6 @@ public static class NarrateSwitchGuard
     }
 }
 
-/// <summary>访问中随机行条件恒真（零售数据的随机行在 0.16 环境下掷不出来）。</summary>
 [HarmonyPatch(typeof(RandomLineCondition), "Test")]
 public static class NarrateRandomGuard
 {
@@ -63,10 +56,6 @@ public static class NarrateRandomGuard
     }
 }
 
-/// <summary>
-/// 库外任务（零售数据引用、但 SPT 数据库里没有的任务）的状态条件统一模拟成 Locked——
-/// 互斥分支才不会同时放行（旧 DEV_NOTES #49）。别按商人加覆写表：Skier 试过，反而顶掉正常开场白（#58）。
-/// </summary>
 [HarmonyPatch(typeof(QuestStatusCondition), "Test")]
 public static class NarrateQuestGhostGuard
 {
@@ -79,7 +68,44 @@ public static class NarrateQuestGhostGuard
     }
 }
 
-/// <summary>点击管线会静默吞构建异常，此处 LogError 是唯一现场可见性。</summary>
+[HarmonyPatch(typeof(DynamicTraderDialog), nameof(DynamicTraderDialog.GenerateEmbeddedQuestDialogLines))]
+public static class NarrateEmbedSwitchGuard
+{
+    static void Postfix(DynamicTraderDialog __instance, ref IEnumerable<BaseTraderDialogLine> __result)
+    {
+        if (__result != null) __result = Reorder(__instance, __result);
+    }
+
+    static IEnumerable<BaseTraderDialogLine> Reorder(DynamicTraderDialog dialog, IEnumerable<BaseTraderDialogLine> lines)
+    {
+        foreach (var line in lines)
+        {
+            BaseTraderDialogLine fixedLine = null;
+            try
+            {
+                var t = line?.Template;
+                var acts = t?.Actions;
+                if (line is TraderDialogTextLine && acts != null && acts.Count(a => a is DialogSwitchDialogAction) >= 2)
+                {
+                    var appended = new List<DialogAction>();
+                    var own = new List<DialogAction>(acts);
+                    for (var i = own.Count - 1; i >= 0 && appended.Count < 2; i--)
+                        if (own[i] is DialogEmbedQuestDialogAction || (own[i] is DialogSwitchDialogAction && appended.Count == 1)) { appended.Insert(0, own[i]); own.RemoveAt(i); }
+                    if (appended.Count == 2)
+                    {
+                        appended.AddRange(own);
+                        var template = new DialogLineTemplate(t.Id, t.DialogSide, t.IconType, t.Trigger, appended.ToArray(), t.AnimationData);
+                        fixedLine = new TraderDialogTextLine(template, dialog.Context);
+                        Plugin.Log.LogInfo($"[narrate] 嵌入任务句 {t.Id} 自带跳转，引擎追加的跳转挪到句首（1.1 数据的跳转生效）");
+                    }
+                }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[narrate] 嵌入任务句跳转整理失败，原样使用: " + e.Message); }
+            yield return fixedLine ?? line;
+        }
+    }
+}
+
 [HarmonyPatch(typeof(DynamicTraderDialog), MethodType.Constructor, typeof(TraderDialogTemplate), typeof(IDialogContext))]
 public static class NarrateDialogBuildGuard
 {

@@ -15,7 +15,6 @@ public static class VisitArt
         return _cache[file] = bytes != null ? Decode(bytes, border) : null;
     }
 
-    /// 内嵌的贴图原件（1.1 相机效果要的 ramp / 抖动图）→ Texture2D，带 mip；解不出来返回 null
     public static Texture2D LoadTexture(string file, TextureWrapMode wrap, FilterMode filter, bool linear = false)
     {
         var bytes = Bytes(file);
@@ -42,7 +41,6 @@ public static class VisitArt
         return bytes;
     }
 
-    /// PNG/JPG 字节 → Sprite；解不出来返回 null
     public static Sprite Decode(byte[] bytes, Vector4 border = default)
     {
         var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);

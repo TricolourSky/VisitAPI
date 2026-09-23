@@ -3,7 +3,6 @@ using UnityEngine;
 
 namespace VisitAPI.Native;
 
-/// <summary>自定义对话的语音 + BGM（两个 2D AudioSource，按当前对话 id 查表播放）。</summary>
 public class DialogAudio : MonoBehaviour
 {
     ClientDialogController _controller;
@@ -39,6 +38,6 @@ public class DialogAudio : MonoBehaviour
         _controller.OnDialogChanged -= OnDialog;
         if (_voice != null) Destroy(_voice);
         if (_bgm != null) Destroy(_bgm);
-        AudioFiles.ReleaseAll();   // 同时只有一场对话，全清是安全的
+        AudioFiles.ReleaseAll();
     }
 }

@@ -7,37 +7,48 @@ using UnityEngine;
 
 namespace VisitAPI.ChapterUI
 {
-    /// <summary>章节横幅通知（1.1 的 NotificationMainQuest）：Title = 章节/子任务名，Text = 状态行，IsChapter 选底图，
-    /// Status 选对勾，Sprite = 章节图标。视图从 bundle 实例化到通知栏；bundle 缺失或连线不全时退回 VisitBanner 那种默认横幅。</summary>
     public class ChapterBanner : NotificationWithText
     {
         public enum EStatus { Started, Success, Fail }
         public string Title; public Sprite Sprite; public bool IsChapter; public EStatus Status;
-        public AudioClip Clip;   // 1.1 的剧情音效（bundle 里的 story_* 片段，DEV_NOTES #73）；null 就照常按 SoundType 放
-        public bool Silent;      // 1.1 在这个时刻根本不出声（子任务开始/完成）：横幅照出，一声不吭
+        public AudioClip Clip;
+        public bool Silent;
         public override ENotificationIconType Icon => ENotificationIconType.Quest;
-        public override Color? BackgroundColor => Color.white;   // 底图是 1.1 的 sprite，不让默认那层半透明黑压它
-        public override bool ShowImmediately => true;
+        public override Color? BackgroundColor => _fallback ? null : Color.white;
+        /// <summary>排队，和正式版一样一条一条出：游戏的 NotifierView 对「立刻显示」的通知是直接叠上去，
+        /// 对排队的一次只处理一条、上一条完全收起才放下一条（09-23 SORA：几条同时来不许叠成一堆）。</summary>
+        public override bool ShowImmediately => false;
+        bool _fallback;
 
         public override BaseNotificationView CreateView(INotificationViewFactory viewFactory)
         {
             var notifier = viewFactory as NotifierView;
-            var font = notifier != null && notifier._defaultNotificationTemplate != null ? notifier._defaultNotificationTemplate._text as TextMeshProUGUI : null;
-            var go = notifier != null ? ChapterBundle.Instantiate("MainQuestNotification", notifier._container, font) : null;
-            var view = go != null ? go.GetComponent<MainQuestNotificationView>() : null;
-            if (view == null || view._icon == null || view._text == null)
+            GameObject go = null; MainQuestNotificationView view = null; var setup = false;
+            try
             {
-                if (go != null) Object.Destroy(go);
+                var font = notifier != null && notifier._defaultNotificationTemplate != null ? notifier._defaultNotificationTemplate._text as TextMeshProUGUI : null;
+                go = notifier != null ? ChapterBundle.Instantiate("MainQuestNotification", notifier._container, font) : null;
+                view = go != null ? go.GetComponent<MainQuestNotificationView>() : null;
+                if (view != null && view._icon != null && view._text != null)
+                {
+                    if (view._container == null) view._container = notifier._container;
+                    notifier.SetupNotificationView(view); setup = true;
+                    view.Init(this);
+                    BannerHost.Attach(view, notifier);
+                    return view;
+                }
                 Plugin.Log.LogWarning("[chapter/banner] 1.1 notification view unavailable, using default banner");
-                return viewFactory.CreateDefaultView(this);
             }
-            if (view._container == null) view._container = notifier._container;   // 1.1 场景里这个字段指通知栏容器本身（在 prefab 之外），运行时补回
-            notifier.SetupNotificationView(view);
-            view.Init(this);
-            return view;
+            // 排队模式下这里一抛，游戏的通知队列会永远卡在「处理中」（ProcessQueuedNotifications 不清标志），连原生通知都不再显示——出错一律退回默认样式
+            catch (System.Exception e) { Plugin.Log.LogWarning("[chapter/banner] 1.1 横幅创建失败，退回默认样式: " + e.Message); }
+            if (setup) notifier.RemoveNotificationView(this, view);   // 已登记进通知栏的要正式撤掉（顺带销毁），光 Destroy 会留下一条空记录
+            else if (go != null) Object.Destroy(go);
+            _fallback = true;
+            var fallback = viewFactory.CreateDefaultView(this);
+            BannerHost.Attach(fallback, notifier);
+            return fallback;
         }
 
-        /// NotifierView 出横幅时按 SoundType 放 UI 音效；带自定义片段的横幅改放 1.1 那段，走 GUISounds 同一个 UI 音源（音量/混音组一致）
         [HarmonyPatch(typeof(NotifierView), nameof(NotifierView.PlaySound))]
         public static class SoundPatch
         {

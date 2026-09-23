@@ -14,11 +14,54 @@ public static class DialogueSanitizer
 		"FinishQuest", "PlayerReward", "SelectSubService", "PurchaseService"
 	};
 
+	private const string ConstantVariable = "000000000000000000000000";
+	public static int Converted;
+
+	private static int Convert(JsonNode node)
+	{
+		if (node is JsonArray array)
+		{
+			return array.Sum(Convert);
+		}
+		if (!(node is JsonObject obj))
+		{
+			return 0;
+		}
+		int count = Convert(obj["Conditions"]);
+		if (!(obj["type"] is JsonValue typeValue) || !typeValue.TryGetValue<string>(out string type))
+		{
+			return count;
+		}
+		bool? truth = type switch
+		{
+			"CompletableItem" => !(obj["isCompleted"] is JsonValue c && c.TryGetValue<bool>(out bool done) && done),
+			"HasFreeSpecialSlot" => obj["hasFreeSlot"] is JsonValue f && f.TryGetValue<bool>(out bool free) && free,
+			_ => null
+		};
+		if (truth == null)
+		{
+			return count;
+		}
+		foreach (string key in obj.Select(kv => kv.Key).Where(k => k != "id" && k != "Id").ToList())
+		{
+			obj.Remove(key);
+		}
+		obj["type"] = "VariableValue";
+		obj["variableId"] = ConstantVariable;
+		obj["value"] = truth.Value ? 0 : 1;
+		obj["operator"] = "==";
+		return count + 1;
+	}
+
 	public static int Clean(JsonObject element)
 	{
 		if (!(element["Lines"] is JsonArray lines))
 		{
 			return 0;
+		}
+		foreach (JsonObject line in lines.OfType<JsonObject>())
+		{
+			Converted += Convert(line["Trigger"]);
 		}
 		List<JsonObject> removed = (from line in lines.OfType<JsonObject>()
 			where Unsupported(line["Trigger"], Conditions) || Unsupported(line["Actions"], Actions)

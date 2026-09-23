@@ -5,11 +5,6 @@ using UnityEngine;
 
 namespace VisitAPI.Native;
 
-/// <summary>
-/// 自定义 `.dlg` `scene:` 场景的专用相机（0.16 的 `Cam2_fps_hideout` 预制体）。
-/// 原生 narrate 路径不建它，但退出时 `NarrateEntry.EnsureMenu` 仍会调 `Hide()`——
-/// 那一次调用同时把 `CameraManager.IsActive` 和 EnvironmentUI 压回菜单状态（实机验证过的时序，别动）。
-/// </summary>
 public static class SceneCamera
 {
     static Camera _cam;

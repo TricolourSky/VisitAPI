@@ -15,7 +15,6 @@ public class VariableRequest : IRequestData
     [JsonPropertyName("value")] public int Value { get; set; }
 }
 
-/// <summary>.dlg 的 `set:` 记号落到 pmc.Variables（客户端登录时随 profile 下发回 ProfileVariables，闭环）。</summary>
 [Injectable]
 public class VariableRouter(JsonUtil jsonUtil, ProfileHelper profileHelper, HttpResponseUtil httpResponse)
     : StaticRouter(jsonUtil, [
@@ -28,8 +27,17 @@ public class VariableRouter(JsonUtil jsonUtil, ProfileHelper profileHelper, Http
                 {
                     pmc.Variables ??= new Dictionary<MongoId, int>();
                     pmc.Variables[new MongoId(request.VariableId)] = request.Value;
+                    VariableGroups.Recompute(pmc.Variables);
                 }
                 return httpResponse.EmptyResponse();
+            },
+            typeof(VariableRequest)),
+        new RouteAction("/visitapi/variable/groups",
+            async (url, info, sessionId, output, ct) =>
+            {
+                var pmc = profileHelper.GetPmcProfile(sessionId);
+                if (pmc?.Variables != null) VariableGroups.Recompute(pmc.Variables);
+                return httpResponse.GetBody(VariableGroups.Payload());
             },
             typeof(VariableRequest))
     ]);

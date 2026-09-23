@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Comfort.Common;
 using EFT;
@@ -12,24 +13,9 @@ using UnityEngine.UI;
 
 namespace VisitAPI.Native;
 
-/// <summary>
-/// 1.1 的金色电话角标（SORA 09-11 截图：Jaeger 卡片右上角一枚、主菜单顶栏昵称后一枚）。0.16 没有这套 UI——
-/// 对话动作的 needNotification 反序列化进 DialogNotifiedAction.Notify 之后无人读，TraderCard 也没有角标位（Dev_Note #132）。
-///
-/// 判据（SORA 09-12 定）：**定时到了、等玩家去对话接的任务**——剧情任务处于「可接」、不自动接、且它的可接前置带 availableAfter
-/// （「几个小时后商人联系你」就是这种任务）。挂在哪位商人头上 = 任务对话（dialogueId）的主商人（服务端查对话表随 flags 下发），没有就是任务自己的商人。
-/// 第一版（进行中的对话目标 / 可交任务也亮）被 SORA 否掉：满屏金图标。
-///
-/// 图形是 1.1 原件：`call_badge.png` = 1.1 客户端 resources.assets 里 SpriteAtlas「ChatBar」的 `Social_Trader_Chat_Full-Call-Icon (2)_3`
-/// （36×34，金色电话 + 带字气泡、自带深色描边；同一图集里 `_0` 就是访问页签那枚灰白电话 visit_icon.png，`_1` 是不带描边的亮金版），
-/// 09-12 用 .work\tools\SpriteRip 从 1.1 的 resources.assets 切出来的，原色使用、不上色、不描边。
-/// （之前试过 0.16 的 Dialog_Icons_Talk（聊天气泡）和把 visit_icon.png 染金，SORA 两轮实机都判「不像、没质感」。）
-/// </summary>
 public static class TraderBadge
 {
-    /// SORA 09-11 截图取样：顶栏 #D8BC40、卡片 #D2C651（小图有抗锯齿混色），取顶栏那枚——现在只给「找不到原件」时的退路上色用
     public static readonly Color Gold = new Color32(0xD8, 0xBC, 0x40, 0xFF);
-    /// 原件 36×34 里实心只有 27×26（四周约 4 像素透明），按「实心尺寸」定大小时要乘这个系数
     internal const float PaddingScale = 36f / 27f;
     static Sprite _sprite;
     static bool _spriteTried, _fallback;
@@ -46,27 +32,52 @@ public static class TraderBadge
         }
     }
 
-    /// 这条任务「去找谁说话」：服务端按 dialogueId 查出来的商人，没有就是任务自己的商人
-    public static string TalkTo(Quest q) => QuestFlags.TalkTo(q.Id) ?? q.Template?.TraderId;
+    public static string TalkTo(Quest q) => QuestFlags.CallTrader(q.Id) ?? QuestFlags.TalkTo(q.Id) ?? q.Template?.TraderId;
 
-    /// 这条任务的可接前置里有没有 availableAfter 定时（1.1「过一段时间商人联系你」的任务）
     static bool Timed(Quest q) =>
         q.Template?.Conditions != null && q.Template.Conditions.TryGetValue(EQuestStatus.AvailableForStart, out var cc)
         && cc.OfType<ConditionQuest>().Any(c => c.availableAfter > 0);
 
-    /// 商人现在有没有「联系过你、等你来谈」的任务
-    static bool NeedsTalk(Quest q) =>
-        q?.Template != null && QuestFlags.IsStory(q.Id) && q.QuestStatus == EQuestStatus.AvailableForStart && !QuestFlags.AutoStart(q.Id) && Timed(q);
+    static bool NeedsTalk(Quest q, QuestController qc)
+    {
+        if (q?.Template == null || q.QuestStatus != EQuestStatus.AvailableForStart) return false;
+        if (QuestFlags.CallTrader(q.Id) != null) return ChapterChain.Reachable(qc, q);
+        if (QuestFlags.Get(q.Id)?.Story == true) return false;
+        return QuestFlags.IsStory(q.Id) && Timed(q) && !QuestFlags.IsChapter(q.Id) && !QuestFlags.AutoStart(q.Id) && QuestFlags.StartAfter(q.Id) == null
+            && ChapterChain.Reachable(qc, q);
+    }
 
-    /// 菜单里能拿到的任务控制器：商人屏/剧情页记下的那个优先
+    static bool CanTalk(string traderId, QuestController qc)
+    {
+        if (string.IsNullOrEmpty(traderId)) return false;
+        try
+        {
+            var profile = Singleton<ClientApplication<IEftSession>>.Instance?.GetClientBackEndSession()?.Profile;
+            if (profile?.TradersInfo != null)
+            {
+                if (traderId.Length != 24 || !profile.TradersInfo.TryGetValue(new MongoID(traderId), out var info) || info == null || !info.Unlocked) return false;
+            }
+        }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] 读商人解锁状态失败，按可谈处理: " + e.Message); }
+        return QuestFlags.DialogueUnlocked(traderId, qc) != false;
+    }
+
     static QuestController Controller => ChapterChain.Controller ?? ChapterTab.Quests ?? QuestOps.Resolve();
+
+    public static List<string> Lit(string traderId, QuestController qc = null)
+    {
+        qc ??= Controller;
+        if (qc?.Quests == null || string.IsNullOrEmpty(traderId)) return new List<string>();
+        try { return qc.Quests.Where(q => NeedsTalk(q, qc) && string.Equals(TalkTo(q), traderId, StringComparison.OrdinalIgnoreCase)).Select(q => q.Id).ToList(); }
+        catch { return new List<string>(); }
+    }
 
     public static bool Wanted(string traderId, QuestController qc = null)
     {
         if (!Plugin.CallBadge.Value || string.IsNullOrEmpty(traderId)) return false;
         qc ??= Controller;
         if (qc?.Quests == null) return false;
-        try { return qc.Quests.Any(q => NeedsTalk(q) && string.Equals(TalkTo(q), traderId, StringComparison.OrdinalIgnoreCase)); }
+        try { return CanTalk(traderId, qc) && qc.Quests.Any(q => NeedsTalk(q, qc) && string.Equals(TalkTo(q), traderId, StringComparison.OrdinalIgnoreCase)); }
         catch (Exception e) { Plugin.Log.LogWarning("[badge] 商人角标判定失败: " + e.Message); return false; }
     }
 
@@ -75,11 +86,61 @@ public static class TraderBadge
         if (!Plugin.CallBadge.Value) return false;
         qc ??= Controller;
         if (qc?.Quests == null) return false;
-        try { return qc.Quests.Any(NeedsTalk); }
+        try { return qc.Quests.Any(q => NeedsTalk(q, qc) && CanTalk(TalkTo(q), qc)); }
         catch (Exception e) { Plugin.Log.LogWarning("[badge] 顶栏角标判定失败: " + e.Message); return false; }
     }
 
-    // ── 商人卡片：Show 时挂一枚，UpdateView / 任务事件 / 每秒复查 ──
+    static readonly Dictionary<string, Sprite> _sprites = new();
+    static Sprite Art(string file)
+    {
+        if (_sprites.TryGetValue(file, out var s)) return s;
+        s = VisitArt.Load(file);
+        if (s == null) Plugin.Log.LogWarning($"[badge] 内嵌 {file} 读不到，这枚 1.1.5 角标不换");
+        _sprites[file] = s;
+        return s;
+    }
+    public static Sprite HandoverSprite => Art("handover_badge.png");
+    public static Sprite StartSprite => Art("start_badge.png");
+    public static Sprite FinishSprite => Art("finish_badge.png");
+
+    internal static void Swap(GameObject icon, Sprite sprite)
+    {
+        if (icon == null || sprite == null) return;
+        var img = icon.GetComponent<Image>() ?? icon.GetComponentInChildren<Image>(true);
+        if (img == null || img.sprite == sprite) return;
+        img.sprite = sprite;
+        img.color = Color.white;
+        img.preserveAspect = true;
+    }
+
+    static readonly Dictionary<string, (float until, bool on)> _handCache = new(StringComparer.OrdinalIgnoreCase);
+
+    public static bool HandoverWanted(string traderId, QuestController qc = null)
+    {
+        if (!Plugin.HandoverBadge.Value || string.IsNullOrEmpty(traderId)) return false;
+        if (_handCache.TryGetValue(traderId, out var cached) && Time.unscaledTime < cached.until) return cached.on;
+        qc ??= Controller;
+        var on = false;
+        if (qc?.Quests != null)
+            try
+            {
+                foreach (var q in qc.Quests)
+                {
+                    if (q?.Template == null || q.QuestStatus != EQuestStatus.Started) continue;
+                    if (!string.Equals(TalkTo(q), traderId, StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (var cond in q.ProgressCheckers.Keys)
+                    {
+                        if (cond is not ConditionItem || !q.CheckVisibilityStatus(cond)) continue;
+                        if (qc.CanHandoverItems(q.Id, cond.id, true)) { on = true; break; }
+                    }
+                    if (on) break;
+                }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[badge] 上交角标判定失败: " + e.Message); }
+        _handCache[traderId] = (Time.unscaledTime + 1f, on);
+        return on;
+    }
+
     [HarmonyPatch(typeof(TraderCard), nameof(TraderCard.Show))]
     public static class CardShow
     {
@@ -104,7 +165,6 @@ public static class TraderBadge
         }
     }
 
-    // ── 顶栏：任务栏建好时挂一个看守，它自己去找昵称文字并把角标贴在后面；只在主菜单亮（09-12 实机：人物屏的昵称也被贴上了）──
     [HarmonyPatch(typeof(MenuTaskBar), "Awake")]
     public static class TaskBarAwake
     {
@@ -121,14 +181,14 @@ public static class TraderBadge
         static void Postfix(EEftScreenType eftScreenType) => HeaderBadge.Screen = eftScreenType;
     }
 
-    internal static Image Build(RectTransform parent, string name)
+    internal static Image Build(RectTransform parent, string name, Sprite sprite = null)
     {
         var go = new GameObject(name, typeof(RectTransform), typeof(Image));
         var rt = (RectTransform)go.transform;
         rt.SetParent(parent, false);
         var img = go.GetComponent<Image>();
-        img.sprite = Sprite;
-        img.color = _fallback ? Gold : Color.white;   // 1.1 原件自带金色和描边，原样画
+        img.sprite = sprite ?? Sprite;
+        img.color = sprite == null && _fallback ? Gold : Color.white;
         img.raycastTarget = false;
         img.preserveAspect = true;
         go.SetActive(false);
@@ -136,7 +196,6 @@ public static class TraderBadge
     }
 }
 
-/// <summary>商人卡片上的那枚：右上角、随卡片宽度定尺寸（1.1 截图量的比例：角标约卡宽 12%，中心离右上角 (0.17w, 0.15w)）</summary>
 public class CardBadge : MonoBehaviour
 {
     string _traderId;
@@ -159,45 +218,212 @@ public class CardBadge : MonoBehaviour
         Refresh();
     }
 
+    readonly Dictionary<RectTransform, Vector2> _nativeHome = new();
+    bool _shifted;
+    RectTransform _spacer;
+    LayoutGroup _layout;
+    bool _layoutChecked;
+    static bool _layoutLogged;
+
+    LayoutGroup NativeLayout(TraderAvatar avatar)
+    {
+        if (_layoutChecked) return _layout;
+        var start = avatar?._availableToStartQuestsIcon?.transform as RectTransform;
+        if (start == null || start.parent is not RectTransform parent) return null;
+        _layoutChecked = true;
+        _layout = parent.GetComponent<LayoutGroup>();
+        if (!_layoutLogged)
+        {
+            _layoutLogged = true;
+            Plugin.Log.LogInfo($"[badge] 原生角标父物体 '{parent.name}'：布局组 {(_layout != null ? _layout.GetType().Name : "无")}，可接角标锚点 {start.anchorMin}~{start.anchorMax} 轴心 {start.pivot} 坐标 {start.anchoredPosition} 尺寸 {start.sizeDelta}");
+        }
+        return _layout;
+    }
+
+    const float StartPad = 52f / 41f, FinishPad = 52f / 42f, HandoverPad = 49f / 41f;
+    static float ColumnWidth(float slot) => slot * StartPad;
+
+    void SizeNativeIcons(float slot)
+    {
+        try
+        {
+            var avatar = GetComponentInChildren<TraderAvatar>(true);
+            if (avatar == null || slot <= 1f) return;
+            var layout = NativeLayout(avatar);
+            var width = ColumnWidth(slot);
+            foreach (var (go, pad) in new[] { (avatar._availableToStartQuestsIcon, StartPad), (avatar._availableToFinishQuestsIcon, FinishPad) })
+            {
+                if (go == null || go.transform is not RectTransform rt) continue;
+                var size = new Vector2(width, slot * pad);
+                if (layout != null)
+                {
+                    var le = rt.GetComponent<LayoutElement>() ?? rt.gameObject.AddComponent<LayoutElement>();
+                    if (Mathf.Abs(le.preferredWidth - size.x) > 0.5f || Mathf.Abs(le.preferredHeight - size.y) > 0.5f) { le.preferredWidth = size.x; le.preferredHeight = size.y; }
+                }
+                if ((rt.sizeDelta - size).sqrMagnitude > 0.25f) rt.sizeDelta = size;
+            }
+        }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] 原生角标定尺寸失败: " + e.Message); }
+    }
+
+    void AlignGoldToSpacer()
+    {
+        if (_img == null || !_img.gameObject.activeSelf || _spacer == null || !_spacer.gameObject.activeInHierarchy) return;
+        var corners = new Vector3[4];
+        _spacer.GetWorldCorners(corners);
+        var center = (corners[0] + corners[2]) * 0.5f;
+        if ((_img.transform.position - center).sqrMagnitude > 0.0001f) _img.transform.position = center;
+    }
+
+    void ShiftNativeIcons(bool on, float shift)
+    {
+        try
+        {
+            var avatar = GetComponentInChildren<TraderAvatar>(true);
+            if (avatar == null) return;
+            var layout = NativeLayout(avatar);
+            if (layout != null)
+            {
+                if (_spacer == null)
+                {
+                    if (!on) return;
+                    var go = new GameObject("VisitCallBadgeSpacer", typeof(RectTransform), typeof(LayoutElement));
+                    _spacer = (RectTransform)go.transform;
+                    _spacer.SetParent(layout.transform, false);
+                }
+                var le = _spacer.GetComponent<LayoutElement>();
+                var cell = ColumnWidth(shift);
+                le.preferredWidth = le.preferredHeight = cell;
+                _spacer.sizeDelta = new Vector2(cell, cell);
+                if (_spacer.GetSiblingIndex() != 0) _spacer.SetAsFirstSibling();
+                if (_spacer.gameObject.activeSelf != on) _spacer.gameObject.SetActive(on);
+                if (on && layout.transform is RectTransform lrt) LayoutRebuilder.ForceRebuildLayoutImmediate(lrt);
+                return;
+            }
+            if (!on && !_shifted) return;
+            foreach (var go in new[] { avatar._availableToStartQuestsIcon, avatar._availableToFinishQuestsIcon })
+            {
+                if (go == null || go.transform is not RectTransform rt) continue;
+                if (!_nativeHome.TryGetValue(rt, out var home))
+                {
+                    if (!on) continue;
+                    home = rt.anchoredPosition; _nativeHome[rt] = home;
+                }
+                var want = on ? home + new Vector2(0f, -shift) : home;
+                if ((rt.anchoredPosition - want).sqrMagnitude > 0.01f) rt.anchoredPosition = want;
+            }
+            _shifted = on;
+        }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] 原生角标让位失败: " + e.Message); }
+    }
+
     public void Refresh()
     {
         if (_img == null) return;
         var on = TraderBadge.Wanted(_traderId, _qc);
-        if (_img.gameObject.activeSelf != on) TalkButton.Retint();   // 09-13 审查：定时在商人屏开着时到点，访问页签也得跟着变金/还原
+        if (_img.gameObject.activeSelf != on)
+        {
+            TalkButton.Retint();
+            Plugin.Log.LogInfo(on ? $"[badge] 商人 {_traderId} 金色电话亮起，任务: {string.Join(", ", TraderBadge.Lit(_traderId, _qc))}" : $"[badge] 商人 {_traderId} 金色电话熄灭");
+        }
+        var w = ((RectTransform)transform).rect.width;
+        if (w <= 1f) w = 150f;
+        var slot = w * visible;
+        if (Plugin.CallBadge.Value || Plugin.HandoverBadge.Value) SizeNativeIcons(slot);
         if (on)
         {
-            var w = ((RectTransform)transform).rect.width;
-            if (w <= 1f) w = 150f;
-            // 09-12 第 3 轮按正式版对照图逐像素量：1.1 的角标和卡片左上的等级框一样高（≈ 卡宽 13%，实心），中心离右上角 (0.18w, 0.105w)；
-            // visit_icon.png 32×30 里实心只有 24×23（四边各 4 像素透明），所以画 32% 卡宽才能实心 24%——比 1.1 略大一点，SORA 第 2 轮嫌小
-            // 09-12 第 7 轮：两张单卡截图逐像素对（1.1 卡外框 161 宽，我们 158）——1.1 角标实心 20×18 = 0.124w，右边离外框右缘 0.106w、上边离外框上缘 0.11w；
-            // 我们上一轮实心 24×23、低了 5 像素。现在尺寸和边距全部按 1.1 的数，不再放大（SORA 第 4 轮嫌小的那版是位置错着看的）。
             var rt = (RectTransform)_img.transform;
-            const float visible = 0.15f;   // 第 8 轮 SORA「放大一点」：1.1 的 0.124w → 0.15w（大两成），右/上边距不动，大出来的往卡片里长
             var size = Mathf.Clamp(w * visible * TraderBadge.PaddingScale, 16f, 64f);
             rt.sizeDelta = new Vector2(size, size);
             rt.anchoredPosition = new Vector2(-w * (0.106f + visible / 2f), -w * (0.11f + visible / 2f));
             rt.SetAsLastSibling();
+            ShiftNativeIcons(true, slot);
         }
+        else ShiftNativeIcons(false, 0f);
         if (_img.gameObject.activeSelf != on) _img.gameObject.SetActive(on);
+        RefreshHandover(on, slot, w);
+        AlignGoldToSpacer();
     }
+
+    Image _hand;
+    bool _swapped;
+    void SwapNativeIcons(TraderAvatar avatar)
+    {
+        if (_swapped || avatar == null || !Plugin.HandoverBadge.Value) return;
+        _swapped = true;
+        TraderBadge.Swap(avatar._availableToStartQuestsIcon, TraderBadge.StartSprite);
+        TraderBadge.Swap(avatar._availableToFinishQuestsIcon, TraderBadge.FinishSprite);
+    }
+
+    void RefreshHandover(bool gold, float slot, float w)
+    {
+        try
+        {
+            if (!_swapped) SwapNativeIcons(GetComponentInChildren<TraderAvatar>(true));
+            var on = TraderBadge.HandoverWanted(_traderId, _qc);
+            if (!on) { if (_hand != null && _hand.gameObject.activeSelf) _hand.gameObject.SetActive(false); return; }
+            if (_hand == null)
+            {
+                if (TraderBadge.HandoverSprite == null) return;
+                _hand = TraderBadge.Build((RectTransform)transform, "VisitHandoverBadge", TraderBadge.HandoverSprite);
+            }
+            var rt = (RectTransform)_hand.transform;
+            var avatar = GetComponentInChildren<TraderAvatar>(true);
+            SwapNativeIcons(avatar);
+            var start = avatar != null && avatar._availableToStartQuestsIcon != null ? avatar._availableToStartQuestsIcon.transform as RectTransform : null;
+            if (start != null && start.parent is RectTransform nativeParent)
+            {
+                if (rt.parent != nativeParent) rt.SetParent(nativeParent, false);
+                var size = new Vector2(ColumnWidth(slot), slot * HandoverPad);
+                rt.sizeDelta = size;
+                if (NativeLayout(avatar) != null)
+                {
+                    var le = rt.GetComponent<LayoutElement>() ?? rt.gameObject.AddComponent<LayoutElement>();
+                    le.preferredWidth = size.x; le.preferredHeight = size.y;
+                    if (rt.GetSiblingIndex() != nativeParent.childCount - 1) rt.SetAsLastSibling();
+                }
+                else
+                {
+                    rt.anchorMin = start.anchorMin; rt.anchorMax = start.anchorMax; rt.pivot = start.pivot;
+                    var home = _nativeHome.TryGetValue(start, out var h) ? h : start.anchoredPosition;
+                    float? lowest = gold ? home.y : null;
+                    foreach (var go in new[] { avatar._availableToStartQuestsIcon, avatar._availableToFinishQuestsIcon })
+                        if (go != null && go.activeInHierarchy && go.transform is RectTransform nrt)
+                            lowest = lowest.HasValue ? Mathf.Min(lowest.Value, nrt.anchoredPosition.y) : nrt.anchoredPosition.y;
+                    rt.anchoredPosition = new Vector2(home.x, lowest.HasValue ? lowest.Value - slot : home.y);
+                    rt.SetAsLastSibling();
+                }
+            }
+            else
+            {
+                if (rt.parent != transform) rt.SetParent(transform, false);
+                rt.anchorMin = rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.sizeDelta = new Vector2(slot, slot);
+                rt.anchoredPosition = new Vector2(-w * (0.106f + visible / 2f), -w * (0.11f + visible / 2f) - (gold ? slot : 0f));
+                rt.SetAsLastSibling();
+            }
+            if (!_hand.gameObject.activeSelf) _hand.gameObject.SetActive(true);
+        }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] 上交角标刷新失败: " + e.Message); }
+    }
+    const float visible = 0.15f;
 
     void LateUpdate()
     {
         if (_img == null) return;
         if (ChapterEvents.Changed(ref _seen) || Time.unscaledTime >= _next) { _next = Time.unscaledTime + 1f; Refresh(); }
+        AlignGoldToSpacer();
     }
 }
 
-/// <summary>顶栏那枚：只在主菜单屏亮。找显示玩家昵称的文字（同名文字取字号最大的那个——MenuOverhaul 之类会自己画顶栏，不认死某个类），
-/// 贴在文字右边；任一商人有话要说就亮。每 0.5 秒看一次，换屏 / 文字对象没了就重找。</summary>
 public class HeaderBadge : MonoBehaviour
 {
     public static EEftScreenType Screen = EEftScreenType.MainMenu;
     TMP_Text _label;
     Image _img;
     EEftScreenType _seenScreen;
-    float _next, _retry;   // _retry：找不到昵称文字时的退避（09-13 审查：原来每半秒扫一遍全部 TMP 文字，没昵称的菜单会一直扫）
+    float _next, _retry;
 
     static string Nickname()
     {
@@ -210,7 +436,7 @@ public class HeaderBadge : MonoBehaviour
         if (Time.unscaledTime < _next) return;
         _next = Time.unscaledTime + 0.5f;
         if (Screen != EEftScreenType.MainMenu) { Hide(); _seenScreen = Screen; return; }
-        if (_seenScreen != Screen) { _seenScreen = Screen; _label = null; _retry = 0f; }   // 回到主菜单：重找一次（换屏后文字对象常常是新建的）
+        if (_seenScreen != Screen) { _seenScreen = Screen; _label = null; _retry = 0f; }
         if (_label == null || !_label.isActiveAndEnabled)
         {
             if (Time.unscaledTime < _retry) { Hide(); return; }
@@ -250,7 +476,7 @@ public class HeaderBadge : MonoBehaviour
     {
         if (_img == null || _label == null) return;
         var rt = (RectTransform)_img.transform;
-        var size = Mathf.Clamp(_label.fontSize * 1.1f * TraderBadge.PaddingScale, 24f, 64f);   // 1.1 顶栏那枚实心约 0.9 倍字号，SORA 第 5 轮嫌小 → 1.1 倍；原件四周有透明边
+        var size = Mathf.Clamp(_label.fontSize * 1.1f * TraderBadge.PaddingScale, 24f, 64f);
         rt.sizeDelta = new Vector2(size, size);
         rt.pivot = new Vector2(0f, 0.5f);
         if (_label.horizontalAlignment == HorizontalAlignmentOptions.Left)

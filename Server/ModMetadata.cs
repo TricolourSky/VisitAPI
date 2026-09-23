@@ -6,12 +6,12 @@ namespace VisitAPI.Server;
 
 public record ModMetadata : IModMetadata
 {
-    public string ModGuid { get; init; } = "com.sora.visitapi.server";   // 1.0.0 发布时就是这个，别改（服务端模组身份靠它）
+    public string ModGuid { get; init; } = "com.sora.visitapi.server";
     public string Name { get; init; } = "VisitAPI-Server";
     public string Author { get; init; } = "TricolourSky";
     public List<string> Contributors { get; init; }
-    public Version Version { get; init; } = new("1.3.2");
-    public Range SptVersion { get; init; } = new("~4.1.1");
+    public Version Version { get; init; } = new("1.3.3");
+    public Range SptVersion { get; init; } = new("~4.1.6");
     public bool HasPrepatcher { get; init; }
     public List<string> Incompatibilities { get; init; }
     public Dictionary<string, Range> ModDependencies { get; init; }

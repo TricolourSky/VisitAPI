@@ -11,9 +11,6 @@ using VisitAPI.Dialog;
 
 namespace VisitAPI.Native;
 
-/// <summary>「对话里开商人页」的唯一实现（Refactor_Plan：TabRouter 吸收 NarrateTabs，两套近似流程收成一条尾巴）。
-/// 自定义路径：`@trade/@tasks/@services` 选项 → 关对话开商人页 → 关闭后回到原对话节点；
-/// 原生路径：访问对话里点「任务」（DialogQuestsScreenAction）→ 商人任务页。单商人假设：同时只有一场访问。</summary>
 public static class TabRouter
 {
     public static bool DialogWindowOpen;
@@ -31,11 +28,14 @@ public static class TabRouter
         var achievements = new AchievementsControllerClientBackend(profile, inventory, quests.Quests, session);
         var sc = new TraderScreensGroup.DialogTraderScreenController(trader, new[] { trader }, profile, inventory, health, quests, achievements, session);
         sc.OnClose += () => { DialogWindowOpen = false; DialogBackground.Cover(); Plugin.Instance.StartCoroutine(ReopenDialog(tree, node, screen, profile, quests, inventory)); };
+        if (Tsg == null) { Plugin.Log.LogWarning("[tab] no trader screen group - cannot open trader screen"); DialogBackground.Discard(); yield break; }
         DialogWindowOpen = true;
         yield return ShowAt(sc, mode);
+        if (!Active) { Plugin.Log.LogWarning("[tab] trader screen did not show, releasing dialog-window flag"); DialogWindowOpen = false; DialogBackground.Discard(); }
     }
 
-    /// 共用尾巴：亮出备好的控制器，等商人屏就位，切到指定页（Trade 是默认页不用切）
+    public static bool Active => DialogWindowOpen && Tsg != null && Tsg.isActiveAndEnabled;
+
     static TraderScreensGroup Tsg => MonoBehaviourSingleton<MenuUI>.Instance != null ? MonoBehaviourSingleton<MenuUI>.Instance.TraderScreensGroup : null;
 
     static IEnumerator ShowAt(TraderScreensGroup.TraderScreenController sc, TraderScreensGroup.ETraderMode mode)
@@ -57,8 +57,6 @@ public static class TabRouter
         { Plugin.Log.LogWarning("[tab] dialog reopen failed: " + err); DialogBackground.Discard(); }
     }
 
-    // ── 原生访问路径（原 NarrateTabs，2026-09-02 阶段四并入）──
-
     static BaseTraderDialogController _watched;
     static string _watchedTraderId;
 
@@ -68,11 +66,10 @@ public static class TabRouter
         if (!(NarrateEntry.MenuOpField?.GetValue(app) is MainMenuShowOperation op) || op.DialogController == null) return;
         if (_watched != null) _watched.OnActionFinished -= HandleNarrate;
         _watched = op.DialogController;
-        _watched.OnActionFinished -= HandleNarrate;   // 防同一 controller 重复订阅
+        _watched.OnActionFinished -= HandleNarrate;
         _watched.OnActionFinished += HandleNarrate;
     }
 
-    /// 退出访问时退订（NarrateHideGuard.Prefix 调）：订阅留着的话之后任何对话里的 DialogQuestsScreenAction 都会开**上一位**商人的任务页
     public static void UnwatchNarrate()
     {
         if (_watched != null) _watched.OnActionFinished -= HandleNarrate;

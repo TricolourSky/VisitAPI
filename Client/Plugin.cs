@@ -12,13 +12,14 @@ namespace VisitAPI;
 [BepInPlugin("com.sora.visitapi", "VisitAPI", Version)]
 public class Plugin : BaseUnityPlugin
 {
-    public const string Version = "1.3.2";
+    public const string Version = "1.3.3";
     public static Plugin Instance;
     public static ManualLogSource Log;
     public static ConfigEntry<string> Language;
     public static ConfigEntry<float> TalkOffsetX;
     public static ConfigEntry<float> TalkOffsetY;
     public static ConfigEntry<bool> ShowUnstarted;
+    public static ConfigEntry<float> CustomChapterOrder;
     public static ConfigEntry<bool> HideStory;
     public static ConfigEntry<float> Fov;
     public static ConfigEntry<bool> PixelLights;
@@ -30,6 +31,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<KeyboardShortcut> CoordKey;
     public static ConfigEntry<KeyboardShortcut> AbortVisitKey;
     public static ConfigEntry<bool> CallBadge;
+    public static ConfigEntry<bool> HandoverBadge;
 
     void Awake()
     {
@@ -39,37 +41,38 @@ public class Plugin : BaseUnityPlugin
         TalkOffsetX = Config.Bind("TalkButton", "OffsetX", 0f, "访问按钮水平偏移 | Visit button X offset");
         TalkOffsetY = Config.Bind("TalkButton", "OffsetY", 0f, "访问按钮垂直偏移 | Visit button Y offset");
         ShowUnstarted = Config.Bind("Chapter", "ShowUnstartedChapters", false, "剧情页显示未开始的章节 | Show unstarted chapters");
+        CustomChapterOrder = Config.Bind("Chapter", "CustomChapterOrder", 100f,
+            "自制章节在剧情页的排序位次，小的在前。剧情页先按解锁先后排，解锁时间相同时才看这个值。官方章节是 1～10，默认 100 排在它们后面 | Sort position of custom chapters on the story page, smaller first. The page sorts by unlock time first; this value only breaks ties. Official chapters are 1-10; the default 100 places custom chapters after them");
         HideStory = Config.Bind("Chapter", "HideStoryQuestsInLists", true, "剧情任务不进普通任务列表 | Hide story quests in regular lists");
         LevelCamera = Config.Bind("Narrate", "LevelCamera", true,
-            "相机俯仰归零：玩家眼睛带 3.76° 下俯，1.1 房间自带的机位标记是俯仰 0（两张图逐像素量过，差的就是这 80 像素）| Level the visit camera pitch");
+            "访问商人时相机保持水平，与 1.1 房间的机位一致 | Keep the visit camera level to match the 1.1 room camera");
         PixelLights = Config.Bind("Narrate", "PixelLights", true,
-            "把房间的顶点光全提成像素光（顶点光在 0.16 延迟管线里不吃 cookie，1.1 的灯罩光斑形状出不来）| Promote the room's vertex lights to pixel lights");
+            "商人房间的灯光按像素光渲染，灯罩的光斑形状才正确 | Render room lights as pixel lights so lamp shapes appear correctly");
         Fov = Config.Bind("Narrate", "Fov", 50f,
-            "访问房间的视野 | 50 是实机验收过的构图值（1.1 相机预制体写的是 75）| Visit camera field of view");
+            "访问商人房间时的视野 | Visit camera field of view");
         DecalDirect = Config.Bind("Narrate", "DecalDirect", false,
-            "贴花改成逐个 DrawMesh 画。**默认关**——坑 #116 的立论（0.16 画不出贴花）是在剥了法线的包上取的证，法线补回来后 0.16 自己就画得出来，再直画一遍等于画两遍（09-05 SORA 实机：关掉才和 1.1 正式版一样，坑 #125）| Draw static decals one by one");
-        // ── 下面三项 09-05 从「拆除」改回「保留」：坑 #124。它们不是「违背 1.1 的数据」，
-        //    而是「同一个数在 0.16 的渲染器里跑出来不是 1.1 的样子」——实机 A/B 判的，别再按 1.1 的字面值删。
+            "逐个直接绘制房间贴花。默认关闭，打开会重复绘制 | Draw room decals one by one. Off by default; turning it on draws them twice");
         ShaderSource = Config.Bind("Narrate", "ShaderSource", "game",
-            "材质用谁的 shader | game=同名换成 0.16 自己的（实机验收过的观感）；bundle=包里带的 1.1 二进制 shader | Which shader implementation to use");
+            "房间材质使用的着色器：game = 游戏自带的同名着色器，bundle = 房间包里的 1.1 着色器 | Shaders for room materials: game = the game's own shaders, bundle = the 1.1 shaders in the room pack");
         DimReflection = Config.Bind("Narrate", "DimReflection", true,
-            "环境反射按 0 走、雾关掉（1.1 authored 是 1/开，但 0.16 的反射源是**烘焙时那张白天蓝空**的 HDR 立方图，强度 1 会把满屋光泽面垫亮，坑 #124）| Mute environment reflection and fog");
+            "关闭商人房间的环境反射和雾，避免画面整体发亮 | Mute environment reflection and fog in trader rooms so the picture is not washed out");
         AmbientReflection = Config.Bind("Narrate", "AmbientReflection", true,
-            "屏幕环境光按 1.1 场景写的强度 0.2 走（0.16 见 SSR 开着就取 ReflectionIntensitySSR=1，等于给全画面垫 5 倍底光，坑 #119/#124）| Pin the screen-ambient pass to the authored reflection intensity");
-        // 09-07 终审：热键默认**不绑**（SORA 09-07 明令：F 键被别的插件占满，热键取证全部拆除）。
-        // 作者要打触发点坐标、或访问卡死要逃生，自己在配置里绑一个键；默认 None 时 Update 里一次都不查键盘。
+            "屏幕环境光按 1.1 房间设定的强度渲染 | Use the 1.1 room's screen-space ambient intensity");
         CoordKey = Config.Bind("Debug", "CoordKey", KeyboardShortcut.Empty,
-            "打印当前相机坐标到日志（.dlg 触发点填坐标用，与判距同基准）。默认不绑 | Log the camera position for trigger authoring (unbound by default)");
+            "按下时把当前相机坐标写进日志，编写剧本触发点时使用。默认不绑定 | Write the camera position to the log, for placing script triggers (unbound by default)");
         AbortVisitKey = Config.Bind("Debug", "AbortVisitKey", KeyboardShortcut.Empty,
-            "强制退出卡住的商人访问。默认不绑 | Force-exit a stuck trader visit (unbound by default)");
+            "强制退出卡住的商人访问。默认不绑定 | Force-exit a stuck trader visit (unbound by default)");
         CallBadge = Config.Bind("Badge", "CallBadge", true,
-            "商人有话要说时的金色电话角标（商人卡片右上 + 顶栏昵称旁，1.1 同款）| Gold phone badge on trader cards and next to the nickname when a trader has something to say");
+            "商人有话要说时，在商人卡片和顶栏昵称旁显示金色电话角标 | Show a gold phone badge on the trader card and next to your nickname when a trader has something to say");
+        HandoverBadge = Config.Bind("Badge", "HandoverBadge", true,
+            "商人卡片使用 1.1.5 的角标：蓝色可上交、绿色可接、白色已完成 | Use 1.1.5 trader card badges: blue hand-over, green available, white completed");
         Loc.Mode = Language.Value;
         Language.SettingChanged += delegate { Loc.Mode = Language.Value; };
         Loc.GameCulture = () => LocalizationManager.Instance?.Culture;
         DlgLoc.Picker = Loc.Pick;
         VisitPatches.ApplyAll(new Harmony("com.sora.visitapi"));
         QuestFlags.Prefetch();
+        QuestZones.Prefetch();
         Log.LogInfo($"VisitAPI {Version} loaded (SPT 4.1.x: NarrateSystem + 章节UI + 触发器)");
     }
 

@@ -6,15 +6,8 @@ using HarmonyLib;
 
 namespace VisitAPI.Native;
 
-/// <summary>章节自动接取链（1.1 的 AutoStart 在 0.16 的替身）：
-/// ① 子任务标 `visitapi.autoStart` → 一变"可接"就自动接，**但要等所属章节先开始**（ChapterOpen）；标 `autoFinish` → 一达成就自动交；
-/// ② 章节任务本身没人会去点：任一子任务开始就自动接章节、子任务全完成（引擎判可交）就自动交章节——邮件/奖励照原生走。
-/// 挂在 QuestController 两个入口：状态变化事件 + 任务进书（含登录整本扫）。
-/// 实际接/交走 Core\QuestOps 唯一出口（T-6）：等一帧、状态复查、与触发器共用在途去重——双交任务从根上杜绝。
-/// 顺带担任 G7 的信号源：每次过手都点一下 ChapterEvents。DEV_NOTES #71。</summary>
 public static class ChapterChain
 {
-    /// 最近一个在用的任务控制器（flags 迟到时 Rescan 拿它补跑；章节横幅取章节名也用）
     public static QuestController Controller;
 
     [HarmonyPatch(typeof(QuestController), nameof(QuestController.OnConditionalStatusChangedEvent))]
@@ -23,7 +16,6 @@ public static class ChapterChain
     [HarmonyPatch(typeof(QuestController), nameof(QuestController.ManageConditional))]
     public static class Added { static void Postfix(QuestController __instance, Quest conditional) => Check(__instance, conditional); }
 
-    // 阶段四单点隔离：Check 挂在任务状态事件的两个入口上，自己炸会打断引擎的事件派发
     static void Check(QuestController qc, Quest quest)
     {
         try { CheckCore(qc, quest); }
@@ -33,9 +25,6 @@ public static class ChapterChain
     static void CheckCore(QuestController qc, Quest quest)
     {
         if (quest?.Template == null || qc?.Quests == null) return;
-        // 坑 #98 同病（09-07 终审）：藏身处 3D 里玩家挂的是 QuestControllerClientLocalGame，它的 Accept/Finish 只改内存、本地发奖励、不进档案；
-        // 触发器早改走 QuestOps.Resolve() 拿 Backend 版，自动链却一直用事件的 __instance。目标在藏身处达成时会「本地交一次、出去再交一次」。
-        // 事件来自 LocalGame 版 + 当前世界是藏身处 → 换成 Backend 版并按 id 重取任务；换不到就跳过（登录整本扫 / 战局内不受影响）。
         if (qc is QuestControllerClientLocalGame && Singleton<GameWorld>.Instantiated && Raid.IsHideout(Singleton<GameWorld>.Instance.LocationId))
         {
             var backend = QuestOps.Resolve();
@@ -45,24 +34,22 @@ public static class ChapterChain
             qc = backend; quest = real;
         }
         Controller = qc; QuestFlags.MarkStory(quest);
-        if (QuestFlags.IsStory(quest.Id)) ChapterEvents.Raise();   // 只有剧情家族才值得章节屏重画一次
+        ChapterUI.SkipState.Use(qc.Profile?.Id);
+        if (QuestFlags.IsStory(quest.Id)) { ChapterEvents.Raise(); ChapterUI.SkipState.Note(quest); }
+        QuestConditionNotify.Seed(quest);
         var st = quest.QuestStatus;
         if (AutoReady(qc, quest.Id) && st == EQuestStatus.AvailableForStart && ChapterOpen(qc, quest.Id)) AutoAccept(qc, quest);
         if ((QuestFlags.IsChapter(quest.Id) || QuestFlags.AutoFinish(quest.Id)) && st == EQuestStatus.AvailableForFinish) QuestOps.Finish(qc, quest, "chain");
-        // 章节跟着子任务走：任一子任务开始就接章节。子任务先到（状态变化）或章节先到（登录整本扫）都接得住
         var chapterId = QuestFlags.IsChapter(quest.Id) ? quest.Id : QuestFlags.ChapterOf(quest.Id);
         var chapter = chapterId == null ? null : chapterId == quest.Id ? quest : qc.Quests.GetConditional(chapterId);
         if (chapter != null && chapter.QuestStatus == EQuestStatus.AvailableForStart
             && QuestFlags.SubsOf(chapterId).Any(id => ChapterUI.ChapterStates.Begun(qc.Quests.GetConditional(id)?.QuestStatus ?? EQuestStatus.Locked))) AutoAccept(qc, chapter);
-        // 章节刚开门：把卡在 ChapterOpen 上等开门的 autoStart 子任务放出来（它们自己不会再收到状态变化事件，得由章节主动点名）
-        // 09-14：「已开始」一律问 ChapterStates.Begun，别用 >=（AvailableAfter=9 排在 Success 后面，等定时的任务会被当成已开始）
         if (chapter != null && ChapterUI.ChapterStates.Begun(chapter.QuestStatus))
             foreach (var id in QuestFlags.SubsOf(chapterId))
             {
                 var sub = qc.Quests.GetConditional(id);
                 if (sub != null && AutoReady(qc, id) && sub.QuestStatus == EQuestStatus.AvailableForStart) AutoAccept(qc, sub);
             }
-        // startAfter 是跨任务前置：前置完成时点名等它的任务（可能在别的章节，上面按本章节扫的循环够不着；09-07 终审）
         if (st == EQuestStatus.Success)
             foreach (var id in QuestFlags.WaitingOn(quest.Id))
             {
@@ -71,12 +58,6 @@ public static class ChapterChain
             }
     }
 
-    /// <summary>自动接的唯一出口：先按引擎自己的判据把 AvailableForStart 里的 Quest 型前置再核一遍（09-12 迷宫实机）。
-    /// 起因：SPT Developer 版本的档案建档时把库里**所有**任务一律标成「可接」（`QuestHelper.AddAllQuestsToProfile`——档案里六条迷宫任务的
-    /// 可接时间戳全等于建档那一秒），客户端拿档案状态当初始状态 → 前置没完成的 Jaeger 任务一登录就是「可接」→ 自动链当场接下 →
-    /// SPT 接取时照发 Started 奖励，两张门禁卡登录一秒就寄到了、16 小时定时器形同虚设。
-    /// 判据照抄 `ConditionsConnectorsManager` 里 ConditionQuest 的检查：目标任务状态在要求表里；带 `availableAfter` 的还要过了
-    /// 「目标进入该状态的时间 + availableAfter」。没到就不接、记一条日志（同一任务同一原因只记一次）；到点后引擎自己的定时器会再发状态事件。</summary>
     static readonly System.Collections.Generic.Dictionary<string, string> _held = new();
     static void AutoAccept(QuestController qc, Quest quest)
     {
@@ -108,19 +89,14 @@ public static class ChapterChain
         return true;
     }
 
-    /// <summary>子任务的「自动接」是章节内部的接力棒：所属章节没开始就先别发。
-    /// 不设这道闸，一条没有前置的子任务会在登录、任务书刚建好那一刻就被接下——人还在菜单里横幅就弹了（实机踩过）。
-    /// 想让整章自动开始，把 autoStart 标在**章节**上：章节自己不属于任何章节，不受这道闸。</summary>
     static bool ChapterOpen(QuestController qc, string questId)
     {
         var chapterId = QuestFlags.ChapterOf(questId);
-        if (chapterId == null) return true;                       // 不是谁的子任务：老行为不变
+        if (chapterId == null) return true;
         var chapter = qc.Quests.GetConditional(chapterId);
         return chapter != null && ChapterUI.ChapterStates.Begun(chapter.QuestStatus);
     }
 
-    /// <summary>这条任务够不够格「自动接」。标了 startAfter 就等指定任务 == Success —— VisitAPI 自己的前置，战局内也算数。
-    /// 两者都写时 startAfter 更严、它说了算。判定必须 == Success：>= 会把失败家族一起放行。</summary>
     static bool AutoReady(QuestController qc, string questId)
     {
         var after = QuestFlags.StartAfter(questId);
@@ -128,8 +104,20 @@ public static class ChapterChain
         return qc.Quests.GetConditional(after)?.QuestStatus == EQuestStatus.Success;
     }
 
-    /// <summary>flags 迟到时补跑一轮：先把章节表登记齐，再让每条任务重过一遍自动链判定。
-    /// 登录那轮 ManageConditional 扫描在 flags 没到时是空跑的（IsChapter 全 false → 点名循环压根不进）。</summary>
+    public static bool Reachable(QuestController qc, Quest quest)
+    {
+        if (qc?.Quests == null || quest == null) return false;
+        var after = QuestFlags.StartAfter(quest.Id);
+        if (after != null && qc.Quests.GetConditional(after)?.QuestStatus != EQuestStatus.Success) return false;
+        if (!PrereqsMet(qc, quest, out _)) return false;
+        var chapterId = QuestFlags.ChapterOf(quest.Id);
+        if (chapterId == null || chapterId == quest.Id) return true;
+        var chapter = qc.Quests.GetConditional(chapterId);
+        if (chapter == null) return false;
+        if (ChapterUI.ChapterStates.Begun(chapter.QuestStatus)) return true;
+        return chapter.QuestStatus == EQuestStatus.AvailableForStart && Reachable(qc, chapter);
+    }
+
     public static void Rescan()
     {
         var qc = Controller; if (qc?.Quests == null) return;

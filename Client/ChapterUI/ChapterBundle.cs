@@ -5,13 +5,10 @@ using UnityEngine;
 
 namespace VisitAPI.ChapterUI
 {
-    /// <summary>章节屏的壳：从 plugins/VisitAPI/bundles/visitapi_chapterui.bundle 里把 1.1 的 prefab 实例化出来。
-    /// bundle 里 TMP 的字体引用是空的（1.1 的字体资产没带），实例化后从任务屏现成的文字上抄字体和材质。DEV_NOTES #69。</summary>
     public static class ChapterBundle
     {
         static AssetBundle _bundle;
 
-        /// 实例化 bundle 里任一 prefab：清掉 1.1 导出残留的 SubMesh，把字体/材质从任务屏现成文字上抄过来，文本走 TmpFix 重建
         public static GameObject Instantiate(string prefabName, Transform host, TextMeshProUGUI fontTemplate)
         {
             var prefab = Load()?.LoadAsset<GameObject>(prefabName);
@@ -34,7 +31,7 @@ namespace VisitAPI.ChapterUI
         static AssetBundle Load()
         {
             if (_bundle != null) return _bundle;
-            var path = Path.Combine(Path.GetDirectoryName(typeof(Plugin).Assembly.Location), "bundles", "visitapi_chapterui.bundle");
+            var path = Path.Combine(VisitPaths.Ui, "visitapi_chapterui.bundle");   // ui\（老的 bundles\ 还认，见 VisitPaths）
             if (!File.Exists(path)) { Plugin.Log.LogWarning("[chapter] bundle missing: " + path); return null; }
             _bundle = AssetBundle.LoadFromFile(path);
             if (_bundle == null) Plugin.Log.LogWarning("[chapter] bundle failed to load: " + path);

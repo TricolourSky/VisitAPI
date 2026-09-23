@@ -9,11 +9,6 @@ using VisitAPI.Dialog;
 
 namespace VisitAPI.Native;
 
-/// <summary>
-/// 一场自定义 `.dlg` 对话的统一生命周期：行副作用分发 + 失控熔断 + 任务状态变了重建当前节点。
-/// 旧版是 8 个服务各自 Watch 一遍（TabRouter/QuestRefresh/Standing/Variable/SetStatus/Handover/Once/Fuse），
-/// 生命周期各自为政 —— 触发器和对话互相出 BUG 的头号接缝，现在收成这一个对象。
-/// </summary>
 public sealed class DialogSession
 {
     readonly ClientDialogController _dc;
@@ -37,11 +32,9 @@ public sealed class DialogSession
 
     void OnDialog(BaseTraderDialog dialog)
     {
-        // 验收证据行（坑 #98 规矩：要看的必须 LogInfo）：每一拍的去向 + 每条执行的行，一场对话十几行
         Plugin.Log.LogInfo(dialog == null ? "[dlg] 对话结束（当前对话置空）"
             : $"[dlg] 切到 {(DialogTemplateBuilder.NodeByDialog.TryGetValue(dialog.Id, out var n) ? n : "旁白拍")} {dialog.Id} side={dialog.DialogSide} lines={dialog.Lines?.Count() ?? 0}");
         if (dialog == null) return;
-        // 每个 dialog 对象只经过这里一次（OnDialogChanged 每拍发一个新对象），不会重复订阅
         dialog.OnExecuteLine += line =>
         {
             var acts = line?.Template?.Actions?.Select(a => a.GetType().Name.Replace("Dialog", "").Replace("Action", "")) ?? Enumerable.Empty<string>();
@@ -53,7 +46,7 @@ public sealed class DialogSession
             if (e.SyncVar != null) Vars.Sync(e.SyncVar.Value.id, e.SyncVar.Value.value);
             if (e.SetStatus != null) EffectActions.SetStatus(_quests, e.SetStatus.Value.quest, e.SetStatus.Value.status);
             if (e.HandoverQuest != null) EffectActions.Handover(_quests, _profile, _inventory, e.HandoverQuest);
-            if (e.Once != null) OnceService.Mark(e.Once.Value);
+            if (e.Once != null) OnceService.Mark(_profile, e.Once.Value);
         };
     }
 
@@ -65,7 +58,6 @@ public sealed class DialogSession
         Plugin.Instance.StartCoroutine(TabRouter.OpenTradeWindow(_tree, node, _screen, _profile, _quests, _inventory, mode));
     }
 
-    // 1 秒内执行 25 行 = 剧本死循环，熔断保护；熔断后压 4 秒冷静期（期间不重置计数窗口）
     void Fuse()
     {
         if (Time.unscaledTime - _fuseWindow > 1f) { _fuseWindow = Time.unscaledTime; _fuseCount = 0; }

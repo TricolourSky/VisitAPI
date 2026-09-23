@@ -9,5 +9,12 @@
   "UI/MainQuests/NoQuestsAvailable": "NO ACTIVE TASKS",
   "UI/MainQuests/TabName": "STORY",
   "UI/MainQuests/FailedTask": "FAILED",
-  "UI/MainQuests/ChapterUnavailable": "UNAVAILABLE"
+  "UI/MainQuests/ChapterUnavailable": "UNAVAILABLE",
+  "UI/Quest/Reward/Notification/MainQuest": "Reward for completing the story:",
+  "UI/Quest/Reward/Notification/QuestChapter": "Reward for finishing a chapter:",
+  "UI/Quest/Reward/Notification/Experience": "Experience:",
+  "DialogConfirmationWindow/Header": "IMPORTANT CHOICE",
+  "DialogConfirmationWindow/Description": "POINT OF NO RETURN",
+  "PopUpWarningconsequences_Sky_05_give": "Give the case to Prapor?",
+  "PopUpWarningconsequences_Sky_05_keep": "Keep the case for yourself?"
 }

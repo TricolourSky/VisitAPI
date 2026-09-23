@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Comfort.Common;
 using EFT;
 using EFT.CameraControl;
@@ -8,23 +9,13 @@ using UnityEngine;
 
 namespace VisitAPI.Native;
 
-/// <summary>
-/// 访问期间不用玩家设置建相机：1.1 场景相机预制体在 0.16 只有 6 个可绑定组件，整搬会黑屏（实机证实）。
-/// 用 0.16 自己的 `Cam2_fps_hideout` 完整效果链顶上，仍由原生 SetCameraFromPrefab 完成实例化与效果登记。
-/// FOV 走配置 `Narrate.Fov`：09-02 定 50 → 09-04 SORA 改 55 → 同日改回 1.1 相机预制体的 75 做影调对照（自动曝光按画面内容取样，
-/// 视野变了取样内容也变）。默认值即当前生效值，改动需 SORA 拍板。
-/// </summary>
 [HarmonyPatch(typeof(CameraManager), nameof(CameraManager.SetCameraFromSettings))]
 public static class NarrateCameraBypass
 {
-    /// 按 1.1 机位标记定位的房间用 1.1 写死的 55 度；走 0.16 原生坐标的（Prapor）用配置值
     internal static float FixedFov => NarrateSpawnGuard.MarkerUsed ? NarrateSpawnGuard.Fov11 : Plugin.Fov.Value;
 
-    /// <summary>玩家眼睛带着 3.76° 下俯，1.1 房间自带的机位标记写的是俯仰 0——把两张图的人物位置逐像素量过：
-    /// 这 3.76° 正好等于 1.1 里人物高出我们的那 80 像素（坑 #118 修正版：机位标记的**坐标**是错的，**朝向**是对的）。
-    /// 只把俯仰和翻滚归零，朝向（yaw）和位置仍用玩家眼睛的。</summary>
     internal static Quaternion Level(Quaternion eye) =>
-        Plugin.LevelCamera.Value && !NarrateSpawnGuard.MarkerUsed ? Quaternion.Euler(0f, eye.eulerAngles.y, 0f) : eye;   // 按 1.1 机位标记定位的房间保留标记自带的俯仰
+        Plugin.LevelCamera.Value && !NarrateSpawnGuard.MarkerUsed ? Quaternion.Euler(0f, eye.eulerAngles.y, 0f) : eye;
 
     static bool Prefix(CameraManager __instance, CameraManager.ISettings settings)
     {
@@ -36,8 +27,6 @@ public static class NarrateCameraBypass
             return true;
         }
         __instance.SetCameraFromPrefab(prefab, settings?.PrismPresetPrefab, settings?.PostProcessProfilePrefab);
-        // 相机已经按我们的预制体建好了：后面无论哪一步抛异常都必须 return false，否则异常从前缀漏回 PlayerCameraController、
-        // 引擎再按原逻辑建第二台相机（09-07 终审）。参数搬运 / 效果名单本就是「能装多少装多少」，失败只记日志。
         try
         {
             var camera = __instance.Camera;
@@ -48,44 +37,86 @@ public static class NarrateCameraBypass
                 if (eye != null) camera.transform.SetPositionAndRotation(eye.position, Level(eye.rotation));
                 camera.fieldOfView = FixedFov;
                 __instance.Fov = FixedFov;
-                // 09-08 SORA 实机（藏身处 → 访问）：藏身处玩家举枪瞄准时 Player.Look 发过 SetFov(设置值-15=40, 1s)，那条渐变协程跑在 StaticManager 上、
-                // 每帧重读 CameraManager.Camera——相机换成我们的之后它继续把新相机拉向 40 并把 CameraManager.Fov 记成 40；健康效果的 FOV_Accumulator
-                // 又每帧按 Fov+ε 写回 → 商人贴脸。协程起于访问之前，SetFov 前缀改不到它的目标值；这里再调一次 SetFov 把它杀掉（前缀会把目标改成 FixedFov）。
                 __instance.SetFov(FixedFov, 0.05f);
+                if (camera.GetComponent("CinemachineBrain") is Behaviour brain)
+                {
+                    string active = "无";
+                    try
+                    {
+                        var vcam = brain.GetType().GetProperty("ActiveVirtualCamera")?.GetValue(brain);
+                        if (vcam != null)
+                        {
+                            var name = vcam.GetType().GetProperty("Name")?.GetValue(vcam) as string;
+                            var state = vcam.GetType().GetProperty("State")?.GetValue(vcam);
+                            var lens = state?.GetType().GetField("Lens")?.GetValue(state);
+                            var lensFov = lens?.GetType().GetField("FieldOfView")?.GetValue(lens);
+                            active = $"{name} 镜头 FOV={lensFov}";
+                        }
+                    }
+                    catch (Exception e) { active = "读取失败: " + e.Message; }
+                    brain.enabled = false;
+                    Plugin.Log.LogInfo($"[narrate] 访问相机上的 CinemachineBrain 已关（之前驱动的虚拟相机：{active}）");
+                }
                 if (camera.GetComponent<NarrateFovEnforcer>() == null) camera.gameObject.AddComponent<NarrateFovEnforcer>();
-                // 后处理参数整套搬 1.1 相机预制体上的 PrismEffects（包内原生数据），插件不发明数值
                 PrismTransplant.Apply(settings?.CameraPrefab, camera);
-                Camera11.Apply(camera);   // 1.1 名单：本机多出来的效果关掉，1.1 开着的按预制体参数灌上
+                Camera11.Apply(camera);
             }
             Visibility.Environment(false);
-            Plugin.Log.LogDebug($"[narrate] native compatible camera registered: pos={(camera != null ? camera.transform.position.ToString() : "?")} fov={(camera != null ? camera.fieldOfView : 0f):0.##}");
+            Plugin.Log.LogInfo($"[narrate] 访问相机建好：pos={(camera != null ? camera.transform.position.ToString() : "?")} fov={(camera != null ? camera.fieldOfView : 0f):0.##} 目标 {FixedFov:0.##} CameraManager.Fov={__instance.Fov:0.##} 机位标记={NarrateSpawnGuard.MarkerUsed}");
         }
         catch (Exception e) { Plugin.Log.LogError("[narrate] 相机建好后的参数搬运失败（相机保留，效果可能不全）: " + e); }
         return false;
     }
 }
 
-// CameraManager 会把玩家设置重新写进相机；商人访问期间把这个入口固定住。
 [HarmonyPatch(typeof(CameraManager), nameof(CameraManager.ApplyFoV))]
 public static class NarrateFovLock
 {
+    static float _logAt;
     static void Prefix(ref int __0)
     {
-        if (Narrating.Now) __0 = (int)Math.Round(NarrateCameraBypass.FixedFov);
+        if (!Narrating.Now) return;
+        var to = (int)Math.Round(NarrateCameraBypass.FixedFov);
+        if (__0 != to && Time.unscaledTime >= _logAt) { _logAt = Time.unscaledTime + 5f; Plugin.Log.LogInfo($"[narrate] ApplyFoV({__0}) 访问期改写成 {to}"); }
+        __0 = to;
     }
 }
 
-/// <summary>第三道 FOV 防线：有东西绕过 CameraManager 直写相机（实测被写到 41.85，视角像凑近了）。
-/// 访问期逐帧执法——偏离配置值超过 0.5 度就按回去并记下现行值。随相机销毁自灭。</summary>
 public class NarrateFovEnforcer : MonoBehaviour
 {
     float _logAt;
     Camera _cam;
 
-    // 09-08：除了 LateUpdate，再挂一道 onPreCull（每台相机真正渲染前的最后一刻）——Update/LateUpdate 阶段之后还有人写 FOV 的话，
-    // 这里是最后一次机会；同时把 CameraManager.Fov 一起钉住（FOV_Accumulator 之类是按「Fov + ε」写回相机的，基数不对怎么按都按不住）
-    void OnEnable() { _cam = GetComponent<Camera>(); Camera.onPreCull += Pin; }
-    void OnDisable() { Camera.onPreCull -= Pin; }
+    void OnEnable()
+    {
+        _cam = GetComponent<Camera>(); Camera.onPreCull += Pin; Camera.onPreRender += PreRender;
+        Plugin.Log.LogInfo($"[narrate] FOV 执法器挂上：相机 {(_cam != null ? _cam.name : "?")} 现值 {(_cam != null ? _cam.fieldOfView : 0f):0.##}，目标 {NarrateCameraBypass.FixedFov:0.##}");
+        if (_cam != null)
+            Plugin.Log.LogInfo("[narrate] 相机组件（带 渲染前/LateUpdate 回调的标 *）: " + string.Join(", ", _cam.GetComponents<Component>().Where(c => c != null).Select(c =>
+            {
+                var t = c.GetType();
+                const System.Reflection.BindingFlags F = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+                var hooks = new[] { "OnPreCull", "OnPreRender", "LateUpdate" }.Where(m => t.GetMethod(m, F, null, Type.EmptyTypes, null) != null).ToArray();
+                return hooks.Length > 0 ? $"{t.Name}*[{string.Join("/", hooks)}]" : t.Name;
+            })));
+    }
+    void OnDisable() { Camera.onPreCull -= Pin; Camera.onPreRender -= PreRender; }
+
+    float _renderLogAt;
+    void PreRender(Camera cam)
+    {
+        if (cam != _cam || !Narrating.Now || Time.unscaledTime < _renderLogAt) return;
+        var m11 = cam.projectionMatrix.m11;
+        var projFov = m11 != 0f ? 2f * Mathf.Atan(1f / m11) * Mathf.Rad2Deg : 0f;
+        if (Math.Abs(cam.fieldOfView - NarrateCameraBypass.FixedFov) <= 0.5f && Math.Abs(projFov - NarrateCameraBypass.FixedFov) <= 0.5f) return;
+        cam.fieldOfView = NarrateCameraBypass.FixedFov;
+        if (Math.Abs(projFov - NarrateCameraBypass.FixedFov) > 0.5f) cam.ResetProjectionMatrix();
+        var fixedM11 = cam.projectionMatrix.m11;
+        var fixedFov = fixedM11 != 0f ? 2f * Mathf.Atan(1f / fixedM11) * Mathf.Rad2Deg : 0f;
+        _renderLogAt = Time.unscaledTime + 5f;
+        var cm = EFT.CameraControl.CameraManager.Instance;
+        Plugin.Log.LogWarning($"[narrate] 渲染前：投影矩阵折算 FOV={projFov:0.##} → 重算后 {fixedFov:0.##}（CameraManager.Fov={(cm != null ? cm.Fov : 0f):0.##} 目标 {NarrateCameraBypass.FixedFov:0.##}）");
+    }
 
     void Pin(Camera cam)
     {
@@ -116,14 +147,18 @@ public class NarrateFovEnforcer : MonoBehaviour
     }
 }
 
-// 第二条 FOV 写入口：SetFov(float, time) 是带渐变协程的版本。
-// ProceduralWeaponAnimation（HideWeapon → InitTransforms 等）会用它把玩家 FOV(≈68) 平滑写回相机——
-// 二次进入实机抓到 fov=67.62 正是这条渐变的中途值（首次进入时它跑在相机创建前，被引擎空检查挡掉）。
 [HarmonyPatch(typeof(CameraManager), nameof(CameraManager.SetFov))]
 public static class NarrateSetFovLock
 {
-    static void Prefix(ref float x)
+    static float _logAt;
+    static void Prefix(ref float x, float time)
     {
-        if (Narrating.Now) x = NarrateCameraBypass.FixedFov;
+        if (!Narrating.Now) return;
+        if (Math.Abs(x - NarrateCameraBypass.FixedFov) > 0.5f && Time.unscaledTime >= _logAt)
+        {
+            _logAt = Time.unscaledTime + 5f;
+            Plugin.Log.LogInfo($"[narrate] SetFov({x:0.##}, {time:0.##}s) 访问期改写成 {NarrateCameraBypass.FixedFov:0.##}");
+        }
+        x = NarrateCameraBypass.FixedFov;
     }
 }
