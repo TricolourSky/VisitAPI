@@ -14,7 +14,6 @@ public static class InputGuard
         GamePlayerOwner.SetIgnoreInputInNPCDialog(true);
         _blocked = true;
         _since = Time.unscaledTime;
-        Plugin.Log.LogDebug("[dlg] 玩家视角已锁（对话屏开着）");
     }
 
     public static void Release()
@@ -22,7 +21,6 @@ public static class InputGuard
         if (!_blocked) return;
         GamePlayerOwner.SetIgnoreInputInNPCDialog(false);
         _blocked = false;
-        Plugin.Log.LogDebug("[dlg] 玩家视角已放开");
     }
 
     public static void Tick()

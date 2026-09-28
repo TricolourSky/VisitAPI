@@ -10,14 +10,13 @@ public static class GlassProbe
     public static void Report(Scene scene)
     {
         try { Apply(scene); }
-        catch (System.Exception e) { Plugin.Log.LogWarning("[narrate] 透明面光滑度封顶出错（已忽略）: " + e.GetType().Name + ": " + e.Message); }
+        catch (System.Exception e) { Plugin.Log.LogWarning("[narrate] transparent surface smoothness cap failed (ignored): " + e.GetType().Name + ": " + e.Message); }
     }
 
     static void Apply(Scene scene)
     {
         if (!scene.isLoaded) return;
         var rebuilt = new System.Collections.Generic.Dictionary<Material, Material>();
-        var touched = new System.Collections.Generic.List<string>();
         var standard = Shader.Find("Standard");
         if (standard == null) return;
         foreach (var root in scene.GetRootGameObjects())
@@ -42,13 +41,10 @@ public static class GlassProbe
                         fresh.SetFloat("_Mode", 3f); fresh.SetFloat("_SrcBlend", 1f); fresh.SetFloat("_DstBlend", 10f); fresh.SetFloat("_ZWrite", 0f);
                         fresh.renderQueue = m.renderQueue;
                         rebuilt[m] = fresh;
-                        touched.Add($"{m.name}@{r.name}(光滑度 {g:0.##}→{Mathf.Min(g, MaxSmoothness):0.##})");
                     }
                     mats[i] = fresh; changed = true;
                 }
                 if (changed) r.sharedMaterials = mats;
             }
-        if (touched.Count > 0)
-            Plugin.Log.LogInfo($"[narrate] 透明面重建: '{scene.name}' {touched.Count} 个 Standard 预乘透明材质按验收档位重建 [{string.Join(", ", touched)}]（访问里透明面的反射源是黑的，越光滑越黑；09-07 实机定 0.5）");
     }
 }

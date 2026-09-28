@@ -23,12 +23,14 @@ public class VariableRouter(JsonUtil jsonUtil, ProfileHelper profileHelper, Http
             {
                 var request = (VariableRequest)info;
                 var pmc = profileHelper.GetPmcProfile(sessionId);
-                if (pmc != null && request.VariableId?.Length == 24)
-                {
-                    pmc.Variables ??= new Dictionary<MongoId, int>();
-                    pmc.Variables[new MongoId(request.VariableId)] = request.Value;
-                    VariableGroups.Recompute(pmc.Variables);
-                }
+                // 24 位但不是十六进制的 id 会让 new MongoId 抛异常，先校验（09-24 审查 M1）
+                if (pmc != null && request?.VariableId?.Length == 24 && MongoId.IsValidMongoId(request.VariableId))
+                    lock (ProfileVariableLock.For(sessionId))
+                    {
+                        pmc.Variables ??= new Dictionary<MongoId, int>();
+                        pmc.Variables[new MongoId(request.VariableId)] = request.Value;
+                        VariableGroups.Recompute(pmc.Variables);
+                    }
                 return httpResponse.EmptyResponse();
             },
             typeof(VariableRequest)),
@@ -36,7 +38,8 @@ public class VariableRouter(JsonUtil jsonUtil, ProfileHelper profileHelper, Http
             async (url, info, sessionId, output, ct) =>
             {
                 var pmc = profileHelper.GetPmcProfile(sessionId);
-                if (pmc?.Variables != null) VariableGroups.Recompute(pmc.Variables);
+                if (pmc?.Variables != null)
+                    lock (ProfileVariableLock.For(sessionId)) VariableGroups.Recompute(pmc.Variables);
                 return httpResponse.GetBody(VariableGroups.Payload());
             },
             typeof(VariableRequest))

@@ -80,7 +80,6 @@ public static class DialogOpener
             var ok = rule.Conds.TrueForAll(c => { var v = c.Field == "level" ? level : standing; return c.LessEq ? v <= c.Value : v >= c.Value; });
             if (ok && tree.Nodes.ContainsKey(rule.Node)) { pick = rule.Node; break; }
         }
-        Plugin.Log.LogDebug($"[visit] start={pick} (level={level} standing={standing} whenRules={tree.WhenRules.Count})");
         return pick;
     }
 }

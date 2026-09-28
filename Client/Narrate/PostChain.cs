@@ -18,19 +18,18 @@ public static class PostChain
         var field = Traverse.Create(effect).Field("_ssaaPropagator");
         if (!field.FieldExists())
         {
-            Plugin.Log.LogWarning($"[narrate] {name} 没有 _ssaaPropagator 字段（本 build 与取证时不同），不装它");
+            Plugin.Log.LogWarning($"[narrate] {name}: no _ssaaPropagator field (this build differs from the one investigated), not installing it");
             return false;
         }
         var propagator = effect.GetComponent<SSAAPropagator>();
         if (propagator == null)
         {
-            Plugin.Log.LogWarning($"[narrate] 访问相机上没有 SSAAPropagator，{name} 没处画，不装它");
+            Plugin.Log.LogWarning($"[narrate] No SSAAPropagator on the visit camera, {name} has nowhere to draw, not installing it");
             return false;
         }
         field.SetValue(propagator);
         if (_host != effect.gameObject) { Effects.Clear(); _host = effect.gameObject; }
         Effects.Add((effect, draw, name));
-        Plugin.Log.LogInfo($"[narrate] {name} 接进 SSAA 乒乓缓冲，排在最终出图之前（第 {Effects.Count} 位；issue #2）");
         return true;
     }
 
@@ -45,7 +44,7 @@ public static class PostChain
                 var mat = Traverse.Create(effect).Field("m_Material");
                 if (mat.FieldExists() && mat.GetValue() is Material m) { UnityEngine.Object.DestroyImmediate(m); mat.SetValue(null); }
             }
-            catch (Exception e) { Plugin.Log.LogWarning($"[narrate] {name} 材质释放失败: {e.Message}"); }
+            catch (Exception e) { Plugin.Log.LogWarning($"[narrate] {name} material release failed: {e.Message}"); }
         }
         Effects.Clear();
         _host = null;
@@ -65,7 +64,7 @@ public static class PostChain
                 {
                     if (Time.unscaledTime < _logAt) continue;
                     _logAt = Time.unscaledTime + 5f;
-                    Plugin.Log.LogError($"[narrate] {name} 在乒乓缓冲里画失败（跳过这一帧）: {e}");
+                    Plugin.Log.LogError($"[narrate] {name} failed to draw in the ping-pong buffer (skipping this frame): {e}");
                 }
             }
         }

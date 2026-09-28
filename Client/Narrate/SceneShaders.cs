@@ -10,11 +10,9 @@ public static class SceneShaders
     static Dictionary<string, Shader> _shaders;
     static readonly HashSet<string> _missed = new(StringComparer.Ordinal);
     static readonly Dictionary<Type, FieldInfo[]> _shaderFields = new();
-    static int _fieldSwaps, _decalSwaps, _decalKept;
-    static readonly HashSet<string> _gameSwaps = new(StringComparer.Ordinal);
-    static readonly HashSet<string> _noGameTwin = new(StringComparer.Ordinal);
 
-    static bool GameShaders => string.Equals(Plugin.ShaderSource.Value.Trim(), "game", StringComparison.OrdinalIgnoreCase);
+    // 09-25：原来的设置项 Narrate.ShaderSource（默认 game）去掉了，固定用游戏自带的同名着色器
+    const bool GameShaders = true;
 
     public static void Snapshot()
     {
@@ -22,7 +20,6 @@ public static class SceneShaders
         _shaders = new Dictionary<string, Shader>(StringComparer.Ordinal);
         foreach (var s in Resources.FindObjectsOfTypeAll<Shader>())
             if (s != null && !string.IsNullOrEmpty(s.name) && !_shaders.ContainsKey(s.name)) _shaders.Add(s.name, s);
-        Plugin.Log.LogDebug("[scene] native shader snapshot: " + _shaders.Count);
     }
 
     public static void Fix(GameObject root)
@@ -34,9 +31,7 @@ public static class SceneShaders
                 if (mat.shader.isSupported && !GameShaders) continue;
                 if (mat.shader.isSupported)
                 {
-                    if (_shaders.TryGetValue(mat.shader.name, out var own) && own != null && own != mat.shader)
-                    { Swap(mat, own); _gameSwaps.Add(own.name); }
-                    else _noGameTwin.Add(mat.shader.name);
+                    if (_shaders.TryGetValue(mat.shader.name, out var own) && own != null && own != mat.shader) Swap(mat, own);
                     continue;
                 }
                 if (_shaders.TryGetValue(mat.shader.name, out var real) && real != null) { Swap(mat, real); continue; }
@@ -51,13 +46,8 @@ public static class SceneShaders
     {
         var queue = mat.renderQueue;
         mat.shader = to;
-        if (mat.renderQueue != queue)
-        {
-            mat.renderQueue = queue;
-            _queueKept++;
-        }
+        if (mat.renderQueue != queue) mat.renderQueue = queue;
     }
-    static int _queueKept;
 
     static void FixFields(GameObject root)
     {
@@ -74,9 +64,7 @@ public static class SceneShaders
                 f.SetValue(mb, native);
                 swapped = true;
             }
-            if (!swapped) continue;
-            _fieldSwaps++;
-            if (mb.enabled) { mb.enabled = false; mb.enabled = true; }
+            if (swapped && mb.enabled) { mb.enabled = false; mb.enabled = true; }
         }
     }
 
@@ -93,27 +81,11 @@ public static class SceneShaders
     internal static void FixDecal(Material mat)
     {
         if (mat == null || mat.shader == null || _shaders == null || !GameShaders) return;
-        if (_shaders.TryGetValue(mat.shader.name, out var own) && own != null && own != mat.shader) { mat.shader = own; _decalSwaps++; }
-        else if (own == null) _decalKept++;
+        if (_shaders.TryGetValue(mat.shader.name, out var own) && own != null && own != mat.shader) mat.shader = own;
     }
 
     public static void ReportMisses()
     {
-        if (_gameSwaps.Count > 0 || _noGameTwin.Count > 0)
-        {
-            Plugin.Log.LogInfo($"[scene] ShaderSource=game：换成 0.16 同名 shader {_gameSwaps.Count} 种 [{string.Join(", ", _gameSwaps)}]；0.16 没有同名、仍用包内 1.1 二进制 {_noGameTwin.Count} 种 [{string.Join(", ", _noGameTwin)}]；换 shader 时保住渲染队列 {_queueKept} 个材质");
-            _gameSwaps.Clear(); _noGameTwin.Clear(); _queueKept = 0;
-        }
-        if (_decalSwaps > 0 || _decalKept > 0)
-        {
-            Plugin.Log.LogInfo($"[scene] 贴花 shader: 注册前换成 0.16 同名 {_decalSwaps} 个材质，0.16 无同名仍用 1.1 的 {_decalKept} 个（坑 #113）");
-            _decalSwaps = _decalKept = 0;
-        }
-        if (_fieldSwaps > 0)
-        {
-            Plugin.Log.LogDebug("[scene] shader fields fixed on " + _fieldSwaps + " components");
-            _fieldSwaps = 0;
-        }
         if (_missed.Count == 0) return;
         Plugin.Log.LogWarning("[scene] renderers disabled, shader not in game (" + _missed.Count + "): " + string.Join(", ", _missed));
         _missed.Clear();

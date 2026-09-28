@@ -11,7 +11,6 @@ public static class Visibility
         var cm = CameraManager.Instance;
         if (cm == null || cm.Camera == null || cm.IsActive == active) return;
         cm.IsActive = active;
-        Plugin.Log.LogDebug("[vis] camera " + (active ? "on" : "off"));
     }
 
     public static void Environment(bool shown)

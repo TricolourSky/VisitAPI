@@ -18,28 +18,21 @@ public static class ReflectionPin
         try
         {
             var volume = camera.GetComponent<PostProcessVolume>();
-            var kept = volume != null ? OnlySsr(volume) : "无 PostProcessVolume";
+            if (volume != null) OnlySsr(volume);
             if (Singleton<SettingsManager>.Instantiated) cm.SetSSR(Singleton<SettingsManager>.Instance.Graphics.Settings.SSR.Value);
             Refresh();
-            Plugin.Log.LogInfo($"[narrate] 反射: PPv2 只留 SSR（{kept}），SSR={cm.GetSSREnabled()}，AmbientLight[{Describe()}]");
         }
         catch (Exception e)
         {
-            Plugin.Log.LogWarning("[narrate] 反射设置失败: " + e.GetType().Name + " " + e.Message);
+            Plugin.Log.LogWarning("[narrate] Reflection setup failed: " + e.GetType().Name + " " + e.Message);
         }
     }
 
-    static string OnlySsr(PostProcessVolume volume)
+    static void OnlySsr(PostProcessVolume volume)
     {
         volume.enabled = true;
-        var off = 0;
         foreach (var setting in volume.profile.settings)
-        {
-            var keep = setting is ScreenSpaceReflections;
-            if (!keep && setting.active) off++;
-            setting.active = keep;
-        }
-        return $"关掉其余 {off} 项";
+            setting.active = setting is ScreenSpaceReflections;
     }
 
     static void Refresh()
@@ -58,15 +51,8 @@ public static class ReflectionPin
 
         static void Postfix(AmbientLight __instance)
         {
-            if (!Narrating.Now || !Plugin.AmbientReflection.Value || BlockField == null) return;
+            if (!Narrating.Now || BlockField == null) return;
             if (BlockField.GetValue(__instance) is MaterialPropertyBlock block) block.SetFloat(ReflectionIntensityId, __instance.ReflectionIntensity);
         }
     }
-
-    static string Describe() =>
-        string.Join("; ", UnityEngine.Object.FindObjectsOfType<AmbientLight>().Select(a =>
-        {
-            var block = Traverse.Create(a).Field("_screenAmbientBlock").GetValue<MaterialPropertyBlock>();
-            return $"{a.gameObject.scene.name} SSR判定={a.IsSSREnable} 块内={(block != null ? block.GetFloat("_ReflectionIntensity") : -1f):0.###}";
-        }));
 }

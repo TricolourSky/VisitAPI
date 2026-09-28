@@ -22,7 +22,7 @@ namespace VisitAPI.ChapterUI
             if (ChapterEvents.Changed(ref _stamp)) { _view.Show(_quests, keepSelection: true); return; }
             if (Time.unscaledTime < _next) return;
             _next = Time.unscaledTime + 0.5f;
-            if (_view.RowsStale()) { Plugin.Log.LogInfo("[chapter] 可见目标数变了（目标达成后新目标开门），整屏重画"); _view.Show(_quests, keepSelection: true); return; }
+            if (_view.RowsStale()) { _view.Show(_quests, keepSelection: true); return; }
             foreach (var t in _view.LiveRows)
             {
                 if (t.Row == null || !t.Row.gameObject.activeSelf) continue;

@@ -35,7 +35,6 @@ namespace VisitAPI.ChapterUI
             if (!File.Exists(path)) { Plugin.Log.LogWarning("[chapter] bundle missing: " + path); return null; }
             _bundle = AssetBundle.LoadFromFile(path);
             if (_bundle == null) Plugin.Log.LogWarning("[chapter] bundle failed to load: " + path);
-            else Plugin.Log.LogDebug("[chapter] bundle assets: " + string.Join(", ", _bundle.GetAllAssetNames().Take(8)));
             return _bundle;
         }
     }

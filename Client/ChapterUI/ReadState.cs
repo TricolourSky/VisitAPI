@@ -47,7 +47,6 @@ namespace VisitAPI.ChapterUI
             {
                 if (!(JObject.Parse(body)["data"] is JArray arr)) return false;
                 foreach (var t in arr) { var id = t.Value<string>(); if (!string.IsNullOrEmpty(id)) _read.Add(id); }
-                Plugin.Log.LogDebug($"[chapter/read] {_read.Count} read id(s) from profile");
                 return true;
             }
             catch (System.Exception e) { Plugin.Log.LogWarning("[chapter/read] parse failed: " + e.Message); return false; }
@@ -61,7 +60,6 @@ namespace VisitAPI.ChapterUI
                 var old = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(LegacyPath)) ?? new List<string>();
                 MarkRead(old);
                 File.Move(LegacyPath, LegacyPath + ".migrated");
-                Plugin.Log.LogInfo($"[chapter/read] migrated {old.Count} legacy read id(s) into profile");
             }
             catch (System.Exception e) { Plugin.Log.LogWarning("[chapter/read] legacy migrate failed: " + e.Message); }
         }

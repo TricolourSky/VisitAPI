@@ -36,7 +36,6 @@ namespace VisitAPI.ChapterUI
             if (_expandHistoryButton != null) { _expandHistoryButton.onClick.RemoveAllListeners(); _expandHistoryButton.onClick.AddListener(ToggleHistory); }
             WireExpandTasks();
             ChapterLive.Attach(this, quests);
-            Plugin.Log.LogDebug($"[chapter] shown: {_chapters.Count} chapter(s)");
         }
 
         void SpawnIcon(ViewPool pool, ChapterModel ch)

@@ -32,23 +32,31 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
     public async Task OnLoadAsync(CancellationToken cancellationToken)
     {
         // 内容包（09-23）：每个包各自的 items / loot / bundles.json + bundles\，模型包按包文件夹登记
+        var bundlesAdded = 0;
         foreach (var p in ContentPacks.All(log))
         {
             LoadItems(p);
             LoadLoot(p);
-            await LoadBundles(p, cancellationToken);
+            bundlesAdded += await LoadBundles(p, cancellationToken);
+        }
+        // 1.3.4 B8：原生 BundleLoader.LoadBundlesAsync 最后一步是 WriteCacheAsync 把这一轮见过的哈希写进 user\cache\bundleHashCache.json。
+        // 它在所有 IOnLoad 之前跑完，写盘时还没有我们的包，所以包里的模型包每次开服都重算 CRC（约 63 MB）。
+        // 这里照原生补上同一步：缓存服务的「本轮已见」表里此时是原生各模组的 + 我们的，整份写回，下次开服原生加载时一起读进来
+        if (bundlesAdded > 0)
+        {
+            try { await bundleHashes.WriteCacheAsync(cancellationToken); }
+            catch (Exception e) { log.Warning($"[VisitAPI] could not write the bundle hash cache (hashes will be recalculated next start, nothing else affected): {e.Message}"); }
         }
     }
 
     void LoadItems(PackInfo p)
     {
-        int ok = 0, skipped = 0;
         foreach (var file in PackLayout.DataFiles(p, "items"))
         {
             var label = p.Name + "/" + Path.GetFileName(file);
             JsonDocument doc;
             try { doc = JsonDocument.Parse(File.ReadAllBytes(file), new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }); }
-            catch (Exception e) { log.Error($"[VisitAPI] items {label}: 读不动，整个跳过: {e.Message}"); continue; }
+            catch (Exception e) { log.Error($"[VisitAPI] items {label}: could not be read, skipping the whole file: {e.Message}"); continue; }
             using (doc)
                 foreach (var entry in doc.RootElement.EnumerateObject())
                 {
@@ -56,24 +64,22 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
                     {
                         if (templates.Items.ContainsKey(entry.Name))
                         {
-                            if (_owner.TryGetValue(entry.Name, out var first)) log.Error($"[VisitAPI] 物品 {entry.Name} 在包 {first} 和 {p.Name} 里都有，用了前者的");
-                            skipped++;   // 别的模组已登记：沿用它的，不重复加
-                            continue;
+                            if (_owner.TryGetValue(entry.Name, out var first)) log.Error($"[VisitAPI] Item {entry.Name} exists in both pack {first} and {p.Name}, using the former");
+                            continue;   // 别的模组已登记：沿用它的，不重复加
                         }
-                        if (Register(entry.Name, entry.Value, label)) { ok++; _owner[entry.Name] = p.Name; }
+                        if (Register(entry.Name, entry.Value, label)) _owner[entry.Name] = p.Name;
                     }
                     catch (Exception e) { log.Error($"[VisitAPI] items {label} {entry.Name}: {e.Message}"); }
                 }
         }
-        if (ok + skipped > 0) log.Info($"[VisitAPI] 包 {p.Label}：物品 {ok} 件登记，{skipped} 件别处已有");
     }
 
     bool Register(string id, JsonElement entry, string fileName)
     {
         if (!entry.TryGetProperty("template", out var tplNode) || tplNode.ValueKind != JsonValueKind.Object)
-        { log.Error($"[VisitAPI] items {fileName} {id}: 没有 template"); return false; }
+        { log.Error($"[VisitAPI] items {fileName} {id}: no template"); return false; }
         var template = json.Deserialize<TemplateItem>(tplNode.GetRawText());
-        if (template == null) { log.Error($"[VisitAPI] items {fileName} {id}: template 反序列化失败"); return false; }
+        if (template == null) { log.Error($"[VisitAPI] items {fileName} {id}: template deserialization failed"); return false; }
         var locales = new Dictionary<string, LocaleDetails>(StringComparer.OrdinalIgnoreCase);
         if (entry.TryGetProperty("locales", out var loc) && loc.ValueKind == JsonValueKind.Object)
             foreach (var lang in loc.EnumerateObject())
@@ -118,13 +124,13 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
             var label = p.Name + "/" + Path.GetFileName(file);
             Dictionary<string, List<Spawnpoint>> byMap;
             try { byMap = json.Deserialize<Dictionary<string, List<Spawnpoint>>>(File.ReadAllText(file)); }
-            catch (Exception e) { log.Error($"[VisitAPI] loot {label}: 读不动，整个跳过: {e.Message}"); continue; }
+            catch (Exception e) { log.Error($"[VisitAPI] loot {label}: could not be read, skipping the whole file: {e.Message}"); continue; }
             if (byMap == null) continue;
             foreach (var (map, points) in byMap)
             {
                 if (points == null || points.Count == 0) continue;
                 var location = locations.GetLocation(map);
-                if (location?.LooseLoot == null) { log.Error($"[VisitAPI] loot {label}: 本机没有地图 '{map}'，{points.Count} 个刷新点没处放"); continue; }
+                if (location?.LooseLoot == null) { log.Error($"[VisitAPI] loot {label}: map '{map}' not found on this server, {points.Count} spawn point(s) have nowhere to go"); continue; }
                 var raw = json.Serialize(points);
                 location.LooseLoot.AddTransformer(loot =>
                 {
@@ -140,28 +146,28 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
         }
     }
 
-    async Task LoadBundles(PackInfo p, CancellationToken ct)
+    async Task<int> LoadBundles(PackInfo p, CancellationToken ct)
     {
         var manifestFile = PackLayout.BundlesManifest(p);
-        if (!File.Exists(manifestFile)) return;
+        if (!File.Exists(manifestFile)) return 0;
         BundleManifest manifest;
         try { manifest = await json.DeserializeFromFileAsync<BundleManifest>(manifestFile, ct); }
-        catch (Exception e) { log.Error($"[VisitAPI] {p.Name} 的 bundles.json 读不动: {e.Message}"); return; }
-        if (manifest?.Manifest == null) return;
+        catch (Exception e) { log.Error($"[VisitAPI] Could not read bundles.json of {p.Name}: {e.Message}"); return 0; }
+        if (manifest?.Manifest == null) return 0;
         // SPT 按 ModPath/bundles/key 找文件，所以模型文件住在包自己的 bundles\ 下、ModPath 就是包文件夹（老布局 = 模组根目录，和以前一样）
         var modPath = ContentPacks.Rel(p);
-        int added = 0, reused = 0;
+        var added = 0;
         foreach (var entry in manifest.Manifest)
         {
             if (string.IsNullOrEmpty(entry.Key)) continue;
-            if (bundles.GetBundle(entry.Key) != null) { reused++; continue; }   // 别的模组或先加载的包已提供，沿用
+            if (bundles.GetBundle(entry.Key) != null) continue;   // 别的模组或先加载的包已提供，沿用
             var path = Path.Combine(PackLayout.BundlesDir(p), entry.Key.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(path)) { log.Error($"[VisitAPI] 模型包文件不在: {path}"); continue; }
+            if (!File.Exists(path)) { log.Error($"[VisitAPI] Bundle file missing: {path}"); continue; }
             var hash = await bundleHashes.GetOrCalculateHashAsync(Path.Join(modPath, "bundles", entry.Key).Replace('\\', '/'), ct);
-            if (hash == null) { log.Error($"[VisitAPI] 模型包不是合法的 Unity 包: {entry.Key}"); continue; }
+            if (hash == null) { log.Error($"[VisitAPI] Bundle is not a valid Unity bundle: {entry.Key}"); continue; }
             bundles.AddBundle(entry.Key, new BundleInfo { ModPath = modPath, Bundle = entry, Crc = hash.Crc, Size = hash.Size, ModifiedUtcTicks = hash.ModifiedUtcTicks });
             added++;
         }
-        log.Info($"[VisitAPI] 包 {p.Label}：模型包 {added} 个登记，{reused} 个别处已有");
+        return added;
     }
 }

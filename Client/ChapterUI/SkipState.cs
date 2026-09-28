@@ -33,7 +33,6 @@ namespace VisitAPI.ChapterUI
             {
                 if (!(JObject.Parse(body)["data"] is JObject data)) return false;
                 Merge(_data, data);
-                Plugin.Log.LogDebug($"[objectives] {_data.Done.Count} done / {_data.Skipped.Count} skipped from profile");
                 return true;
             }
             catch (System.Exception e) { Plugin.Log.LogWarning("[objectives] parse failed: " + e.Message); return false; }
@@ -60,7 +59,6 @@ namespace VisitAPI.ChapterUI
                     Post(delta);
                 }
                 File.Move(path, path + ".migrated");
-                Plugin.Log.LogInfo($"[objectives] 旧本地记录并入档案：{old?.Done.Count ?? 0} done / {old?.Skipped.Count ?? 0} skipped");
             }
             catch (System.Exception e) { Plugin.Log.LogWarning("[objectives] legacy migrate failed: " + e.Message); }
         }
@@ -96,7 +94,7 @@ namespace VisitAPI.ChapterUI
                     }
                 }
             }
-            catch (System.Exception e) { Plugin.Log.LogWarning("[objectives] 记录子目标结果失败: " + e.Message); }
+            catch (System.Exception e) { Plugin.Log.LogWarning("[objectives] Failed to record sub-objective results: " + e.Message); }
             if (done.Count == 0 && skipped.Count == 0 && counts.Count == 0) return;
             Post(new JObject { ["done"] = new JArray(done), ["skipped"] = new JArray(skipped), ["counts"] = JObject.FromObject(counts) });
         }

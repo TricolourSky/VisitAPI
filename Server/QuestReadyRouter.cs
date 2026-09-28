@@ -24,16 +24,17 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, HttpRe
         new RouteAction("/visitapi/quest/flags",
             async (url, info, sessionId, output, ct) =>
                 httpResponse.GetBody(templates.Quests.Values
-                    .Select(q => (id: q.Id.ToString(), vx: Visit(q.ExtensionData), notes: Notes(q), subs: Subs(q), story: Story(q.ExtensionData), noCounter: NoCounter(q), talkTo: TalkTo(q, templates), call: Call(q.ExtensionData), finishers: Finishers(q), hidden: Hidden(q.ExtensionData)))
+                    .Select(q => (id: q.Id.ToString(), vx: Visit(q.ExtensionData), notes: Notes(q), subs: Subs(q), story: Story(q.ExtensionData), noCounter: NoCounter(q), talkTo: TalkTo(q, templates), call: Call(q.ExtensionData), mail: Mail(q.ExtensionData), finishers: Finishers(q), hidden: Hidden(q.ExtensionData), missingSubs: MissingSubs(q, templates)))
                     .Select(x => new
                     {
                         x.id, x.notes, anyOf = AnyOf(x.vx), chapter = Flag(x.vx, "chapter"),
                         autoStart = Flag(x.vx, "autoStart"), autoFinish = Flag(x.vx, "autoFinish"), dialogOnly = Flag(x.vx, "dialogOnly"), icon = Str(x.vx, "icon"), items = Items(x.vx),
-                        startAfter = Str(x.vx, "startAfter"), order = Num(x.vx, "order"), noteLinks = Obj(x.vx, "noteLinks"), x.subs, x.story, x.noCounter,
-                        unlockDialogue = StrList(x.vx, "unlockDialogue"), x.talkTo, unlockLocations = StrList(x.vx, "unlockLocations"), x.call, x.finishers, x.hidden
+                        startAfter = StartAfter(x.vx), order = Num(x.vx, "order"), noteLinks = Obj(x.vx, "noteLinks"), x.subs, x.story, x.noCounter,
+                        unlockDialogue = StrList(x.vx, "unlockDialogue"), x.talkTo, unlockLocations = StrList(x.vx, "unlockLocations"), x.call, x.mail, x.finishers, x.hidden,
+                        setVariables = Obj(x.vx, "setVariables"), x.missingSubs
                     })
-                    .Where(x => x.anyOf != null || x.chapter || x.autoStart || x.autoFinish || x.dialogOnly || x.icon != null || x.notes != null || x.items.Count > 0 || x.startAfter != null || x.order != null || x.noteLinks != null || x.story || x.noCounter != null || x.unlockDialogue.Count > 0 || x.talkTo != null || x.unlockLocations.Count > 0 || x.call != null || x.finishers.Count > 0 || x.hidden)
-                    .ToDictionary(x => x.id, x => new { x.anyOf, x.chapter, x.autoStart, x.autoFinish, x.dialogOnly, x.icon, x.notes, x.items, x.startAfter, x.order, x.noteLinks, x.story, x.noCounter, x.unlockDialogue, x.talkTo, x.unlockLocations, x.call, x.hidden, finishers = x.finishers.Count > 0 ? x.finishers : null, subs = x.chapter ? x.subs : null })),
+                    .Where(x => x.anyOf != null || x.chapter || x.autoStart || x.autoFinish || x.dialogOnly || x.icon != null || x.notes != null || x.items.Count > 0 || x.startAfter != null || x.order != null || x.noteLinks != null || x.story || x.noCounter != null || x.unlockDialogue.Count > 0 || x.talkTo != null || x.unlockLocations.Count > 0 || x.call != null || x.mail != null || x.finishers.Count > 0 || x.hidden || x.setVariables != null)
+                    .ToDictionary(x => x.id, x => new { x.anyOf, x.chapter, x.autoStart, x.autoFinish, x.dialogOnly, x.icon, x.notes, x.items, x.startAfter, x.order, x.noteLinks, x.story, x.noCounter, x.unlockDialogue, x.talkTo, x.unlockLocations, x.call, x.mail, x.hidden, x.setVariables, finishers = x.finishers.Count > 0 ? x.finishers : null, subs = x.chapter ? x.subs : null, missingSubs = x.chapter && x.missingSubs.Count > 0 ? x.missingSubs : null })),
             typeof(QuestReadyRequest))
     ])
 {
@@ -53,6 +54,15 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, HttpRe
 
     static string Str(JsonElement? vx, string name) => vx?.TryGetProperty(name, out var p) == true && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
 
+    /// startAfter：一个任务 id（字符串）或多个（数组，任一完成即可开）——09-24 陨落星辰要么枪匠对话那条桥接任务、要么踩到森林坠机；原样下发，客户端两种都认
+    static object StartAfter(JsonElement? vx)
+    {
+        var s = Str(vx, "startAfter");
+        if (s != null) return s;
+        var list = StrList(vx, "startAfter");
+        return list.Count > 0 ? list : null;
+    }
+
     static double? Num(JsonElement? vx, string name) => vx?.TryGetProperty(name, out var p) == true && p.ValueKind == JsonValueKind.Number ? p.GetDouble() : null;
 
     static Dictionary<string, bool> Subs(Quest q)
@@ -66,6 +76,18 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, HttpRe
                 if (!string.IsNullOrEmpty(target)) result[target] = c.IsNecessary ?? true;
         }
         return result;
+    }
+
+    /// 章节点名但本机根本没有定义的子任务（门票缺的 44 条）。09-24 客户端按章节顺序开任务时要分清「前一条还没出现」和「前一条本机没有」：前者等，后者跳过往前找
+    static HashSet<string> _knownQuests;
+    static List<string> MissingSubs(Quest q, TemplateTable templates)
+    {
+        var list = new List<string>();
+        if (!Flag(Visit(q.ExtensionData), "chapter")) return list;
+        var known = _knownQuests ??= new HashSet<string>(templates.Quests.Values.Select(t => t.Id.ToString()));
+        foreach (var id in Subs(q).Keys)
+            if (!known.Contains(id)) list.Add(id);
+        return list;
     }
 
     static List<string> Finishers(Quest q)
@@ -108,6 +130,24 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, HttpRe
         if (!(e.TryGetProperty("isEnabled", out var on) && on.ValueKind == JsonValueKind.True)) return null;
         var trader = Str(e, "dialogueTraderId") ?? Str(e, "fromTraderId");
         return trader?.Length == 24 ? trader : null;
+    }
+
+    /// <summary>1.1 的邀请信设置（任务可接时该商人往聊天里发的信）原样下发：from = 发信商人，entry = InLobby / InRaid / ViaRadio / ViaNotebook，
+    /// dialogue / dialogueTrader = 按下按钮要开的对话与商人，text = 信正文的文案键。邀请信本身由客户端发现任务可接后请求 /visitapi/mail/invite 寄出。</summary>
+    static object Mail(Dictionary<string, object> ext)
+    {
+        if (ext == null || !ext.TryGetValue("mailSettings", out var v) || v is not JsonElement e || e.ValueKind != JsonValueKind.Object) return null;
+        if (!(e.TryGetProperty("isEnabled", out var on) && on.ValueKind == JsonValueKind.True)) return null;
+        var from = Str(e, "fromTraderId");
+        if (from?.Length != 24) return null;
+        return new
+        {
+            from,
+            entry = Str(e, "entryPoint") ?? "InLobby",
+            dialogue = Str(e, "dialogueId"),
+            dialogueTrader = Str(e, "dialogueTraderId") ?? from,
+            text = Str(e, "whileAvailableMessageText"),
+        };
     }
 
     static List<string> NoCounter(Quest q)

@@ -12,10 +12,13 @@ namespace VisitAPI.Native;
 [HarmonyPatch(typeof(CameraManager), nameof(CameraManager.SetCameraFromSettings))]
 public static class NarrateCameraBypass
 {
-    internal static float FixedFov => NarrateSpawnGuard.MarkerUsed ? NarrateSpawnGuard.Fov11 : Plugin.Fov.Value;
+    // 09-25：原来的设置项 Narrate.Fov（默认 50）/ LevelCamera（默认开）去掉了，固定成默认值
+    const float DefaultFov = 50f;
+
+    internal static float FixedFov => NarrateSpawnGuard.MarkerUsed ? NarrateSpawnGuard.Fov11 : DefaultFov;
 
     internal static Quaternion Level(Quaternion eye) =>
-        Plugin.LevelCamera.Value && !NarrateSpawnGuard.MarkerUsed ? Quaternion.Euler(0f, eye.eulerAngles.y, 0f) : eye;
+        !NarrateSpawnGuard.MarkerUsed ? Quaternion.Euler(0f, eye.eulerAngles.y, 0f) : eye;
 
     static bool Prefix(CameraManager __instance, CameraManager.ISettings settings)
     {
@@ -31,6 +34,7 @@ public static class NarrateCameraBypass
         {
             var camera = __instance.Camera;
             var player = Singleton<GameWorld>.Instantiated ? Singleton<GameWorld>.Instance.MainPlayer : null;
+            if (player != null) VisitCameraPin.PinNow(player);
             var eye = player != null ? player.CameraPosition : null;
             if (camera != null)
             {
@@ -38,33 +42,14 @@ public static class NarrateCameraBypass
                 camera.fieldOfView = FixedFov;
                 __instance.Fov = FixedFov;
                 __instance.SetFov(FixedFov, 0.05f);
-                if (camera.GetComponent("CinemachineBrain") is Behaviour brain)
-                {
-                    string active = "无";
-                    try
-                    {
-                        var vcam = brain.GetType().GetProperty("ActiveVirtualCamera")?.GetValue(brain);
-                        if (vcam != null)
-                        {
-                            var name = vcam.GetType().GetProperty("Name")?.GetValue(vcam) as string;
-                            var state = vcam.GetType().GetProperty("State")?.GetValue(vcam);
-                            var lens = state?.GetType().GetField("Lens")?.GetValue(state);
-                            var lensFov = lens?.GetType().GetField("FieldOfView")?.GetValue(lens);
-                            active = $"{name} 镜头 FOV={lensFov}";
-                        }
-                    }
-                    catch (Exception e) { active = "读取失败: " + e.Message; }
-                    brain.enabled = false;
-                    Plugin.Log.LogInfo($"[narrate] 访问相机上的 CinemachineBrain 已关（之前驱动的虚拟相机：{active}）");
-                }
+                if (camera.GetComponent("CinemachineBrain") is Behaviour brain) brain.enabled = false;
                 if (camera.GetComponent<NarrateFovEnforcer>() == null) camera.gameObject.AddComponent<NarrateFovEnforcer>();
                 PrismTransplant.Apply(settings?.CameraPrefab, camera);
                 Camera11.Apply(camera);
             }
             Visibility.Environment(false);
-            Plugin.Log.LogInfo($"[narrate] 访问相机建好：pos={(camera != null ? camera.transform.position.ToString() : "?")} fov={(camera != null ? camera.fieldOfView : 0f):0.##} 目标 {FixedFov:0.##} CameraManager.Fov={__instance.Fov:0.##} 机位标记={NarrateSpawnGuard.MarkerUsed}");
         }
-        catch (Exception e) { Plugin.Log.LogError("[narrate] 相机建好后的参数搬运失败（相机保留，效果可能不全）: " + e); }
+        catch (Exception e) { Plugin.Log.LogError("[narrate] Failed to transfer settings after the camera was built (camera kept, effects may be incomplete): " + e); }
         return false;
     }
 }
@@ -72,13 +57,10 @@ public static class NarrateCameraBypass
 [HarmonyPatch(typeof(CameraManager), nameof(CameraManager.ApplyFoV))]
 public static class NarrateFovLock
 {
-    static float _logAt;
     static void Prefix(ref int __0)
     {
         if (!Narrating.Now) return;
-        var to = (int)Math.Round(NarrateCameraBypass.FixedFov);
-        if (__0 != to && Time.unscaledTime >= _logAt) { _logAt = Time.unscaledTime + 5f; Plugin.Log.LogInfo($"[narrate] ApplyFoV({__0}) 访问期改写成 {to}"); }
-        __0 = to;
+        __0 = (int)Math.Round(NarrateCameraBypass.FixedFov);
     }
 }
 
@@ -90,15 +72,6 @@ public class NarrateFovEnforcer : MonoBehaviour
     void OnEnable()
     {
         _cam = GetComponent<Camera>(); Camera.onPreCull += Pin; Camera.onPreRender += PreRender;
-        Plugin.Log.LogInfo($"[narrate] FOV 执法器挂上：相机 {(_cam != null ? _cam.name : "?")} 现值 {(_cam != null ? _cam.fieldOfView : 0f):0.##}，目标 {NarrateCameraBypass.FixedFov:0.##}");
-        if (_cam != null)
-            Plugin.Log.LogInfo("[narrate] 相机组件（带 渲染前/LateUpdate 回调的标 *）: " + string.Join(", ", _cam.GetComponents<Component>().Where(c => c != null).Select(c =>
-            {
-                var t = c.GetType();
-                const System.Reflection.BindingFlags F = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
-                var hooks = new[] { "OnPreCull", "OnPreRender", "LateUpdate" }.Where(m => t.GetMethod(m, F, null, Type.EmptyTypes, null) != null).ToArray();
-                return hooks.Length > 0 ? $"{t.Name}*[{string.Join("/", hooks)}]" : t.Name;
-            })));
     }
     void OnDisable() { Camera.onPreCull -= Pin; Camera.onPreRender -= PreRender; }
 
@@ -115,7 +88,7 @@ public class NarrateFovEnforcer : MonoBehaviour
         var fixedFov = fixedM11 != 0f ? 2f * Mathf.Atan(1f / fixedM11) * Mathf.Rad2Deg : 0f;
         _renderLogAt = Time.unscaledTime + 5f;
         var cm = EFT.CameraControl.CameraManager.Instance;
-        Plugin.Log.LogWarning($"[narrate] 渲染前：投影矩阵折算 FOV={projFov:0.##} → 重算后 {fixedFov:0.##}（CameraManager.Fov={(cm != null ? cm.Fov : 0f):0.##} 目标 {NarrateCameraBypass.FixedFov:0.##}）");
+        Plugin.Log.LogWarning($"[narrate] Pre-render: projection matrix FOV={projFov:0.##} -> {fixedFov:0.##} after recompute (CameraManager.Fov={(cm != null ? cm.Fov : 0f):0.##} target {NarrateCameraBypass.FixedFov:0.##})");
     }
 
     void Pin(Camera cam)
@@ -141,7 +114,7 @@ public class NarrateFovEnforcer : MonoBehaviour
         if (Time.unscaledTime >= _logAt)
         {
             _logAt = Time.unscaledTime + 5f;
-            Plugin.Log.LogWarning($"[narrate] FOV 被外力写成 {f:0.##}（{where} 时发现），按回配置值 {NarrateCameraBypass.FixedFov:0.##}");
+            Plugin.Log.LogWarning($"[narrate] FOV was externally set to {f:0.##} (detected in {where}), restoring configured value {NarrateCameraBypass.FixedFov:0.##}");
         }
         cam.fieldOfView = NarrateCameraBypass.FixedFov;
     }
@@ -150,15 +123,9 @@ public class NarrateFovEnforcer : MonoBehaviour
 [HarmonyPatch(typeof(CameraManager), nameof(CameraManager.SetFov))]
 public static class NarrateSetFovLock
 {
-    static float _logAt;
-    static void Prefix(ref float x, float time)
+    static void Prefix(ref float x)
     {
         if (!Narrating.Now) return;
-        if (Math.Abs(x - NarrateCameraBypass.FixedFov) > 0.5f && Time.unscaledTime >= _logAt)
-        {
-            _logAt = Time.unscaledTime + 5f;
-            Plugin.Log.LogInfo($"[narrate] SetFov({x:0.##}, {time:0.##}s) 访问期改写成 {NarrateCameraBypass.FixedFov:0.##}");
-        }
         x = NarrateCameraBypass.FixedFov;
     }
 }

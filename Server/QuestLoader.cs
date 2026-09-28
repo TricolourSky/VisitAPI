@@ -22,7 +22,7 @@ using Path = System.IO.Path;
 namespace VisitAPI.Server;
 
 [Injectable(typePriority: OnLoadOrder.PostLoad)]
-public class QuestLoader(CustomQuestService questService, ImageRouter images, JsonUtil json, LocaleTable localeTable, TemplateTable templates, ISptLogger<QuestLoader> log) : IOnLoad
+public class QuestLoader(CustomQuestService questService, ImageRouter images, JsonUtil json, LocaleTable localeTable, ISptLogger<QuestLoader> log) : IOnLoad
 {
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
@@ -33,13 +33,10 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
         var locales = MergeLocales(packs);
         foreach (var lang in localeTable.Global.Keys)
             if (!locales.ContainsKey(lang)) locales[lang] = new Dictionary<string, string>();
-        var ok = 0;
-        var blanked = 0;
         var all = new Dictionary<string, Quest>();
         var owner = new Dictionary<string, string>();   // 任务 id → 包：两个包都有同一条任务时点名，用先来的
         foreach (var p in packs)
         {
-            var n = 0;
             foreach (var file in PackLayout.DataFiles(p, "quests"))
             {
                 var parsed = Parse<Dictionary<string, Quest>>(file);
@@ -47,17 +44,16 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
                 foreach (var quest in parsed.Values)
                 {
                     var id = quest.Id.ToString();
-                    if (owner.TryGetValue(id, out var first)) { log.Error($"[VisitAPI] 任务 {id} 在包 {first} 和 {p.Name}（{Path.GetFileName(file)}）里都有，用了 {first} 的"); continue; }
+                    if (owner.TryGetValue(id, out var first)) { log.Error($"[VisitAPI] Quest {id} exists in both pack {first} and {p.Name} ({Path.GetFileName(file)}), using the one from {first}"); continue; }
                     owner[id] = p.Name;
                     NativeUnlockReward(quest, Path.GetFileName(file));
                     FixZoneIds(quest, Path.GetFileName(file));
-                    blanked += BlankMailTexts(quest, locales);
+                    BlankMailTexts(quest, locales);
                     var result = questService.CreateQuest(new NewQuestDetails { NewQuest = quest, Locales = locales });
-                    if (result.Success) { ok++; n++; all[id] = quest; }
+                    if (result.Success) all[id] = quest;
                     else log.Error($"[VisitAPI] quest {id} ({p.Name}/{Path.GetFileName(file)}): {string.Join("; ", result.Errors ?? new List<string>())}");
                 }
             }
-            log.Info($"[VisitAPI] 包 {p.Label}：任务 {n} 条");
         }
         NameStoryQuests(all);
         WarnDangling(all);
@@ -80,9 +76,9 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
                 foreach (var (k, v) in table)
                 {
                     if (merged.TryAdd(k, v)) { owner[lang + " " + k] = p.Name; continue; }
-                    if (merged[k] != v && clash++ < 5) log.Error($"[VisitAPI] 文案 {lang}「{k}」在包 {owner[lang + " " + k]} 和 {p.Name} 里不一样，用了前者的");
+                    if (merged[k] != v && clash++ < 5) log.Error($"[VisitAPI] Locale {lang} '{k}' differs between pack {owner[lang + " " + k]} and {p.Name}, using the former");
                 }
-                if (clash > 5) log.Error($"[VisitAPI] 文案 {lang}：包 {p.Name} 还有 {clash - 5} 处同键不同文，没逐条列");
+                if (clash > 5) log.Error($"[VisitAPI] Locale {lang}: pack {p.Name} has {clash - 5} more key(s) with conflicting text, not listed individually");
             }
         return locales;
     }
@@ -151,19 +147,20 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
     {
         try
         {
-            var n = 0;
             foreach (var list in new[] { quest.Conditions?.AvailableForFinish, quest.Conditions?.AvailableForStart, quest.Conditions?.Fail })
                 foreach (var c in list ?? new List<QuestCondition>())
                 {
                     if (c.ConditionType is not ("LeaveItemAtLocation" or "PlaceBeacon") || !string.IsNullOrEmpty(c.ZoneId)) continue;
                     if (c.ExtensionData == null || !c.ExtensionData.TryGetValue("zoneIds", out var z) || z is not JsonElement ze || ze.ValueKind != JsonValueKind.Array) continue;
                     foreach (var e in ze.EnumerateArray())
-                        if (e.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(e.GetString())) { c.ZoneId = e.GetString(); n++; break; }
+                        if (e.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(e.GetString())) { c.ZoneId = e.GetString(); break; }
                 }
         }
         catch (System.Exception e) { log.Error($"[VisitAPI] quest {quest?.Id} ({fileName}): zoneIds fix-up failed: {e.Message}"); }
     }
 
+    /// 任务条件 / visitapi.startAfter 里写错的任务 id（不是 24 位十六进制）报 Error；引用了还没移植的任务是已知的数据缺口，不报
+    ///（09-28 SORA：日志只在出问题时打。以前这里另有一行「N 条条件引用了未移植任务」的汇总，已删）
     void WarnDangling(Dictionary<string, Quest> all)
     {
         var known = new HashSet<string>(all.Keys);
@@ -178,19 +175,15 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
                         if (!string.IsNullOrEmpty(t)) targets.Add((status, t));
                 }
             if (q.ExtensionData != null && q.ExtensionData.TryGetValue("visitapi", out var v) && v is JsonElement vx && vx.ValueKind == JsonValueKind.Object
-                && vx.TryGetProperty("startAfter", out var sa) && sa.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(sa.GetString()))
-                targets.Add(("visitapi.startAfter", sa.GetString()!));
-            foreach (var (what, target) in targets)
+                && vx.TryGetProperty("startAfter", out var sa))
             {
-                if (known.Contains(target)) continue;
-                if (!MongoId.IsValidMongoId(target))
-                {
-                    log.Error($"[VisitAPI] quest {id} 的 {what} 写的是「{target}」，不是合法的 24 位十六进制任务 id（多半是手改 JSON 时敲错或多了空格），这条任务永远到不了那一步");
-                    continue;
-                }
-                if (!templates.Quests.ContainsKey(new MongoId(target)))
-                    log.Error($"[VisitAPI] quest {id} 的 {what} 指向本机没有的任务 {target}——对应的任务文件没装（塔科夫之旅和陨落星辰要一起装），这条任务永远到不了那一步");
+                if (sa.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(sa.GetString())) targets.Add(("visitapi.startAfter", sa.GetString()!));
+                else if (sa.ValueKind == JsonValueKind.Array)
+                    foreach (var e in sa.EnumerateArray()) if (e.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(e.GetString())) targets.Add(("visitapi.startAfter", e.GetString()!));
             }
+            foreach (var (what, target) in targets)
+                if (!known.Contains(target) && !MongoId.IsValidMongoId(target))
+                    log.Error($"[VisitAPI] quest {id} {what} says '{target}', which is not a valid 24-char hex quest id (most likely a typo or extra space from hand-editing the JSON); this quest can never reach that step");
         }
     }
 
@@ -249,7 +242,6 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
     /// 路由是全局的：两个包同名的图撞了点名、先来的赢（SPT 自己是后登记的盖前面的，所以这里不重复登记）。</summary>
     void RegisterImages(PackInfo p, Dictionary<string, string> routes)
     {
-        var n = 0;
         foreach (var (route, dir) in PackLayout.ImageFolders(p))
             foreach (var file in Directory.GetFiles(dir))
             {
@@ -257,16 +249,14 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
                 if (name.Length == 0) continue;
                 if (name.Contains('.'))
                 {
-                    log.Warning($"[VisitAPI] 任务图 {p.Name}/{route}/{Path.GetFileName(file)} 的文件名里有点号，SPT 会把它截断，已跳过");
+                    log.Warning($"[VisitAPI] Quest image {p.Name}/{route}/{Path.GetFileName(file)} has a dot in its file name, SPT would truncate it; skipped");
                     continue;
                 }
                 var key = $"/files/quest/{route}/{name}";
-                if (routes.TryGetValue(key, out var first)) { log.Error($"[VisitAPI] 图片 {route}/{name} 在包 {first} 和 {p.Name} 里都有，用了前者的"); continue; }
+                if (routes.TryGetValue(key, out var first)) { log.Error($"[VisitAPI] Image {route}/{name} exists in both pack {first} and {p.Name}, using the former"); continue; }
                 routes[key] = p.Name;
                 images.AddRoute(key, file);
-                n++;
             }
-        if (n > 0) log.Info($"[VisitAPI] 包 {p.Label}：任务图 {n} 张");
     }
 
     T Parse<T>(string file) where T : class

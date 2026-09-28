@@ -10,7 +10,6 @@ public static class Vars
 
     public static void Sync(MongoID id, int value)
     {
-        Plugin.Log.LogDebug($"[var] {id} = {value}");
         VisitHttp.Post("/visitapi/variable/set", "{\"variableId\":\"" + id + "\",\"value\":" + value + "}", "[var]");
     }
 }

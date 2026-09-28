@@ -17,10 +17,9 @@ public static class RaidFlagReset
             var t = AccessTools.TypeByName(typeName);
             if (t == null) return;
             var m = AccessTools.Method(t, method);
-            if (m == null) { Plugin.Log.LogWarning($"[narrate] {label} 已装但找不到 {typeName}.{method}（版本变了？），战局标记没复位"); return; }
+            if (m == null) { Plugin.Log.LogWarning($"[narrate] {label} is installed but {typeName}.{method} not found (version changed?), raid flag not reset"); return; }
             m.Invoke(null, null);
-            Plugin.Log.LogInfo($"[narrate] {label} 的战局标记已复位（访问期它把自己挂起了）");
         }
-        catch (Exception e) { Plugin.Log.LogWarning($"[narrate] {label} 战局标记复位失败: " + e.Message); }
+        catch (Exception e) { Plugin.Log.LogWarning($"[narrate] {label} raid flag reset failed: " + e.Message); }
     }
 }

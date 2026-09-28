@@ -12,14 +12,18 @@ namespace VisitAPI.Native;
 [HarmonyPatch(typeof(BaseTraderDialogController), "InitNewDialog")]
 public static class NarrateDialogEntryGuard
 {
+    /// 09-24 审查 H3：整体兜住。这是引擎进对话的前缀，这里抛异常会让引擎跳过 InitNewDialog，整场对话坏掉
     static void Prefix(BaseTraderDialogController __instance, MongoID dialogId)
     {
         if (!Narrating.Now) return;
-        if (DialogStorage.Instance != null && DialogStorage.Instance.TryGetTemplate(dialogId, out var template))
-            template.CanBeFirstDialog = true;
-        RetailDialogs.MarkAcquainted(__instance, __instance.Trader?.Id);
-        RetailDialogs.SeedVariables(__instance);
-        Plugin.Log.LogDebug("[narrate] dialog entry unlocked + session variables seeded for " + dialogId);
+        try
+        {
+            if (DialogStorage.Instance != null && DialogStorage.Instance.TryGetTemplate(dialogId, out var template))
+                template.CanBeFirstDialog = true;
+            RetailDialogs.MarkAcquainted(__instance, __instance?.Trader?.Id);
+            RetailDialogs.SeedVariables(__instance);
+        }
+        catch (Exception e) { Plugin.Log.LogError($"[narrate] Unlock / seeding before entering dialogue {dialogId} failed (dialogue proceeds normally): {e}"); }
     }
 }
 
@@ -45,16 +49,8 @@ public static class NarrateSwitchGuard
     }
 }
 
-[HarmonyPatch(typeof(RandomLineCondition), "Test")]
-public static class NarrateRandomGuard
-{
-    static bool Prefix(ref bool __result)
-    {
-        if (!Narrating.Now) return true;
-        __result = true;
-        return false;
-    }
-}
+// 1.3.4 B6：随机台词的闭区间补丁（09-24 M6 的 NarrateRandomGuard）已删——服务端加载内容包时把 1.1 的闭区间数据换成引擎原生的半开区间
+//（Server\DialogueSanitizer.HalfOpenRandoms），访问内外都走原生 RandomLineCondition.Test
 
 [HarmonyPatch(typeof(QuestStatusCondition), "Test")]
 public static class NarrateQuestGhostGuard
@@ -96,11 +92,10 @@ public static class NarrateEmbedSwitchGuard
                         appended.AddRange(own);
                         var template = new DialogLineTemplate(t.Id, t.DialogSide, t.IconType, t.Trigger, appended.ToArray(), t.AnimationData);
                         fixedLine = new TraderDialogTextLine(template, dialog.Context);
-                        Plugin.Log.LogInfo($"[narrate] 嵌入任务句 {t.Id} 自带跳转，引擎追加的跳转挪到句首（1.1 数据的跳转生效）");
                     }
                 }
             }
-            catch (Exception e) { Plugin.Log.LogWarning("[narrate] 嵌入任务句跳转整理失败，原样使用: " + e.Message); }
+            catch (Exception e) { Plugin.Log.LogWarning("[narrate] Failed to reorder embedded quest line jumps, using as is: " + e.Message); }
             yield return fixedLine ?? line;
         }
     }

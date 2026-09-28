@@ -33,7 +33,6 @@ public static class VariableGroups
                     foreach (var m in members) { if (!_byMember.TryGetValue(m, out var l)) _byMember[m] = l = new List<MongoID>(); l.Add(gid); }
                 }
             }
-            Plugin.Log.LogDebug($"[vargroups] {_groups.Count} variable group(s) from server");
             return true;
         }
         catch (System.Exception e) { Plugin.Log.LogWarning("[vargroups] parse failed: " + e.Message); return false; }
@@ -60,9 +59,8 @@ public static class VariableGroups
             if (s.GetVariableValue(group) == sum) return;
             s.SetVariableValue(group, sum);
             Vars.Sync(group, sum);
-            Plugin.Log.LogInfo($"[vargroups] 变量组 {group} = {sum}（{members.Count} 个成员之和）");
         }
-        catch (System.Exception e) { Plugin.Log.LogWarning("[vargroups] 组求和失败: " + e.Message); }
+        catch (System.Exception e) { Plugin.Log.LogWarning("[vargroups] group sum failed: " + e.Message); }
     }
 
     [HarmonyPatch(typeof(ProfileVariablesStorage), nameof(ProfileVariablesStorage.SetVariableValue))]

@@ -94,7 +94,7 @@ namespace VisitAPI.ChapterUI
                 var c = item.BackgroundColor.ToColor(); c.a = 0.3019608f;
                 tint.color = c;
             }
-            catch (System.Exception e) { Plugin.Log.LogDebug("[chapter/items] 背景色取不到，按默认: " + e.Message); tint.color = new Color(0.4f, 0.4f, 0.4f, 0.3f); }
+            catch (System.Exception e) { Plugin.WarnOnce("chapter/items/color", "[chapter/items] Could not get an item's background color, using the default: " + e.Message); tint.color = new Color(0.4f, 0.4f, 0.4f, 0.3f); }
             frame.transform.SetAsFirstSibling(); back.transform.SetSiblingIndex(1); tint.transform.SetSiblingIndex(2);
         }
 

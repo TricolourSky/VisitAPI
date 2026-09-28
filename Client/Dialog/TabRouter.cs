@@ -91,6 +91,5 @@ public static class TabRouter
         var sc = new TraderScreensGroup.TraderScreenController(trader, new[] { trader }, app.Session.Profile, op.InventoryController,
             op.HealthController, op.QuestController, op.achievementsController, app.Session);
         yield return ShowAt(sc, TraderScreensGroup.ETraderMode.Tasks);
-        Plugin.Log.LogDebug("[narrate] tasks screen opened for " + traderId);
     }
 }

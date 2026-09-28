@@ -16,9 +16,8 @@ public static class LockedTraderSelect
             if (nextSelected?.Info == null || nextSelected.Info.Available || __instance.Trader != nextSelected) return;
             var first = __instance.TradersList?.FirstOrDefault(t => t?.Info != null && t.Info.Available);
             if (first == null) return;
-            Plugin.Log.LogInfo($"[trader] 初始商人 {nextSelected.Id} 锁着，改选第一个可用的 {first.Id}");
             nextSelected = first;
         }
-        catch (Exception e) { Plugin.Log.LogWarning("[trader] 初始商人改选失败（照原生）: " + e.Message); }
+        catch (Exception e) { Plugin.Log.LogWarning("[trader] Failed to reselect initial trader (keeping native choice): " + e.Message); }
     }
 }

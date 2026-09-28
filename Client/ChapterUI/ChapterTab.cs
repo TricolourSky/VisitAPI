@@ -21,7 +21,7 @@ public static class ChapterTab
     static void Postfix(TasksScreen __instance)
     {
         try { Inject(__instance); }
-        catch (System.Exception e) { Plugin.Log.LogError("[chapter] 剧情页注入失败（任务屏本体不受影响）: " + e); }
+        catch (System.Exception e) { Plugin.Log.LogError("[chapter] Story tab injection failed (the tasks screen itself is unaffected): " + e); }
     }
 
     static void Inject(TasksScreen screen)
@@ -33,6 +33,7 @@ public static class ChapterTab
         var caption = spawned != null ? spawned._headerLabel : null;
         var part = ChapterBundle.Instantiate("TasksPart", nativePart.parent, caption);
         if (part == null) return;
+        Backdrop11(screen);
         part.name = "VisitAPI.TasksPart";
         var rt = (RectTransform)part.transform; rt.SetSiblingIndex(nativePart.GetSiblingIndex() + 1);
         rt.anchorMin = nativePart.anchorMin; rt.anchorMax = nativePart.anchorMax; rt.pivot = nativePart.pivot;
@@ -59,7 +60,46 @@ public static class ChapterTab
             var view = on ? panel.GetComponent<MainQuestTabView>() : null; if (view != null) view.Show(Quests);
         });
         _story = story;
-        Plugin.Log.LogDebug("[chapter] 1.1 TasksPart injected");
+    }
+
+    /// <summary>09-26（SORA：战局里剧情页背景是透明的）：1.1MCP 导出 1.1 的 InventoryScreen/Tasks Panel——任务页自己带一张全屏底 OverallBackground
+    ///（QuestsTabMainBackground，纯色 #0B0B0B@0.757；锚点铺满、pos(0,-21.5)、size(0,-43)，只让出顶上 43 的页签行）和右上一条 WhiteBackground_Right（白 @0.039），
+    /// 剧情页 TasksPart 的 Background（QuestsTabQuestListBackground，@0.80）叠在上面，合起来约 95% 不透明。我们只搬了 TasksPart，战局里底下直接是游戏画面（只剩 80%）。
+    /// 照 1.1 在任务页上补这两层，放最底下；0.16 已有同名物体就不动</summary>
+    static void Backdrop11(TasksScreen screen)
+    {
+        var root = screen.transform as RectTransform;
+        if (root == null) return;
+        // 09-26 实机日志：0.16 的任务页本来就有 OverallBackground，但用的是 main_part_gradient（上下渐变、部分透明）× 0.78——战局里透的就是它。
+        // 有就改成 1.1 的样子（纯色、位置），没有才新建
+        var overall = root.Find("OverallBackground") as RectTransform;
+        if (overall == null) { overall = Layer(root, "OverallBackground", Overall11); overall.SetSiblingIndex(0); }
+        else if (overall.GetComponent<Image>() is Image oi) { oi.sprite = null; oi.type = Image.Type.Simple; oi.color = Overall11; }
+        overall.anchorMin = Vector2.zero; overall.anchorMax = Vector2.one; overall.pivot = new Vector2(0.5f, 0.5f);
+        overall.anchoredPosition = new Vector2(0f, -21.5f); overall.sizeDelta = new Vector2(0f, -43f);
+        if (root.Find("WhiteBackground_Right") == null)
+        {
+            var w = Layer(root, "WhiteBackground_Right", new Color(1f, 1f, 1f, 0.039f));
+            w.anchorMin = new Vector2(0f, 1f); w.anchorMax = new Vector2(1f, 1f); w.pivot = new Vector2(0f, 1f);
+            w.anchoredPosition = new Vector2(1294f, -43f); w.sizeDelta = new Vector2(-1369f, 77f);
+            w.SetSiblingIndex(0);
+        }
+        // 1.1 的任务页没有左边那条白底
+        var left = root.Find("WhiteBackground_Left");
+        if (left != null && left.gameObject.activeSelf) left.gameObject.SetActive(false);
+    }
+
+    static readonly Color Overall11 = new Color(0.043f, 0.043f, 0.043f, 0.757f);
+
+    static RectTransform Layer(RectTransform parent, string name, Color color)
+    {
+        var go = new GameObject(name, typeof(RectTransform), typeof(Image));
+        var rt = (RectTransform)go.transform;
+        rt.SetParent(parent, false);
+        var img = go.GetComponent<Image>();
+        img.color = color; img.raycastTarget = false;
+        if (go.GetComponent<LayoutElement>() == null) go.AddComponent<LayoutElement>().ignoreLayout = true;
+        return rt;
     }
 
     static string StoryCaption()
@@ -97,7 +137,7 @@ public static class ChapterTab
                 ReadState.Sync();
                 if (_story != null) { _story.isOn = false; _story.isOn = true; }
             }
-            catch (System.Exception e) { Plugin.Log.LogError("[chapter] 剧情页默认落位失败: " + e.Message); }
+            catch (System.Exception e) { Plugin.Log.LogError("[chapter] Failed to select the story tab by default: " + e.Message); }
         }
     }
 }

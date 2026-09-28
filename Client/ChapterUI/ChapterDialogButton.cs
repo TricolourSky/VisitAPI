@@ -53,7 +53,7 @@ namespace VisitAPI.ChapterUI
                 }
                 catch (System.Exception e)
                 {
-                    Plugin.Log.LogWarning("[chapter] 「去找商人」按钮激活失败，已藏起来：" + e.Message);
+                    Plugin.Log.LogWarning("[chapter] Failed to activate the \"visit trader\" button, hid it: " + e.Message);
                     try { c._visitTraderButton.gameObject.SetActive(false); } catch { }
                 }
             }
@@ -81,7 +81,7 @@ namespace VisitAPI.ChapterUI
         static void Postfix(QuestView __instance)
         {
             try { Rewire(__instance); }
-            catch (System.Exception e) { Plugin.Log.LogWarning("[chapter/dialog] 按钮改写失败（任务列表不受影响）: " + e.Message); }
+            catch (System.Exception e) { Plugin.Log.LogWarning("[chapter/dialog] Button rewrite failed (the quest list is unaffected): " + e.Message); }
         }
 
         static void Rewire(QuestView __instance)

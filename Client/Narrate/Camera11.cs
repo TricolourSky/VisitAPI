@@ -47,42 +47,24 @@ public static class Camera11
         Scattering(camera, PrismTransplant.Prefab);
         Desaturate(camera);
         Volumetric(camera);
-        Plugin.Log.LogInfo("[narrate] DistantShadow 不装：只画 TOD 太阳的远处阴影，商人房没有太阳");
         ReflectionPin.Apply(camera);
         Mask(camera);
     }
 
-    const int Mask11 = unchecked((int)0xFEFFFFDF);
     static void Mask(Camera camera)
     {
         var preview = LayerMask.NameToLayer("Weapon Preview");
-        if (preview < 0) { Plugin.Log.LogWarning("[narrate] 本机没有 Weapon Preview 层，枪械零件的图层遮罩没法补"); return; }
-        var was = camera.cullingMask;
+        if (preview < 0) { Plugin.Log.LogWarning("[narrate] No Weapon Preview layer in this build; can't add it to the culling mask for weapon parts"); return; }
         camera.cullingMask |= 1 << preview;
-        var diff = new List<string>();
-        for (var i = 0; i < 32; i++)
-            if (((camera.cullingMask >> i) & 1) != ((Mask11 >> i) & 1))
-                diff.Add($"{i}:{LayerMask.LayerToName(i)}={(((camera.cullingMask >> i) & 1) != 0 ? "开" : "关")}(1.1={(((Mask11 >> i) & 1) != 0 ? "开" : "关")})");
-        Plugin.Log.LogInfo($"[narrate] 相机图层遮罩: 0x{was:X8} → 0x{camera.cullingMask:X8}（补 Weapon Preview 层 {preview}，1.1 相机 0x{Mask11:X8}）；与 1.1 仍不同的层 {diff.Count} 个 [{string.Join(", ", diff)}]");
     }
 
     static void Roster(Camera camera)
     {
-        var disabled = new List<string>();
-        var state = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var b in camera.GetComponents<Behaviour>())
         {
-            if (b == null) continue;
-            var name = b.GetType().Name;
-            if (!state.ContainsKey(name) || b.enabled) state[name] = b.enabled;
-            if (!ShouldDisable(name, b)) continue;
+            if (b == null || !ShouldDisable(b.GetType().Name, b)) continue;
             b.enabled = false;
-            disabled.Add(name);
         }
-        Plugin.Log.LogInfo($"[narrate] 相机按 1.1 名单关掉 {disabled.Count} 个效果: {string.Join(", ", disabled)}");
-        var wanted = On.Where(n => !state.TryGetValue(n, out var on) || !on)
-                       .Select(n => state.ContainsKey(n) ? n + "(关)" : n + "(缺)");
-        Plugin.Log.LogInfo($"[narrate] 1.1 开着而本机相机没有/没开（待打包侧补桩后搬）: {string.Join(", ", wanted)}");
     }
 
     static bool ShouldDisable(string name, Behaviour b)
@@ -103,33 +85,23 @@ public static class Camera11
     static void Vintage(Camera camera)
     {
         var vintage = camera.GetComponent<CC_Vintage>();
-        if (vintage == null) { Plugin.Log.LogWarning("[narrate] 本机相机没有 CC_Vintage，1.1 的复古滤镜没法对上"); return; }
-        var before = $"{vintage.filter}/{vintage.amount:0.###}/{(vintage.enabled ? "开" : "关")}";
+        if (vintage == null) { Plugin.Log.LogWarning("[narrate] Camera has no CC_Vintage; can't match the 1.1 vintage filter"); return; }
         vintage.filter = CC_Vintage.Filter.Jason;
         vintage.amount = 0.498f;
         vintage.enabled = true;
-        Plugin.Log.LogInfo($"[narrate] CC_Vintage 按 1.1 相机预制体: {before} -> Jason/0.498/开");
     }
 
     static void Scattering(Camera camera, Component prefab)
     {
         var target = camera.GetComponent<TOD_Scattering>() ?? camera.gameObject.AddComponent<TOD_Scattering>();
         var from = prefab != null ? prefab.GetComponent<TOD_Scattering>() : null;
-        string source;
-        if (from != null)
-        {
-            source = $"包内相机预制体照搬 {Reflect.Copy(from, target, typeof(TOD_Scattering), out _)} 项";
-        }
+        if (from != null) Reflect.Copy(from, target, typeof(TOD_Scattering), out _);
         else
         {
             Fill(target, "TOD_Scattering", TodScattering11);
-            target.DitheringTexture = VisitArt.LoadTexture("bayer_matrix.png", TextureWrapMode.Repeat, FilterMode.Point, linear: true);
-            source = "包内预制体没带这份组件，抄表";
+            target.DitheringTexture = Cached(ref _bayer, "bayer_matrix.png", TextureWrapMode.Repeat, FilterMode.Point, linear: true);
         }
         target.enabled = true;
-        var sky = MonoBehaviourSingleton<TOD_Sky>.Instance;
-        var state = sky != null && sky.Initialized ? "已初始化，散射会画" : "无 / 未初始化，散射直通不画";
-        Plugin.Log.LogInfo($"[narrate] TOD_Scattering 按 1.1 装上（{source}，密度 {target.GlobalDensity:0.####}）；本机 TOD_Sky {state}");
     }
 
     static void Desaturate(Camera camera)
@@ -137,37 +109,43 @@ public static class Camera11
         var shader = ShadersFinder.Find("Hidden/Desaturate Effect");
         if (shader == null || !shader.isSupported)
         {
-            Plugin.Log.LogWarning("[narrate] 本机没有 'Hidden/Desaturate Effect' shader，1.1 的去饱和装不上");
+            Plugin.Log.LogWarning("[narrate] No 'Hidden/Desaturate Effect' shader in this build; can't install the 1.1 desaturation");
             return;
         }
         var target = camera.GetComponent<DesaturateEffect>() ?? camera.gameObject.AddComponent<DesaturateEffect>();
         Reflect.Set(target, "shader", shader);
-        target.textureRamp = VisitArt.LoadTexture("grayscale_ramp.png", TextureWrapMode.Clamp, FilterMode.Bilinear);
+        target.textureRamp = Cached(ref _ramp, "grayscale_ramp.png", TextureWrapMode.Clamp, FilterMode.Bilinear);
         Fill(target, "DesaturateEffect", Desaturate11);
         PostChain.Register(target, "DesaturateEffect", target.OnRenderImage);
+    }
+
+    // 09-24 审查低项：这两张贴图以前每次访问都新建一份（带 mipmap）、从不销毁；相机销毁时组件不会带走它们。现在整局各留一份
+    static Texture2D _bayer, _ramp;
+
+    static Texture2D Cached(ref Texture2D slot, string file, TextureWrapMode wrap, FilterMode filter, bool linear = false)
+    {
+        if (slot != null) return slot;
+        slot = VisitArt.LoadTexture(file, wrap, filter, linear);
+        if (slot != null) slot.hideFlags |= HideFlags.DontUnloadUnusedAsset;
+        return slot;
     }
 
     static void Volumetric(Camera camera)
     {
         var renderer = camera.GetComponent<VolumetricLightRenderer>();
         var lights = UnityEngine.Object.FindObjectsByType<VolumetricLight>(FindObjectsSortMode.None).Length;
-        if (renderer == null || lights == 0)
-        {
-            Plugin.Log.LogInfo($"[narrate] VolumetricLightRenderer 不开：本机相机{(renderer != null ? "有" : "没有")}这份组件，场上带 VolumetricLight 的灯 {lights} 盏");
-            return;
-        }
+        if (renderer == null || lights == 0) return;
         Fill(renderer, "VolumetricLightRenderer", Volumetric11);
-        Plugin.Log.LogInfo($"[narrate] VolumetricLightRenderer 按 1.1 打开，场上带 VolumetricLight 的灯 {lights} 盏");
     }
 
     static void Bloom(Camera camera)
     {
         var lacking = BloomCore.Append(BloomFlareDirt)
             .Where(n => { var s = ShadersFinder.Find(n); return s == null || !s.isSupported; }).ToList();
-        if (lacking.Count > 0) Plugin.Log.LogWarning($"[narrate] UltimateBloom 本机缺/不支持的 shader: {string.Join(", ", lacking)}");
+        if (lacking.Count > 0) Plugin.Log.LogWarning($"[narrate] UltimateBloom shaders missing/unsupported in this build:{string.Join(", ", lacking)}");
         if (lacking.Any(BloomCore.Contains))
         {
-            Plugin.Log.LogWarning("[narrate] UltimateBloom 核心 shader 不齐，1.1 的柔光这条路走不通，不加");
+            Plugin.Log.LogWarning("[narrate] UltimateBloom core shaders incomplete; the 1.1 bloom can't work, not adding it");
             return;
         }
         var bloom = camera.GetComponent<UltimateBloom>() ?? camera.gameObject.AddComponent<UltimateBloom>();
@@ -175,7 +153,7 @@ public static class Camera11
         if (lacking.Contains(BloomFlareDirt))
         {
             Reflect.Set(bloom, "m_UseAnamorphicFlare", false);
-            Plugin.Log.LogWarning("[narrate] 本机没有光斑合成 shader，UltimateBloom 的各向异性光斑关掉（偏离 1.1）");
+            Plugin.Log.LogWarning("[narrate] No flare composite shader in this build; UltimateBloom anamorphic flare disabled (deviates from 1.1)");
         }
         PostChain.Register(bloom, "UltimateBloom", bloom.OnRenderImage);
     }
@@ -184,15 +162,14 @@ public static class Camera11
     {
         if (target == null)
         {
-            Plugin.Log.LogWarning($"[narrate] 本机相机没有 {name}，1.1 的这份参数没处放");
+            Plugin.Log.LogWarning($"[narrate] Camera has no {name}; nowhere to apply the 1.1 parameters");
             return null;
         }
         var missing = new List<string>();
         foreach (var (field, value) in table)
             if (!Reflect.Set(target, field, value)) missing.Add(field);
         target.enabled = true;
-        Plugin.Log.LogInfo($"[narrate] {name} 按 1.1 相机预制体灌 {table.Length - missing.Count}/{table.Length} 项并打开"
-            + (missing.Count > 0 ? $"，本机没有的字段: {string.Join(", ", missing)}" : ""));
+        if (missing.Count > 0) Plugin.Log.LogWarning($"[narrate] {name}: {missing.Count}/{table.Length} fields of the 1.1 camera prefab are missing in this build: {string.Join(", ", missing)}");
         return target;
     }
 

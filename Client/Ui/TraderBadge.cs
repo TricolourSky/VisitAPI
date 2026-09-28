@@ -27,7 +27,7 @@ public static class TraderBadge
             if (_spriteTried) return _sprite;
             _spriteTried = true;
             _sprite = VisitArt.Load("call_badge.png");
-            if (_sprite == null) { _fallback = true; _sprite = VisitArt.Load("visit_icon.png"); Plugin.Log.LogWarning("[badge] 内嵌 call_badge.png 读不到，退回染金的 visit_icon.png"); }
+            if (_sprite == null) { _fallback = true; _sprite = VisitArt.Load("visit_icon.png"); Plugin.Log.LogWarning("[badge] Embedded call_badge.png could not be read, falling back to gold-tinted visit_icon.png"); }
             return _sprite;
         }
     }
@@ -58,36 +58,27 @@ public static class TraderBadge
                 if (traderId.Length != 24 || !profile.TradersInfo.TryGetValue(new MongoID(traderId), out var info) || info == null || !info.Unlocked) return false;
             }
         }
-        catch (Exception e) { Plugin.Log.LogWarning("[badge] 读商人解锁状态失败，按可谈处理: " + e.Message); }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] Failed to read trader unlock state, treating as talkable: " + e.Message); }
         return QuestFlags.DialogueUnlocked(traderId, qc) != false;
     }
 
     static QuestController Controller => ChapterChain.Controller ?? ChapterTab.Quests ?? QuestOps.Resolve();
 
-    public static List<string> Lit(string traderId, QuestController qc = null)
-    {
-        qc ??= Controller;
-        if (qc?.Quests == null || string.IsNullOrEmpty(traderId)) return new List<string>();
-        try { return qc.Quests.Where(q => NeedsTalk(q, qc) && string.Equals(TalkTo(q), traderId, StringComparison.OrdinalIgnoreCase)).Select(q => q.Id).ToList(); }
-        catch { return new List<string>(); }
-    }
-
     public static bool Wanted(string traderId, QuestController qc = null)
     {
-        if (!Plugin.CallBadge.Value || string.IsNullOrEmpty(traderId)) return false;
+        if (string.IsNullOrEmpty(traderId)) return false;
         qc ??= Controller;
         if (qc?.Quests == null) return false;
         try { return CanTalk(traderId, qc) && qc.Quests.Any(q => NeedsTalk(q, qc) && string.Equals(TalkTo(q), traderId, StringComparison.OrdinalIgnoreCase)); }
-        catch (Exception e) { Plugin.Log.LogWarning("[badge] 商人角标判定失败: " + e.Message); return false; }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] Trader badge check failed: " + e.Message); return false; }
     }
 
     public static bool AnyWanted(QuestController qc = null)
     {
-        if (!Plugin.CallBadge.Value) return false;
         qc ??= Controller;
         if (qc?.Quests == null) return false;
         try { return qc.Quests.Any(q => NeedsTalk(q, qc) && CanTalk(TalkTo(q), qc)); }
-        catch (Exception e) { Plugin.Log.LogWarning("[badge] 顶栏角标判定失败: " + e.Message); return false; }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] Top bar badge check failed: " + e.Message); return false; }
     }
 
     static readonly Dictionary<string, Sprite> _sprites = new();
@@ -95,7 +86,7 @@ public static class TraderBadge
     {
         if (_sprites.TryGetValue(file, out var s)) return s;
         s = VisitArt.Load(file);
-        if (s == null) Plugin.Log.LogWarning($"[badge] 内嵌 {file} 读不到，这枚 1.1.5 角标不换");
+        if (s == null) Plugin.Log.LogWarning($"[badge] Embedded {file} could not be read, this 1.1.5 badge will not be replaced");
         _sprites[file] = s;
         return s;
     }
@@ -117,7 +108,7 @@ public static class TraderBadge
 
     public static bool HandoverWanted(string traderId, QuestController qc = null)
     {
-        if (!Plugin.HandoverBadge.Value || string.IsNullOrEmpty(traderId)) return false;
+        if (string.IsNullOrEmpty(traderId)) return false;
         if (_handCache.TryGetValue(traderId, out var cached) && Time.unscaledTime < cached.until) return cached.on;
         qc ??= Controller;
         var on = false;
@@ -136,7 +127,7 @@ public static class TraderBadge
                     if (on) break;
                 }
             }
-            catch (Exception e) { Plugin.Log.LogWarning("[badge] 上交角标判定失败: " + e.Message); }
+            catch (Exception e) { Plugin.Log.LogWarning("[badge] Hand-over badge check failed: " + e.Message); }
         _handCache[traderId] = (Time.unscaledTime + 1f, on);
         return on;
     }
@@ -151,7 +142,7 @@ public static class TraderBadge
                 var view = __instance.GetComponent<CardBadge>() ?? __instance.gameObject.AddComponent<CardBadge>();
                 view.Bind(trader?.Id, questController);
             }
-            catch (Exception e) { Plugin.Log.LogError("[badge] 商人卡片角标挂载失败（卡片本体不受影响）: " + e); }
+            catch (Exception e) { Plugin.Log.LogError("[badge] Failed to attach trader card badge (the card itself is unaffected): " + e); }
         }
     }
 
@@ -161,7 +152,7 @@ public static class TraderBadge
         static void Postfix(TraderCard __instance)
         {
             try { __instance.GetComponent<CardBadge>()?.Refresh(); }
-            catch (Exception e) { Plugin.Log.LogWarning("[badge] 商人卡片角标刷新失败: " + e.Message); }
+            catch (Exception e) { Plugin.Log.LogWarning("[badge] Trader card badge refresh failed: " + e.Message); }
         }
     }
 
@@ -171,7 +162,7 @@ public static class TraderBadge
         static void Postfix(MenuTaskBar __instance)
         {
             try { if (__instance.GetComponent<HeaderBadge>() == null) __instance.gameObject.AddComponent<HeaderBadge>(); }
-            catch (Exception e) { Plugin.Log.LogError("[badge] 顶栏角标挂载失败（任务栏本体不受影响）: " + e); }
+            catch (Exception e) { Plugin.Log.LogError("[badge] Failed to attach top bar badge (the task bar itself is unaffected): " + e); }
         }
     }
 
@@ -223,7 +214,6 @@ public class CardBadge : MonoBehaviour
     RectTransform _spacer;
     LayoutGroup _layout;
     bool _layoutChecked;
-    static bool _layoutLogged;
 
     LayoutGroup NativeLayout(TraderAvatar avatar)
     {
@@ -232,11 +222,6 @@ public class CardBadge : MonoBehaviour
         if (start == null || start.parent is not RectTransform parent) return null;
         _layoutChecked = true;
         _layout = parent.GetComponent<LayoutGroup>();
-        if (!_layoutLogged)
-        {
-            _layoutLogged = true;
-            Plugin.Log.LogInfo($"[badge] 原生角标父物体 '{parent.name}'：布局组 {(_layout != null ? _layout.GetType().Name : "无")}，可接角标锚点 {start.anchorMin}~{start.anchorMax} 轴心 {start.pivot} 坐标 {start.anchoredPosition} 尺寸 {start.sizeDelta}");
-        }
         return _layout;
     }
 
@@ -263,7 +248,7 @@ public class CardBadge : MonoBehaviour
                 if ((rt.sizeDelta - size).sqrMagnitude > 0.25f) rt.sizeDelta = size;
             }
         }
-        catch (Exception e) { Plugin.Log.LogWarning("[badge] 原生角标定尺寸失败: " + e.Message); }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] Failed to size native badge: " + e.Message); }
     }
 
     void AlignGoldToSpacer()
@@ -314,22 +299,18 @@ public class CardBadge : MonoBehaviour
             }
             _shifted = on;
         }
-        catch (Exception e) { Plugin.Log.LogWarning("[badge] 原生角标让位失败: " + e.Message); }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] Failed to shift native badge aside: " + e.Message); }
     }
 
     public void Refresh()
     {
         if (_img == null) return;
         var on = TraderBadge.Wanted(_traderId, _qc);
-        if (_img.gameObject.activeSelf != on)
-        {
-            TalkButton.Retint();
-            Plugin.Log.LogInfo(on ? $"[badge] 商人 {_traderId} 金色电话亮起，任务: {string.Join(", ", TraderBadge.Lit(_traderId, _qc))}" : $"[badge] 商人 {_traderId} 金色电话熄灭");
-        }
+        if (_img.gameObject.activeSelf != on) TalkButton.Retint();
         var w = ((RectTransform)transform).rect.width;
         if (w <= 1f) w = 150f;
         var slot = w * visible;
-        if (Plugin.CallBadge.Value || Plugin.HandoverBadge.Value) SizeNativeIcons(slot);
+        SizeNativeIcons(slot);
         if (on)
         {
             var rt = (RectTransform)_img.transform;
@@ -349,7 +330,7 @@ public class CardBadge : MonoBehaviour
     bool _swapped;
     void SwapNativeIcons(TraderAvatar avatar)
     {
-        if (_swapped || avatar == null || !Plugin.HandoverBadge.Value) return;
+        if (_swapped || avatar == null) return;
         _swapped = true;
         TraderBadge.Swap(avatar._availableToStartQuestsIcon, TraderBadge.StartSprite);
         TraderBadge.Swap(avatar._availableToFinishQuestsIcon, TraderBadge.FinishSprite);
@@ -405,7 +386,7 @@ public class CardBadge : MonoBehaviour
             }
             if (!_hand.gameObject.activeSelf) _hand.gameObject.SetActive(true);
         }
-        catch (Exception e) { Plugin.Log.LogWarning("[badge] 上交角标刷新失败: " + e.Message); }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] Hand-over badge refresh failed: " + e.Message); }
     }
     const float visible = 0.15f;
 
@@ -467,7 +448,6 @@ public class HeaderBadge : MonoBehaviour
             _label = best;
             if (TraderBadge.Sprite == null) return false;
             _img = TraderBadge.Build((RectTransform)_label.transform, "VisitCallBadgeHeader");
-            Plugin.Log.LogInfo($"[badge] 顶栏角标挂到昵称文字 '{_label.name}'（字号 {_label.fontSize:0.#}）");
         }
         return true;
     }

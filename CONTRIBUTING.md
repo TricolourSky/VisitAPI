@@ -19,9 +19,9 @@ Thanks for helping with VisitAPI. This page is short on purpose — read it once
 
 ## Reporting a bug / 报 Bug
 
-Use the bug-report template. Always include: SPT version, whether Fika is installed, which packs are installed (the server prints one line per pack at startup), `BepInEx/LogOutput.log` lines tagged `[narrate]`, `[dlg]`, `[quest]`, `[chapter/...]`, `[trigger]` or `[VisitAPI]`, and a screenshot when the problem is visual.
+Use the bug-report template. Always include: SPT version, whether Fika is installed, which packs are installed (the folders in `VisitAPI-Server/packs/`), `BepInEx/LogOutput.log` lines tagged `[narrate]`, `[dlg]`, `[quest]`, `[chapter/...]`, `[trigger]` or `[VisitAPI]` and the server log's `[VisitAPI]` lines, and a screenshot when the problem is visual. VisitAPI writes to the logs only when something goes wrong, so every one of those lines is relevant.
 
-用 Bug 模板。务必附上：SPT 版本、是否装了 Fika、装了哪些内容包（服务端启动时每个包打一行）、`BepInEx/LogOutput.log` 里带 `[narrate]`、`[dlg]`、`[quest]`、`[chapter/...]`、`[trigger]`、`[VisitAPI]` 标签的行，画面问题附截图。
+用 Bug 模板。务必附上：SPT 版本、是否装了 Fika、装了哪些内容包（`VisitAPI-Server/packs/` 下的文件夹）、`BepInEx/LogOutput.log` 里带 `[narrate]`、`[dlg]`、`[quest]`、`[chapter/...]`、`[trigger]`、`[VisitAPI]` 标签的行和服务端日志里带 `[VisitAPI]` 的行，画面问题附截图。VisitAPI 只在出问题时写日志，这些行每一条都有用。
 
 ## Pull requests / 提 PR
 

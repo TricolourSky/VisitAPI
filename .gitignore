@@ -21,10 +21,15 @@ Client/art/finish_badge.png
 Client/art/handover_badge.png
 Client/art/start_badge.png
 Client/art/reward_exp.png
+Client/art/chat*.png
 Client/art/audio/
 # Asset extraction / packaging work dirs and tools (never source)
 .work/
 tools/
+# Local research tooling and editor / agent settings (1.1 client REPL, captures of game UI)
+1.1MCP/
+.claude/
+.mcp.json
 # Parked (non-compiled) sources kept locally only
 *.parked
 *.merged

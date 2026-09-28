@@ -27,15 +27,12 @@ namespace VisitAPI.Native
         {
             if (!scene.isLoaded) return;
             var season = Current();
-            var on = 0; var off = 0;
             foreach (var root in scene.GetRootGameObjects())
                 foreach (var env in root.GetComponentsInChildren<SeasonEnvironment>(true))
                 {
                     var match = env.IsMatch(season);
                     if (env.gameObject.activeSelf != match) env.gameObject.SetActive(match);
-                    if (match) on++; else off++;
                 }
-            if (on + off > 0) Plugin.Log.LogInfo($"[narrate] 季节开关: '{scene.name}' 当前={season}，留 {on} 组、关 {off} 组");
         }
 
         static ESeason Current()
@@ -54,11 +51,10 @@ namespace VisitAPI.Native
                 if (token != null && token.Type != JTokenType.Null)
                 {
                     _season = (ESeason)(byte)token.Value<int>();
-                    Plugin.Log.LogInfo($"[narrate] SPT 服务端季节: {_season}");
                     return _season.Value;
                 }
             }
-            catch (Exception e) { Plugin.Log.LogWarning("[narrate] 取不到 SPT 季节，按夏季处理: " + e.Message); }
+            catch (Exception e) { Plugin.Log.LogWarning("[narrate] could not get the SPT season, assuming summer: " + e.Message); }
             _season = ESeason.Summer;
             return ESeason.Summer;
         }

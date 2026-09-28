@@ -64,7 +64,7 @@ namespace NPC
 			var r = _animationsEventReceiver as EFT.NPC.NPCAnimationsEventReceiver;
 			if (r != null) r.OnNeedToPlaySomeSound += Play;
 			var dict = _audioConfigDictionary as Audio.ConfiguredAudioPlayer.AudioClipConfigDictionary;
-			VisitAPI.Plugin.Log.LogInfo($"[foley] crossfade '{name}' 上线: 事件接收器={(r != null ? "绑定" : "空!")} 配置表={(dict != null ? dict.Count.ToString() + " 条" : "空!")}");
+			if (r == null || dict == null) VisitAPI.Plugin.Log.LogWarning($"[foley] crossfade '{name}': {(r == null ? "no animation event receiver" : "")}{(r == null && dict == null ? ", " : "")}{(dict == null ? "no audio config table" : "")}; its sounds will not play");
 		}
 
 		private void OnDisable()
@@ -75,13 +75,7 @@ namespace NPC
 		private void Play(string soundID)
 		{
 			var dict = _audioConfigDictionary as Audio.ConfiguredAudioPlayer.AudioClipConfigDictionary;
-			var hit = dict != null && !string.IsNullOrEmpty(soundID) && dict.TryGetValue(soundID, out var probe) && probe?.clip != null;
-			if (hit) VisitAPI.Plugin.Log.LogInfo($"[foley] 动画音效事件 '{soundID}' → 命中");
-			else VisitAPI.Plugin.Log.LogDebug($"[foley] 动画音效事件 '{soundID}' → 本表没有");
-			if (dict == null || string.IsNullOrEmpty(soundID) || !dict.TryGetValue(soundID, out var cfg) || cfg?.clip == null)
-			{
-				return;
-			}
+			if (dict == null || string.IsNullOrEmpty(soundID) || !dict.TryGetValue(soundID, out var cfg) || cfg?.clip == null) return;
 			if (_sources == null) _sources = new[] { NewSource(), NewSource() };
 			var next = _sources[_slot = 1 - _slot];
 			next.clip = cfg.clip;
@@ -129,7 +123,7 @@ namespace NPC
 		private void OnEnable()
 		{
 			var g = _ambientGroup as Audio.AmbientSubsystem.AmbientSoundPlayerGroup;
-			VisitAPI.Plugin.Log.LogInfo($"[ambient] 场景音总控上线: group={(g != null ? g.name + " players=" + g._soundPlayers.Count : "空!")}");
+			if (g == null) VisitAPI.Plugin.Log.LogWarning($"[ambient] scene audio controller '{name}' has no ambient group; room ambience will not play");
 			if (g != null && !g.IsPlaying) g.Play();
 		}
 

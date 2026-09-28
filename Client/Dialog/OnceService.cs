@@ -29,7 +29,6 @@ public static class OnceService
         if (profile.ProfileVariables.GetVariableValue(id) == 1) return;
         profile.ProfileVariables.SetVariableValue(id, 1);
         Vars.Sync(id, 1);
-        Plugin.Log.LogDebug($"[once] {what} 记号已打（档案变量 {id}）");
     }
 
     public static void Mark(Profile profile, (string trader, string node, int option) key) =>
@@ -41,20 +40,19 @@ public static class OnceService
         var pid = profile.Id;
         if (string.IsNullOrEmpty(pid) || !_migrated.Add(pid)) return;
         try { MigrateCore(profile, pid); }
-        catch (Exception e) { Plugin.Log.LogWarning($"[once] 旧记号迁移失败（不影响对话）: {e.Message}"); }
+        catch (Exception e) { Plugin.Log.LogWarning($"[once] legacy mark migration failed (dialogue unaffected):{e.Message}"); }
     }
 
     static void MigrateCore(Profile profile, string pid)
     {
         var dir = DialogFiles.Loader.BaseDir;
         if (!Directory.Exists(dir)) return;
-        var moved = 0;
         foreach (var file in Directory.GetFiles(dir, "*.seen.json"))
         {
             var trader = Path.GetFileName(file); trader = trader.Substring(0, trader.Length - ".seen.json".Length);
             Dictionary<string, int> map;
             try { map = JsonConvert.DeserializeObject<Dictionary<string, int>>(File.ReadAllText(file)); }
-            catch (Exception e) { Plugin.Log.LogWarning($"[once] 旧记号文件 {Path.GetFileName(file)} 解析失败，跳过: {e.Message}"); continue; }
+            catch (Exception e) { Plugin.Log.LogWarning($"[once] failed to parse legacy mark file {Path.GetFileName(file)}, skipped:{e.Message}"); continue; }
             if (map == null) continue;
             var prefix = pid + "|";
             foreach (var key in map.Keys)
@@ -72,9 +70,7 @@ public static class OnceService
                 if (id == null || profile.ProfileVariables.GetVariableValue(id.Value) != 0) continue;
                 profile.ProfileVariables.SetVariableValue(id.Value, 1);
                 Vars.Sync(id.Value, 1);
-                moved++;
             }
         }
-        if (moved > 0) Plugin.Log.LogInfo($"[once] 旧 seen.json 里 {moved} 个记号已搬进档案变量（档案 {pid}）");
     }
 }

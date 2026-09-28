@@ -22,7 +22,7 @@ public static class TalkButton
     static void Postfix(TraderScreensGroup __instance)
     {
         try { Refresh(__instance); }
-        catch (System.Exception e) { Plugin.Log.LogError("[talk] 访问按钮刷新失败（商人屏不受影响）: " + e); }
+        catch (System.Exception e) { Plugin.Log.LogError("[talk] Visit button refresh failed (the trader screen is unaffected): " + e); }
     }
 
     static void Refresh(TraderScreensGroup __instance)
@@ -46,13 +46,12 @@ public static class TalkButton
             var traderId = _screen.Trader?.Id;
             if (traderId != null) TalkButtonUi.Tint(_button, TraderBadge.Wanted(traderId, _screen.QuestController));
         }
-        catch (System.Exception e) { Plugin.Log.LogWarning("[talk] 访问按钮重上色失败: " + e.Message); }
+        catch (System.Exception e) { Plugin.Log.LogWarning("[talk] Visit button recolor failed: " + e.Message); }
     }
 
     static bool DialogueOpen(string traderId, QuestController qc)
     {
         var state = QuestFlags.DialogueUnlocked(traderId, qc);
-        if (state == false) Plugin.Log.LogDebug($"[talk] {traderId} 的对话还没解锁（剧情未到），不出访问按钮");
         return state != false;
     }
 
@@ -70,7 +69,7 @@ public static class TalkButton
         var corners = new Vector3[4];
         ((RectTransform)tsg._traderCardsContainer).GetWorldCorners(corners);
         var topGap = parent.InverseTransformPoint(corners[1]).y - parent.rect.yMax;
-        rt.anchoredPosition = new Vector2(Plugin.TalkOffsetX.Value, topGap + Plugin.TalkOffsetY.Value);
+        rt.anchoredPosition = new Vector2(0f, topGap);
     }
 
     static void Open()
@@ -102,7 +101,7 @@ public static class TalkButton
         catch (System.Exception e)
         {
             _opening = false;
-            Plugin.Log.LogError("[talk] 打开访问失败（按钮已解锁，可以再点）: " + e);
+            Plugin.Log.LogError("[talk] Failed to open visit (button unlocked again, can be clicked again): " + e);
         }
     }
 
@@ -164,7 +163,7 @@ public static class TalkButtonUi
             tex.Apply();
             _goldTab = Sprite.Create(tex, shape.rect, new Vector2(0.5f, 0.5f), shape.pixelsPerUnit, 0u, SpriteMeshType.FullRect, shape.border);
         }
-        catch (System.Exception e) { Plugin.Log.LogWarning("[talk] 金色访问页签生成失败，退回图标变金: " + e.Message); }
+        catch (System.Exception e) { Plugin.Log.LogWarning("[talk] Failed to build gold visit tab, falling back to gold-tinted icon: " + e.Message); }
         return _goldTab;
     }
 

@@ -17,7 +17,6 @@ public static class AmbientGuard
 
     internal static void Clear()
     {
-        var purged = 0;
         foreach (var name in Registries)
         {
             var field = AccessTools.Field(typeof(AmbientLight), name);
@@ -30,13 +29,11 @@ public static class AmbientGuard
                 else dead++;
             }
             if (dead == 0) continue;
-            purged += dead;
             var t = col.GetType();
             t.GetMethod("Clear")?.Invoke(col, null);
             var add = t.GetMethod("Add");
             if (add != null) foreach (var o in alive) add.Invoke(col, new[] { o });
         }
-        if (purged > 0) Plugin.Log.LogInfo($"[narrate] ambient light registries purged: {purged} destroyed source(s)");
     }
 }
 
@@ -51,8 +48,6 @@ public static class AmbientDrawGuard
     {
         AmbientLight.RuntimeOptimizePrepare();
         _nullLogged = false;
-        var count = (ListField?.GetValue(null) as System.Collections.ICollection)?.Count ?? -1;
-        Plugin.Log.LogInfo($"[narrate] ambient static sources prepared: {count}");
     }
 
     [HarmonyPrefix, HarmonyPatch(typeof(AmbientLight), nameof(AmbientLight.RuntimeDrawStaticSourcesOptimized))]

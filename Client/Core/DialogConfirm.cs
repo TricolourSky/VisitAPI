@@ -23,10 +23,9 @@ public static class DialogConfirm
                     if (!string.IsNullOrEmpty(key)) _byLine[p.Name] = key;
                 }
             }
-            Plugin.Log.LogDebug($"[choice] {_byLine.Count} 条台词带关键抉择");
             return true;
         }
-        catch (System.Exception e) { Plugin.Log.LogWarning("[choice] 抉择表解析失败: " + e.Message); return false; }
+        catch (System.Exception e) { Plugin.Log.LogWarning("[choice] failed to parse the choice table: " + e.Message); return false; }
     }
 
     public static string KeyFor(string lineId)

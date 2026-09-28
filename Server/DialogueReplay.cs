@@ -43,29 +43,34 @@ public sealed class DialogueReplayRouter : ItemEventRouter
 
 	private static void Replay(ProfileHelper profiles, TemplateTable templates, ISptLogger<DialogueReplayRouter> log, PmcData pmc, SaveDialogueStateRequest body, MongoId sessionId)
 	{
-		profiles.GetFullProfile(sessionId).DialogueProgress = body.DialogueProgress;
+		var full = profiles.GetFullProfile(sessionId);
+		if (full != null) full.DialogueProgress = body.DialogueProgress;
 		if (body.DialogueProgress == null || body.DialogueProgress.Count == 0 || pmc == null)
 		{
 			return;
-		}
-		if (pmc.Variables == null)
-		{
-			pmc.Variables = new Dictionary<MongoId, int>();
 		}
 		if (_index == null)
 		{
 			_index = (from e in templates.Dialogue.Elements
 				group e by e.Id.ToString()).ToDictionary((IGrouping<string, TraderDialogElement> g) => g.Key, (IGrouping<string, TraderDialogElement> g) => g.First());
 		}
-		int persisted = 0;
-		foreach (NodePathTraveled step in body.DialogueProgress)
+		// 和 /visitapi/variable/set 用同一把按会话的锁改 pmc.Variables（09-24 审查 M1）
+		lock (ProfileVariableLock.For(sessionId))
 		{
-			if (step != null && step.DialogueId != null && step.NodeId != null && _index.TryGetValue(step.DialogueId, out var element))
+			if (pmc.Variables == null)
 			{
-				persisted += Apply(element, step.NodeId, pmc.Variables);
+				pmc.Variables = new Dictionary<MongoId, int>();
 			}
+			int persisted = 0;
+			foreach (NodePathTraveled step in body.DialogueProgress)
+			{
+				if (step != null && step.DialogueId != null && step.NodeId != null && _index.TryGetValue(step.DialogueId, out var element))
+				{
+					persisted += Apply(element, step.NodeId, pmc.Variables);
+				}
+			}
+			if (persisted > 0) VariableGroups.Recompute(pmc.Variables);
 		}
-		if (persisted > 0) VariableGroups.Recompute(pmc.Variables);
 	}
 
 	private static int Apply(TraderDialogElement element, string nodeId, Dictionary<MongoId, int> variables)
@@ -93,7 +98,7 @@ public sealed class DialogueReplayRouter : ItemEventRouter
 					&& action.TryGetProperty("value", out var valueProp) && valueProp.TryGetInt32(out var intValue))
 				{
 					string variableId = variableIdProp.GetString();
-					if (variableId != null && variableId.Length == 24)
+					if (variableId != null && variableId.Length == 24 && MongoId.IsValidMongoId(variableId))
 					{
 						variables[variableId] = intValue;
 						count++;

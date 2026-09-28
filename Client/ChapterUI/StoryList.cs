@@ -28,7 +28,7 @@ public static class StoryList
         static void Postfix(QuestListItem questView)
         {
             try { if (questView != null && Hidden(questView.Quest)) questView.gameObject.SetActive(false); }
-            catch (System.Exception e) { Plugin.Log.LogError("[story] 商人任务列表过滤失败: " + e); }
+            catch (System.Exception e) { Plugin.Log.LogError("[story] Trader quest list filtering failed: " + e); }
         }
     }
 }

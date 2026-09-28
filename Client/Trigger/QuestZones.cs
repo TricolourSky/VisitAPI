@@ -70,7 +70,7 @@ public static class QuestZones
                         Position = V3(t["position"], Vector3.zero), Size = V3(t["size"], Vector3.one),
                         Rotation = t["rotation"] is JObject r ? new Quaternion(F(r, "x"), F(r, "y"), F(r, "z"), r["w"] != null ? F(r, "w") : 1f) : Quaternion.identity
                     };
-                    if (string.IsNullOrEmpty(z.Id) || z.Locations.Count == 0) { Plugin.Log.LogWarning("[zones] 有一条区域缺 id 或 locations，跳过: " + t.ToString(Newtonsoft.Json.Formatting.None)); continue; }
+                    if (string.IsNullOrEmpty(z.Id) || z.Locations.Count == 0) { Plugin.Log.LogWarning("[zones] a zone is missing id or locations, skipped: " + t.ToString(Newtonsoft.Json.Formatting.None)); continue; }
                     if (t["subtitles"] is JObject s)
                     {
                         var sub = new Subtitle
@@ -95,14 +95,13 @@ public static class QuestZones
                                 CompleteOnUse = it["completeOnUse"]?.Value<bool>() ?? true
                             };
                         if (sub.Lines.Count > 0 || sub.Pool.Count > 0) z.Subtitles = sub;
-                        else Plugin.Log.LogWarning($"[zones] 区域 {z.Id} 的 subtitles 既没有 lines 也没有 pool，忽略");
+                        else Plugin.Log.LogWarning($"[zones] zone {z.Id} subtitles have neither lines nor pool, ignored");
                     }
                     parsed.Add(z);
                 }
-                catch (Exception e) { Plugin.Log.LogWarning("[zones] 一条区域解析失败，跳过: " + e.Message); }
+                catch (Exception e) { Plugin.Log.LogWarning("[zones] failed to parse a zone, skipped: " + e.Message); }
             }
             _zones = parsed;
-            Plugin.Log.LogInfo($"[zones] 登记 {parsed.Count} 个任务区域（{string.Join(", ", parsed.SelectMany(z => z.Locations).Distinct(StringComparer.OrdinalIgnoreCase))}）");
             return true;
         }
         catch (Exception e) { Plugin.Log.LogWarning("[zones] parse failed: " + e.Message); return false; }
@@ -117,7 +116,6 @@ public static class QuestZones
         _live.Clear();
         var loc = world?.LocationId;
         if (string.IsNullOrEmpty(loc) || _zones.Count == 0) return;
-        var made = new List<string>();
         foreach (var z in _zones.Where(z => z.Locations.Any(l => string.Equals(l, loc, StringComparison.OrdinalIgnoreCase))))
         {
             var go = new GameObject(z.Id);
@@ -125,17 +123,16 @@ public static class QuestZones
             var box = go.AddComponent<BoxCollider>();
             box.isTrigger = true;
             box.size = z.Size;
+            var probe = go.AddComponent<QuestZoneProbe>();
+            probe.Id = z.Id; probe.Zone = z;
             TriggerWithId trigger = z.Type switch
             {
-                "placeitem" => go.AddComponent<PlaceItemTrigger>(),
-                _ => go.AddComponent<ExperienceTrigger>(),
+                "placeitem" => go.AddComponent<VisitPlaceItemTrigger>().With(probe),
+                _ => go.AddComponent<VisitExperienceTrigger>().With(probe),
             };
             trigger.SetId(z.Id);
             go.layer = LayerMask.NameToLayer("Triggers");
-            var probe = go.AddComponent<QuestZoneProbe>();
-            probe.Id = z.Id; probe.Zone = z;
             _live.Add(go);
-            made.Add($"{z.Id}({z.Type})");
             if (z.Subtitles?.Interact is Interact it)
             {
                 if (it.CompleteOnUse)
@@ -157,11 +154,26 @@ public static class QuestZones
                 t.VoiceAt = at;
                 if (it.CompleteOnUse) t.ZoneToComplete = trigger;
                 _live.Add(tgo);
-                made.Add($"{z.Id}:交互「{it.Prompt}」@({at.x:0.#},{at.y:0.#},{at.z:0.#})");
             }
         }
-        if (made.Count > 0) Plugin.Log.LogInfo($"[zones] {loc}: 生成 {made.Count} 个任务区域 [{string.Join(", ", made)}]");
     }
+}
+
+/// 09-25：EFT 的触发检测（玩家身上的重叠检查）只通知实现了 IPhysicsTrigger 的组件（TriggerWithId），同一物体上的普通 MonoBehaviour
+/// 收不到 OnTriggerEnter——所以探针以前的「player entered quest zone」日志和「走进区域播字幕」从来没生效过（原生触发器照常计任务进度）。
+/// 这里继承两种原生触发器，TriggerEnter 先走原生逻辑、再通知探针
+public class VisitExperienceTrigger : ExperienceTrigger
+{
+    QuestZoneProbe _probe;
+    public VisitExperienceTrigger With(QuestZoneProbe probe) { _probe = probe; return this; }
+    public override void TriggerEnter(Player player) { base.TriggerEnter(player); _probe?.Entered(player); }
+}
+
+public class VisitPlaceItemTrigger : PlaceItemTrigger
+{
+    QuestZoneProbe _probe;
+    public VisitPlaceItemTrigger With(QuestZoneProbe probe) { _probe = probe; return this; }
+    public override void TriggerEnter(Player player) { base.TriggerEnter(player); _probe?.Entered(player); }
 }
 
 public class QuestZoneProbe : MonoBehaviour
@@ -169,7 +181,7 @@ public class QuestZoneProbe : MonoBehaviour
     public string Id;
     public QuestZones.Zone Zone;
     public bool ManualOnly;
-    bool _inside, _subtitled;
+    bool _inside, _subtitled, _spawnCheck;
 
     void PlaySubtitle(string how)
     {
@@ -180,15 +192,14 @@ public class QuestZoneProbe : MonoBehaviour
             if (!string.IsNullOrEmpty(sub.Quest))
             {
                 var quest = QuestOps.Resolve()?.Quests?.GetConditional(sub.Quest);
-                if (quest == null || (sub.Statuses.Count > 0 && !sub.Statuses.Contains((int)quest.QuestStatus)))
-                { Plugin.Log.LogInfo($"[zones] {Id} 的字幕不播：任务 {sub.Quest} 现在是 {(quest == null ? "不在任务书里" : quest.QuestStatus.ToString())}"); return; }
+                if (quest == null || (sub.Statuses.Count > 0 && !sub.Statuses.Contains((int)quest.QuestStatus))) return;
             }
             _subtitled = true;
             var pick = sub.Pick();
             if (!string.IsNullOrEmpty(pick.Audio)) RaidVoice.PlayAt(pick.Audio, transform.position, sub.Volume);
-            RaidSubtitles.Play(pick.Lines, $"任务区域 {Id}，{how}");
+            RaidSubtitles.Play(pick.Lines, $"quest zone {Id}, {how}");
         }
-        catch (Exception e) { Plugin.Log.LogWarning($"[zones] {Id} 播字幕失败: " + e.Message); }
+        catch (Exception e) { Plugin.Log.LogWarning($"[zones] {Id} failed to play subtitles: " + e.Message); }
     }
 
     System.Collections.IEnumerator Start()
@@ -212,31 +223,27 @@ public class QuestZoneProbe : MonoBehaviour
                 var half = (box != null ? box.size : Vector3.one) * 0.5f;
                 if (Mathf.Abs(local.x) <= half.x && Mathf.Abs(local.y) <= half.y && Mathf.Abs(local.z) <= half.z && !_inside)
                 {
-                    _inside = true;
-                    GetComponent<TriggerWithId>()?.TriggerEnter(player);
-                    Plugin.Log.LogInfo($"[zones] 玩家出生就在任务区域 {Id} 里，补触发一次（原生只认走进去那一下）");
-                    PlaySubtitle("出生就在里面");
+                    _spawnCheck = true;
+                    GetComponent<TriggerWithId>()?.TriggerEnter(player);   // 经子类回到 Entered，字幕在那里
+                    _spawnCheck = false;
                 }
                 yield break;
             }
             yield return new WaitForSeconds(0.5f);
         }
-        Plugin.Log.LogWarning($"[zones] 等了 60 秒主玩家没就位，没做出生检查：{Id}");
+        Plugin.Log.LogWarning($"[zones] main player not ready after 60 s; spawn check skipped: {Id}");
     }
 
-    void OnTriggerEnter(Collider col)
+    /// 原生触发器（VisitExperienceTrigger / VisitPlaceItemTrigger）确认有玩家进入后调用；只管主玩家
+    public void Entered(Player player)
     {
         try
         {
-            if (!Singleton<GameWorld>.Instantiated) return;
-            var world = Singleton<GameWorld>.Instance;
-            var player = world.GetPlayerByCollider(col);
-            if (player == null || !ReferenceEquals(player, world.MainPlayer)) return;
+            if (!Singleton<GameWorld>.Instantiated || player == null || !ReferenceEquals(player, Singleton<GameWorld>.Instance.MainPlayer)) return;
             _inside = true;
-            Plugin.Log.LogInfo($"[zones] 玩家进入任务区域 {Id}");
-            PlaySubtitle("走进区域");
+            PlaySubtitle(_spawnCheck ? "spawned inside" : "walked in");
         }
-        catch {  }
+        catch (Exception e) { Plugin.Log.LogWarning($"[zones] {Id} enter handling failed: " + e.Message); }
     }
 }
 
@@ -250,6 +257,6 @@ public static class QuestZoneSpawn
             if (Narrating.IsVisitWorld(__instance) || Narrating.Now) return;
             QuestZones.Spawn(__instance);
         }
-        catch (Exception e) { Plugin.Log.LogError("[zones] 生成任务区域失败（战局不受影响）: " + e); }
+        catch (Exception e) { Plugin.Log.LogError("[zones] failed to spawn quest zones (raid unaffected): " + e); }
     }
 }

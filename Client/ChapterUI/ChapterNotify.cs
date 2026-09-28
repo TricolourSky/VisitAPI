@@ -41,9 +41,9 @@ public static class ChapterNotify
                 Title = title, Text = text, IsChapter = true,
                 Sprite = VisitArt.Load("reward_exp.png") ?? ChapterImages.Cached(QuestFlags.Get(chapter.Id)?.Icon),
                 Silent = true, Status = ChapterBanner.EStatus.Success, SoundType = EUISoundType.QuestFinished, Duration = ENotificationDurationType.Long
-            }), $"奖励横幅「{title}」{text}");
+            }), $"reward banner \"{title}\" {text}");
         }
-        catch (Exception e) { Plugin.Log.LogWarning("[banner] 奖励横幅失败: " + e.Message); }
+        catch (Exception e) { Plugin.Log.LogWarning("[banner] Reward banner failed: " + e.Message); }
     }
 
     static string Word(string key, string ch, string en)
@@ -56,7 +56,7 @@ public static class ChapterNotify
 
     public static void Show(Quest quest, bool chapter, string line, EUISoundType sound)
     {
-        if (!Singleton<NotificationManager>.Instantiated) { Plugin.Log.LogWarning("[banner] NotificationManager 不在，横幅出不了：" + line); return; }
+        if (!Singleton<NotificationManager>.Instantiated) { Plugin.Log.LogWarning("[banner] NotificationManager not present, cannot show banner: " + line); return; }
         var st = quest.QuestStatus;
         var chapterId = chapter ? quest.Id : QuestFlags.ChapterOf(quest.Id);
         var title = ChapterTitle(quest, chapter, chapterId);
@@ -69,12 +69,12 @@ public static class ChapterNotify
             Sprite = ChapterImages.Cached(QuestFlags.Get(chapterId)?.Icon),
             Clip = clip != null ? ChapterBundle.Clip(clip) : null, Silent = false,
             Status = status, SoundType = sound, Duration = ENotificationDurationType.Long
-        }), $"{(chapter ? "章节" : "子任务")}「{title}」{line}（{st}）");
+        }), $"{(chapter ? "chapter" : "subtask")} \"{title}\" {line} ({st})");
     }
 
     public static void ShowObjective(Quest quest, string what)
     {
-        if (!Singleton<NotificationManager>.Instantiated) { Plugin.Log.LogWarning("[banner] NotificationManager 不在，目标横幅出不了：" + what); return; }
+        if (!Singleton<NotificationManager>.Instantiated) { Plugin.Log.LogWarning("[banner] NotificationManager not present, cannot show objective banner: " + what); return; }
         var chapterId = QuestFlags.ChapterOf(quest.Id);
         var title = ChapterTitle(quest, false, chapterId);
         Display(() => NotificationManager.DisplayNotification(new ChapterBanner
@@ -83,12 +83,11 @@ public static class ChapterNotify
             Sprite = ChapterImages.Cached(QuestFlags.Get(chapterId)?.Icon),
             Clip = ChapterBundle.Clip("story_quest_task_done_and_reward"), Silent = false,
             Status = ChapterBanner.EStatus.Success, SoundType = EUISoundType.QuestFinished, Duration = ENotificationDurationType.Long
-        }), $"目标「{what}」达成（{title}）");
+        }), $"objective \"{what}\" complete ({title})");
     }
 
     public static void Display(Action show, string what)
     {
-        Plugin.Log.LogInfo($"[banner] 显示{(DialogScreenTracker.Open ? "（对话屏开着，画在对话屏之上）" : "")}：{what}");
         show();
     }
 
@@ -113,7 +112,7 @@ public static class QuestNotify
         if (!Story(quest)) return true;
         if (!Duplicate(__instance))
             try { Handle(quest, story: true); }
-            catch (System.Exception e) { Plugin.Log.LogError("[quest] 剧情播报失败: " + e); }
+            catch (System.Exception e) { Plugin.Log.LogError("[quest] Story notification failed: " + e); }
         return false;
     }
 
@@ -121,7 +120,7 @@ public static class QuestNotify
     {
         if (Story(quest) || Duplicate(__instance)) return;
         try { Handle(quest, story: false); }
-        catch (System.Exception e) { Plugin.Log.LogError("[quest] 状态播报失败（原生通知不受影响）: " + e); }
+        catch (System.Exception e) { Plugin.Log.LogError("[quest] Status notification failed (native notifications are unaffected): " + e); }
     }
 
     internal static bool Duplicate(QuestControllerClient qc) =>
@@ -154,7 +153,7 @@ public static class QuestNotify
             Text = $"<color={Name}>{quest.Template.Name?.Trim()}</color>\n<size=88%><color={hue}>{status}</color></size>",
             SoundType = sound,
             Duration = ENotificationDurationType.Long,
-        }), $"黑条「{quest.Template.Name?.Trim()}」{status}");
+        }), $"black bar \"{quest.Template.Name?.Trim()}\" {status}");
     }
 
     static bool Owns(string questId) =>
@@ -182,14 +181,14 @@ public static class QuestConditionNotify
     public static void Seed(Quest quest)
     {
         try { if (quest?.Template != null && !_done.ContainsKey(quest.Id) && QuestNotify.Story(quest)) _done[quest.Id] = DoneNow(quest); }
-        catch (System.Exception e) { Plugin.Log.LogWarning("[quest] 目标达成表播种失败: " + e.Message); }
+        catch (System.Exception e) { Plugin.Log.LogWarning("[quest] Failed to seed completed-objectives table: " + e.Message); }
     }
 
     static bool Prefix(QuestControllerClient __instance, Quest quest)
     {
         if (!QuestNotify.Story(quest)) return true;
         try { Notify(__instance, quest); }
-        catch (System.Exception e) { Plugin.Log.LogError("[quest] 目标达成提醒失败: " + e); }
+        catch (System.Exception e) { Plugin.Log.LogError("[quest] Objective-complete notification failed: " + e); }
         return false;
     }
 
@@ -208,11 +207,9 @@ public static class QuestConditionNotify
         var fresh = now.Where(id => !seen.Contains(id) && objectives.ContainsKey(id)).ToList();
         if (fresh.Count == 0) return;
         var necessary = objectives.Values.Where(c => c.IsNecessary).Select(c => c.id.ToString()).ToList();
-        if (quest.QuestStatus >= EQuestStatus.AvailableForFinish || (necessary.Count > 0 && necessary.All(now.Contains)))
-        { Plugin.Log.LogInfo($"[quest] 目标全部达成，交给任务完成横幅：{quest.Id}"); return; }
+        if (quest.QuestStatus >= EQuestStatus.AvailableForFinish || (necessary.Count > 0 && necessary.All(now.Contains))) return;
         var names = fresh.Select(id => objectives[id].FormattedDescription?.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
         var what = names.Count > 0 ? string.Join("; ", names) : fresh[0];
-        Plugin.Log.LogInfo($"[quest] 目标达成：{quest.Id} → {what}");
         ChapterNotify.ShowObjective(quest, what);
     }
 }

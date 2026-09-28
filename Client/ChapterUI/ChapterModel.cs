@@ -34,6 +34,9 @@ namespace VisitAPI.ChapterUI
             IEnumerable<Quest> shown = all || over
                 ? Subs.Where(s => ChapterStates.Begun(s.QuestStatus))
                 : Subs.Where(s => active.Contains(s) || (s.QuestStatus == EQuestStatus.Success && prereq.Contains(s.Id)));
+            // 09-26（SORA：迷宫章节目标里露出两串 id）：1.1 标了 notDisplayedQuest 的子任务（服务端下发成 hidden，比如迷宫的 68ffdaf2——
+            // 两条「某任务完成」、没有文案的收尾条件）1.1 界面上不显示，章节页也不列它的目标
+            shown = shown.Where(s => QuestFlags.Get(s.Id)?.Hidden != true);
             foreach (var s in shown.Reverse())
             {
                 if (!s.Template.Conditions.TryGetValue(EQuestStatus.AvailableForFinish, out var list)) continue;
@@ -118,20 +121,13 @@ namespace VisitAPI.ChapterUI
                 Subs = QuestFlags.SubsOf(q.Id).Select(book.GetConditional).Where(s => s?.Template != null).ToList()
             });
             var list = Plugin.ShowUnstarted.Value ? all : all.Where(c => c.Status != State.Unavailable);
+            // 09-26 SORA：不再按解锁先后排。原版 1.1 章节按 SORA 定的固定位次、自制章节按自己的 order（QuestFlags.Order）；
+            // 章节开始了就自动排进它的位次，没开始的（只有打开「显示未开始的章节」才看得到）排在已开始的后面
             return list.Select((c, i) => (c, i))
-                .OrderBy(x => UnlockedAt(x.c.Quest))
+                .OrderBy(x => x.c.Status == State.Unavailable ? 1 : 0)
                 .ThenBy(x => QuestFlags.Order(x.c.Quest.Id))
                 .ThenBy(x => x.i)
                 .Select(x => x.c).ToList();
-        }
-
-        static double UnlockedAt(Quest quest)
-        {
-            var stamps = quest?.StatusStartTimestamps;
-            if (stamps == null || stamps.Count == 0) return double.MaxValue;
-            var first = double.MaxValue;
-            foreach (var kv in stamps) if (kv.Value > 0d && kv.Value < first) first = kv.Value;
-            return first;
         }
     }
 }

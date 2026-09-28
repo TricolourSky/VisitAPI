@@ -40,7 +40,7 @@ namespace VisitAPI.ChapterUI
                 Plugin.Log.LogWarning("[chapter/banner] 1.1 notification view unavailable, using default banner");
             }
             // 排队模式下这里一抛，游戏的通知队列会永远卡在「处理中」（ProcessQueuedNotifications 不清标志），连原生通知都不再显示——出错一律退回默认样式
-            catch (System.Exception e) { Plugin.Log.LogWarning("[chapter/banner] 1.1 横幅创建失败，退回默认样式: " + e.Message); }
+            catch (System.Exception e) { Plugin.Log.LogWarning("[chapter/banner] Failed to create 1.1 banner, falling back to default style: " + e.Message); }
             if (setup) notifier.RemoveNotificationView(this, view);   // 已登记进通知栏的要正式撤掉（顺带销毁），光 Destroy 会留下一条空记录
             else if (go != null) Object.Destroy(go);
             _fallback = true;

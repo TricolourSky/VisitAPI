@@ -31,7 +31,6 @@ public static class QuestRefresh
             if (dialog == null || dialog.DialogSide != EDialogSide.Player || dialog.IsBlocked) continue;
             System.Array.Copy(now, last, now.Length);
             dc.SetCurrentDialog(dc.method_0(dialog.Id));
-            Plugin.Log.LogDebug("[refresh] quest status changed, current node rebuilt");
         }
     }
 

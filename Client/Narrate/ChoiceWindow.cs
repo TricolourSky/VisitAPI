@@ -34,16 +34,14 @@ public static class ChoiceWindow
 
     static RectTransform _live;
     static Poller _poll;
-    static bool _logged;
 
     public static bool Show(string key, Action yes, Action no)
     {
         try
         {
             var screen = DialogScreenTracker.Live;
-            if (screen == null || screen.transform is not RectTransform root) { Plugin.Log.LogWarning("[choice] 对话屏不在，确认窗开不出来"); return false; }
+            if (screen == null || screen.transform is not RectTransform root) { Plugin.Log.LogWarning("[choice] Dialogue screen not present, can't open the confirmation window"); return false; }
             Close();
-            _logged = false;
             var s = root.rect.height > 10f ? root.rect.height / 1080f : 1f;
             var font = FontSource(root);
 
@@ -57,7 +55,6 @@ public static class ChoiceWindow
             host.gameObject.AddComponent<GraphicRaycaster>();
             _poll = host.gameObject.AddComponent<Poller>();
             _poll.Canvas = canvas;
-            Plugin.Log.LogInfo($"[choice] 事件系统：{(EventSystem.current == null ? "不在" : "在（" + (EventSystem.current.currentInputModule == null ? "没有输入模块" : EventSystem.current.currentInputModule.GetType().Name) + "）")}");
 
             var win = Box(host, "Window", Back);
             Center(win, W * s, H * s);
@@ -85,25 +82,23 @@ public static class ChoiceWindow
             var btnY = qTop + QuestionH + LineH + ButtonsH / 2f;
             var size = Mathf.Max(1, Mathf.RoundToInt(30f * s));
             var done = false;
-            void Pick(bool accept, Action act)
+            void Pick(Action act)
             {
                 if (done) return;
                 done = true;
-                Plugin.Log.LogInfo($"[choice] 「{Word(key, key, key)}」玩家选了{(accept ? "是" : "否")}");
                 Close();
-                try { act?.Invoke(); } catch (Exception e) { Plugin.Log.LogWarning("[choice] 抉择回调失败: " + e.Message); }
+                try { act?.Invoke(); } catch (Exception e) { Plugin.Log.LogWarning("[choice] Choice callback failed: " + e.Message); }
             }
-            Button(win, Word("Yes", "是", "Yes"), size, font, -BtnGap / 2f * s, btnY * s, s, () => Pick(true, yes), leftMask);
-            Button(win, Word("No", "否", "No"), size, font, BtnGap / 2f * s, btnY * s, s, () => Pick(false, no), rightMask);
+            Button(win, Word("Yes", "是", "Yes"), size, font, -BtnGap / 2f * s, btnY * s, s, () => Pick(yes), leftMask);
+            Button(win, Word("No", "否", "No"), size, font, BtnGap / 2f * s, btnY * s, s, () => Pick(no), rightMask);
 
             Frame9(win, s);
 
-            Plugin.Log.LogInfo($"[choice] 关键抉择窗打开：{key}（图 {(art.left ?? "无")} / {(art.right ?? "无")}，画布 {root.rect.width:0}×{root.rect.height:0}，缩放 {s:0.###}）");
             return true;
         }
         catch (Exception e)
         {
-            Plugin.Log.LogWarning("[choice] 确认窗搭建失败，这句照原生执行: " + e);
+            Plugin.Log.LogWarning("[choice] Failed to build confirmation window, running this line natively: " + e);
             Close();
             return false;
         }
@@ -186,7 +181,7 @@ public static class ChoiceWindow
     static void Frame9(RectTransform win, float s)
     {
         var sprite = VisitArt.Load("choice_frame.png", new Vector4(5f, 5f, 5f, 5f));
-        if (sprite == null) { Plugin.Log.LogWarning("[choice] 外框贴图缺失，窗口不画边"); return; }
+        if (sprite == null) { Plugin.Log.LogWarning("[choice] Frame texture missing, window drawn without border"); return; }
         var rt = Box(win, "Border", Color.white);
         var img = rt.GetComponent<Image>();
         img.sprite = sprite;
@@ -250,13 +245,20 @@ public static class ChoiceWindow
         RectTransform rt = null;
         try
         {
-            var src = UnityEngine.Object.FindObjectsOfType<DefaultUIButton>(true)
-                .FirstOrDefault(b => b != null && b._headerLabel != null && b.GetComponent<RectTransform>() != null);
+            // 09-26：以前随手取场景里第一个 DefaultUIButton 当模板，抓到过聊天窗克隆的回复按钮、跳过它之后又抓到别的带电话图标的原生按钮。
+            // 现在固定用原生聊天窗的「收取全部」按钮（图标本来就是空的，聊天窗克隆的也是它），找不到才退回第一个不是我们克隆的
+            var candidates = UnityEngine.Object.FindObjectsOfType<DefaultUIButton>(true)
+                .Where(b => b != null && b._headerLabel != null && b.GetComponent<RectTransform>() != null
+                            && b.GetComponent<VisitClonedButton>() == null && !b.name.StartsWith("Btn_", StringComparison.Ordinal)).ToList();
+            var src = candidates.FirstOrDefault(b => b.name == "ReceiveAllButton") ?? candidates.FirstOrDefault();
             if (src != null)
             {
                 var go = UnityEngine.Object.Instantiate(src.gameObject, win, false);
                 go.name = "Btn_" + text;
                 go.SetActive(true);
+                // 抉择按钮只有文字：模板上的图标（不管挂在哪一层）一律关掉
+                foreach (var t in go.GetComponentsInChildren<Transform>(true))
+                    if (t != go.transform && (t.name == "IconContainer" || t.name == "Icon" || t.name == "IconIdle")) t.gameObject.SetActive(false);
                 foreach (var b in go.GetComponentsInChildren<Button>(true)) b.onClick.RemoveAllListeners();
                 foreach (var le in go.GetComponentsInChildren<LayoutElement>(true)) le.ignoreLayout = true;
                 if (go.GetComponent<ContentSizeFitter>() is ContentSizeFitter fitter) fitter.enabled = false;
@@ -270,7 +272,7 @@ public static class ChoiceWindow
                 rt = (RectTransform)go.transform;
             }
         }
-        catch (Exception e) { Plugin.Log.LogWarning("[choice] 克隆原生按钮失败，用纯文字按钮: " + e.Message); rt = null; }
+        catch (Exception e) { Plugin.Log.LogWarning("[choice] Failed to clone native button, using plain text button: " + e.Message); rt = null; }
 
         if (rt == null)
         {
@@ -301,7 +303,7 @@ public static class ChoiceWindow
     {
         if (go == null || EventSystem.current == null) return;
         try { ExecuteEvents.Execute(go, new PointerEventData(EventSystem.current), what); }
-        catch (Exception e) { Plugin.Log.LogWarning("[choice] 转发按钮事件失败: " + e.Message); }
+        catch (Exception e) { Plugin.Log.LogWarning("[choice] Failed to forward button event: " + e.Message); }
     }
 
     static void Fade(RectTransform mask, float to)
@@ -317,7 +319,7 @@ public static class ChoiceWindow
     static TMP_Text FontSource(Transform root)
     {
         var t = root.GetComponentsInChildren<TextMeshProUGUI>(true).FirstOrDefault(x => x != null && x.font != null);
-        if (t == null) Plugin.Log.LogWarning("[choice] 对话屏上找不到现成文字，确认窗用默认字体");
+        if (t == null) Plugin.Log.LogWarning("[choice] No existing text found on dialogue screen, confirmation window uses default font");
         return t;
     }
 
@@ -347,7 +349,6 @@ public static class ChoiceWindow
             if (_first)
             {
                 _first = false;
-                Plugin.Log.LogInfo($"[choice] 按钮轮询就位：鼠标 {pos.x:0},{pos.y:0}，按钮 {_buttons.Count} 枚，首帧{(hit >= 0 ? "已命中 " + _buttons[hit].rect.name : "未命中")}");
             }
             if (hit != _hover)
             {
@@ -357,14 +358,13 @@ public static class ChoiceWindow
             }
             if (hit >= 0 && Input.GetMouseButtonDown(0))
             {
-                Plugin.Log.LogInfo($"[choice] 轮询：在 {_buttons[hit].rect.name} 上按下鼠标");
                 Safe(_buttons[hit].click);
             }
         }
 
         static void Safe(Action a)
         {
-            try { a?.Invoke(); } catch (Exception e) { Plugin.Log.LogWarning("[choice] 按钮轮询回调失败: " + e.Message); }
+            try { a?.Invoke(); } catch (Exception e) { Plugin.Log.LogWarning("[choice] Button polling callback failed: " + e.Message); }
         }
     }
 
@@ -390,24 +390,22 @@ public static class ChoiceWindow
         public void OnPointerEnter(PointerEventData e)
         {
             _inside = true;
-            if (!_logged) { _logged = true; Plugin.Log.LogInfo("[choice] 鼠标进入按钮 " + transform.parent?.name + "（事件系统能摸到窗口）"); }
             Safe(Enter);
         }
 
         public void OnPointerExit(PointerEventData e) { _inside = false; Safe(Exit); }
         public void OnPointerDown(PointerEventData e) => Safe(Down);
-        public void OnPointerUp(PointerEventData e) { Safe(Up); if (_inside) Fire("抬起"); }
-        public void OnPointerClick(PointerEventData e) => Fire("点击");
+        public void OnPointerUp(PointerEventData e) { Safe(Up); if (_inside) Fire("pointer up"); }
+        public void OnPointerClick(PointerEventData e) => Fire("click");
 
         void Fire(string how)
         {
-            Plugin.Log.LogInfo($"[choice] {how} {transform.parent?.name}");
             Safe(Click);
         }
 
         static void Safe(Action a)
         {
-            try { a?.Invoke(); } catch (Exception e) { Plugin.Log.LogWarning("[choice] 按钮事件失败: " + e.Message); }
+            try { a?.Invoke(); } catch (Exception e) { Plugin.Log.LogWarning("[choice] Button event failed: " + e.Message); }
         }
     }
 }

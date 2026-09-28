@@ -46,7 +46,6 @@ public class DialogueLoader(TemplateTable templates, TradersTable traders, Local
             catch (Exception ex) { log.Error("[VisitAPI] cannot parse " + label + ": " + ex.Message); continue; }
             pending.AddRange(elements.OfType<JsonObject>().Select(e => (label, e)));
         }
-        if (pending.Count > 0) log.Info($"[VisitAPI] 包 {p.Label}：对话元素 {pending.Count} 个");
         return pending;
     }
 
@@ -60,6 +59,8 @@ public class DialogueLoader(TemplateTable templates, TradersTable traders, Local
             CollectTexts((JsonObject)element["localization"]!, texts);
             DialogueConfirmations.Scan(element);
             dropped += DialogueSanitizer.Clean(element);
+            DialogueSanitizer.SplitRandomGroups(element);
+            DialogueSanitizer.HalfOpenRandoms(element);
             try { var parsed = json.Deserialize<TraderDialogElement>(element.ToJsonString())!; known.Add(parsed.Id.ToString()); }
             catch (Exception ex) { log.Error($"[VisitAPI] bad element {element["Id"]} in {fileName}: {ex.Message}"); }
         }
@@ -80,7 +81,7 @@ public class DialogueLoader(TemplateTable templates, TradersTable traders, Local
             var id = parsed.Id.ToString();
             if (!existing.Add(id))
             {
-                if (owner.TryGetValue(id, out var first)) log.Error($"[VisitAPI] 对话元素 {id} 在 {first} 和 {fileName} 里都有，用了前者的");
+                if (owner.TryGetValue(id, out var first)) log.Error($"[VisitAPI] Dialogue element {id} exists in both {first} and {fileName}, using the former");
                 continue;
             }
             owner[id] = fileName;

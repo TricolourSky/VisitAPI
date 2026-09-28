@@ -8,7 +8,21 @@ namespace VisitAPI.Native;
 [HarmonyPatch(typeof(ConditionCollection), nameof(ConditionCollection.TestAll), typeof(IConditional))]
 public static class AnyOfQuest
 {
+    static bool _warned;
+
+    /// 09-26 F4：这里跑在引擎的 ManageConditional → CheckForStatusChange 里（撤离结算、大厅重建都会走到），以前没兜：
+    /// Pass 会对引擎自己从不测的非必需子条件调 Test()，一抛就进了原生调用方。出错就交回原生判定
     static bool Prefix(ConditionCollection __instance, IConditional conditional, ref bool __result)
+    {
+        try { return Core(__instance, conditional, ref __result); }
+        catch (System.Exception e)
+        {
+            if (!_warned) { _warned = true; Plugin.Log.LogWarning("[quest] any-of / finisher check failed, falling back to the native check (logged once): " + e); }
+            return true;
+        }
+    }
+
+    static bool Core(ConditionCollection __instance, IConditional conditional, ref bool __result)
     {
         if (!(conditional is Quest quest) || quest.Template?.Conditions == null) return true;
         if (!quest.Template.Conditions.TryGetValue(EQuestStatus.AvailableForFinish, out var finish) || !ReferenceEquals(finish, __instance)) return true;

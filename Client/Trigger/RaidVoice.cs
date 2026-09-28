@@ -29,15 +29,14 @@ public static class RaidVoice
                 try
                 {
                     var path = Dump(file);
-                    if (path == null) { Plugin.Log.LogWarning("[voice] 内嵌音频不存在: " + file); yield break; }
+                    if (path == null) { Plugin.Log.LogWarning("[voice] embedded audio not found: " + file); yield break; }
                     using var req = UnityWebRequestMultimedia.GetAudioClip("file:///" + path.Replace('\\', '/'), file.EndsWith(".wav", System.StringComparison.OrdinalIgnoreCase) ? AudioType.WAV : AudioType.OGGVORBIS);
                     yield return req.SendWebRequest();
-                    if (req.result != UnityWebRequest.Result.Success) { Plugin.Log.LogWarning($"[voice] 音频加载失败 {file}: {req.error}"); yield break; }
+                    if (req.result != UnityWebRequest.Result.Success) { Plugin.Log.LogWarning($"[voice] audio load failed {file}: {req.error}"); yield break; }
                     clip = DownloadHandlerAudioClip.GetContent(req);
-                    if (clip == null) { Plugin.Log.LogWarning("[voice] 音频解不出 AudioClip: " + file); yield break; }
+                    if (clip == null) { Plugin.Log.LogWarning("[voice] could not decode an AudioClip from audio: " + file); yield break; }
                     clip.name = file;
                     _clips[file] = clip;
-                    Plugin.Log.LogInfo($"[voice] 载入 {file}：{clip.length:0.##}s {clip.frequency}Hz {clip.channels}ch");
                 }
                 finally { _loading.Remove(file); }
             }
@@ -55,7 +54,6 @@ public static class RaidVoice
         src.dopplerLevel = 0f;
         src.playOnAwake = false;
         src.Play();
-        Plugin.Log.LogInfo($"[voice] 播 {file} @({at.x:0.#}, {at.y:0.#}, {at.z:0.#}) 音量 {volume}");
         Object.Destroy(go, clip.length + 0.5f);
     }
 

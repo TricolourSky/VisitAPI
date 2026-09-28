@@ -76,7 +76,6 @@ public class VisitTrigger : MonoBehaviour
         var d = Vector3.Distance(Camera.main.transform.position, new Vector3(Data.X, Data.Y, Data.Z));
         if (d > Data.Dist * 5f) return;
         _nearLog = Time.unscaledTime + 2f;
-        Plugin.Log.LogInfo($"[trigger] 距触发点 {d:F1}m（需要 ≤{Data.Dist}m）@ ({Data.X}, {Data.Y}, {Data.Z})");
     }
 
     bool FindOwner()
@@ -134,12 +133,11 @@ public class VisitTrigger : MonoBehaviour
         _cooldown = Time.unscaledTime + 1.5f;
         var acted = false;
         var handled = true;
-        Plugin.Log.LogInfo($"[trigger] 触发：accept={Data.AcceptId ?? "-"} finish={Data.FinishId ?? "-"} fail={Data.FailId ?? "-"} node={Data.Node ?? "-"}{(Voice != null ? $" voice(池 {Voice.Pool.Count})" : "")}");
         if (Voice != null)
         {
             var pick = Voice.Pick();
             if (!string.IsNullOrEmpty(pick.Audio)) RaidVoice.PlayAt(pick.Audio, VoiceAt, Voice.Volume);
-            RaidSubtitles.Play(pick.Lines, "交互触发点 " + TraderId);
+            RaidSubtitles.Play(pick.Lines, "interaction trigger " + TraderId);
             acted = true;
         }
         if (ZoneToComplete != null)
@@ -147,10 +145,10 @@ public class VisitTrigger : MonoBehaviour
             try
             {
                 var player = Comfort.Common.Singleton<GameWorld>.Instantiated ? Comfort.Common.Singleton<GameWorld>.Instance.MainPlayer : null;
-                if (player != null) { ZoneToComplete.TriggerEnter(player); Plugin.Log.LogInfo($"[trigger] 按下交互，手动触发任务区域 {ZoneToComplete.Id}（到达）"); }
-                else Plugin.Log.LogWarning("[trigger] 主玩家不在，任务区域没触发");
+                if (player != null) ZoneToComplete.TriggerEnter(player);
+                else Plugin.Log.LogWarning("[trigger] no main player; quest zone not triggered");
             }
-            catch (System.Exception e) { Plugin.Log.LogWarning("[trigger] 手动触发任务区域失败: " + e.Message); }
+            catch (System.Exception e) { Plugin.Log.LogWarning("[trigger] manual quest zone trigger failed: " + e.Message); }
         }
         if (Data.AcceptId != null) { handled &= AcceptQuest(); acted = true; }
         if (Data.FinishId != null) { handled &= SetStatus(Data.FinishId, EQuestStatus.Success); acted = true; }
@@ -159,7 +157,7 @@ public class VisitTrigger : MonoBehaviour
         if (!acted)
         {
             if (DialogScreenTracker.Open)
-            { Plugin.Log.LogInfo("[trigger] 对话屏开着，这次不弹（冷却后重试）"); handled = false; _fired = false; }
+            { handled = false; _fired = false; }
             else
             {
                 var tree = DialogFiles.Loader.Load(TraderId);
@@ -183,7 +181,7 @@ public class VisitTrigger : MonoBehaviour
         {
             if (Time.unscaledTime < _onceDeadline) return true;
             ResetOnce();
-            Plugin.Log.LogWarning($"[trigger] 触发的对话屏 10 秒内没出现，once 不记{(Auto ? "，这个自动触发点本局不再弹" : "，冷却后重新出提示")}");
+            Plugin.Log.LogWarning($"[trigger] triggered dialog screen did not appear within 10 s; once not recorded{(Auto ? ", this auto trigger won't fire again this raid" : ", prompt will reappear after cooldown")}");
             if (!Auto) _cooldown = Time.unscaledTime + 1.5f;
             return false;
         }
@@ -192,7 +190,6 @@ public class VisitTrigger : MonoBehaviour
         ResetOnce();
         if (DialogLeftGateUnresolved())
         {
-            Plugin.Log.LogInfo($"[trigger] 对话关了，但它还能推进的任务都没推进（节点 {Data.Node ?? "入口"}）——当成没走完，once 不记{(Auto ? "，下次进图再弹" : "，走过去还能再对话")}");
             if (!Auto) _cooldown = Time.unscaledTime + 1.5f;
             return false;
         }
@@ -208,7 +205,6 @@ public class VisitTrigger : MonoBehaviour
         if (DialogLeftGateUnresolved())
         {
             _burned = false;
-            Plugin.Log.LogInfo($"[trigger] once 记号已打，但这段对话（节点 {Data.Node ?? "入口"}）还推进得了剧情——按「上次没走完」处理，这次照常可用");
             return true;
         }
         Destroy(gameObject);
@@ -273,7 +269,6 @@ public class VisitTrigger : MonoBehaviour
         var player = GamePlayerOwner.MyPlayer;
         if (player == null) return;
         OnceService.Mark(player.Profile, OnceService.TriggerId(TraderId, OnceKey), "trigger");
-        Plugin.Log.LogInfo("[trigger] once 记号已打（档案变量），这个触发点不会再弹");
         Destroy(gameObject);
     }
 
@@ -284,7 +279,6 @@ public class VisitTrigger : MonoBehaviour
         if (quest == null) return Miss(Data.AcceptId);
         if (quest.QuestStatus != EQuestStatus.AvailableForStart)
         {
-            Plugin.Log.LogInfo($"[trigger] {Data.AcceptId} 现在是 {quest.QuestStatus}，不是「可接」，没接");
             return true;
         }
         QuestOps.Accept(quests, quest, "trigger");
@@ -298,7 +292,6 @@ public class VisitTrigger : MonoBehaviour
         if (quest == null) return Miss(questId);
         if (quest.QuestStatus == want || quest.QuestStatus == EQuestStatus.Success || quest.QuestStatus == EQuestStatus.Fail || quest.QuestStatus == EQuestStatus.MarkedAsFailed)
         {
-            Plugin.Log.LogInfo($"[trigger] {questId} 已经是 {quest.QuestStatus}，不动它");
             return true;
         }
         if (quest.QuestStatus == EQuestStatus.AvailableForStart) quests.SetConditionalStatus(quest, EQuestStatus.Started);
@@ -308,7 +301,7 @@ public class VisitTrigger : MonoBehaviour
             QuestOps.Finish(quests, quest, "trigger");
             return true;
         }
-        if (QuestOps.SetStatus(quests, quest, want, "trigger")) Plugin.Log.LogInfo($"[trigger] {questId} -> {want}（实际变成 {quest.QuestStatus}）");
+        QuestOps.SetStatus(quests, quest, want, "trigger");
         return true;
     }
 

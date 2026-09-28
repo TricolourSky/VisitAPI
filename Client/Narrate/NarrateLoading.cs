@@ -42,7 +42,7 @@ public static class NarrateLoading
         if (_pending == null || Time.unscaledTime > _pendingUntil)
         {
             _pending = null;
-            if (Shown) { Plugin.Log.LogWarning("[narrate] 1.1 加载屏残留着（上次访问没走到 Close），先收掉再放行藏身处加载屏"); ForceClose(); }
+            if (Shown) { Plugin.Log.LogWarning("[narrate] 1.1 loading screen left over (last visit never reached Close), closing it before letting the hideout loading screen through"); ForceClose(); }
             _intercepted = false;
             return true;
         }
@@ -59,7 +59,6 @@ public static class NarrateLoading
         _shownAt = Time.unscaledTime;
         if (_hold != null) { Plugin.Instance.StopCoroutine(_hold); _hold = null; }
         StartFade(1f, null);
-        Plugin.Log.LogInfo($"[narrate] 1.1 加载屏: {name}（Animator {animators.Length} 个）");
         return false;
     }
 
@@ -103,9 +102,9 @@ public static class NarrateLoading
     {
         if (_screen != null) return true;
         var prefab = Load()?.LoadAsset<GameObject>(PrefabName);
-        if (prefab == null) { Plugin.Log.LogWarning("[narrate] 加载屏 prefab 不在包里: " + PrefabName); return false; }
+        if (prefab == null) { Plugin.Log.LogWarning("[narrate] Loading screen prefab not found in bundle: " + PrefabName); return false; }
         var parent = hideout != null ? hideout.transform.parent : null;
-        if (parent == null) { Plugin.Log.LogWarning("[narrate] 加载屏没有可挂的父节点"); return false; }
+        if (parent == null) { Plugin.Log.LogWarning("[narrate] Loading screen has no parent node to attach to"); return false; }
         var canvas = parent.GetComponentInParent<Canvas>();
         var host = canvas != null ? canvas.rootCanvas.transform : parent;
         _screen = Object.Instantiate(prefab, host, false);
@@ -116,8 +115,6 @@ public static class NarrateLoading
             rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
             rt.localScale = Vector3.one;
         }
-        Plugin.Log.LogInfo($"[narrate] 加载屏挂载: host='{host.name}' {Size(host)} 原父节点='{parent.name}' {Size(parent)} 本体 {Size(_screen.transform)} "
-            + $"Background {Size(_screen.transform.Find("Background"))} Loader {Size(_screen.transform.Find("Loader"))}");
         _group = _screen.GetComponent<CanvasGroup>() ?? _screen.AddComponent<CanvasGroup>();
         _group.alpha = 0f;
         foreach (var animator in _screen.GetComponentsInChildren<Animator>(true))
@@ -131,13 +128,10 @@ public static class NarrateLoading
                 t.font = template.font;
                 t.fontSharedMaterial = template.fontSharedMaterial;
             }
-        else Plugin.Log.LogWarning("[narrate] 加载屏没找到可抄的字体，商人名可能不显示");
+        else Plugin.Log.LogWarning("[narrate] Loading screen found no font to copy, trader name may not display");
         _screen.SetActive(false);
-        Plugin.Log.LogInfo($"[narrate] 1.1 加载屏已实例化：名牌文字={(_name != null)} 字体模板={(template != null ? template.font?.name : "无")}");
         return true;
     }
-
-    static string Size(Transform t) => t is RectTransform r ? $"{r.rect.width:0}x{r.rect.height:0}" : (t == null ? "无" : "非Rect");
 
     static TMP_Text FontTemplate(Transform parent)
     {
@@ -170,9 +164,9 @@ public static class NarrateLoading
     {
         if (_bundle != null) return _bundle;
         var path = Path.Combine(VisitPaths.Ui, BundleFile);   // ui\（老的 bundles\ 还认，见 VisitPaths）
-        if (!File.Exists(path)) { Plugin.Log.LogWarning("[narrate] 加载屏包不存在: " + path); return null; }
+        if (!File.Exists(path)) { Plugin.Log.LogWarning("[narrate] Loading screen bundle does not exist: " + path); return null; }
         _bundle = AssetBundle.LoadFromFile(path);
-        if (_bundle == null) Plugin.Log.LogWarning("[narrate] 加载屏包加载失败: " + path);
+        if (_bundle == null) Plugin.Log.LogWarning("[narrate] Failed to load loading screen bundle: " + path);
         return _bundle;
     }
 }

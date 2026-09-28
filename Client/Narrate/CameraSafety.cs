@@ -14,7 +14,6 @@ public static class CameraSafety
     static bool SetIsActive(CameraManager __instance)
     {
         if (__instance.Camera != null) return true;
-        Plugin.Log.LogDebug("[narrate] IsActive ignored - no camera bound");
         return false;
     }
 
@@ -51,7 +50,6 @@ public static class UpscalerGuard
     static bool Prefix(CameraManager __instance)
     {
         if (SsaaImplField == null || SsaaImplField.GetValue(__instance) as Object != null) return true;
-        Plugin.Log.LogDebug("[narrate] camera has no SSAAImpl - upscaler setup skipped");
         return false;
     }
 }

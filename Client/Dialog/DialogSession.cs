@@ -32,13 +32,9 @@ public sealed class DialogSession
 
     void OnDialog(BaseTraderDialog dialog)
     {
-        Plugin.Log.LogInfo(dialog == null ? "[dlg] 对话结束（当前对话置空）"
-            : $"[dlg] 切到 {(DialogTemplateBuilder.NodeByDialog.TryGetValue(dialog.Id, out var n) ? n : "旁白拍")} {dialog.Id} side={dialog.DialogSide} lines={dialog.Lines?.Count() ?? 0}");
         if (dialog == null) return;
         dialog.OnExecuteLine += line =>
         {
-            var acts = line?.Template?.Actions?.Select(a => a.GetType().Name.Replace("Dialog", "").Replace("Action", "")) ?? Enumerable.Empty<string>();
-            Plugin.Log.LogInfo($"[dlg] 执行行 {line?.Template?.Id} 动作=[{string.Join(",", acts)}]");
             Fuse();
             if (line?.Template == null || !LineEffects.TryGet(line.Template.Id, out var e)) return;
             if (e.Tab != null) RouteTab(e.Tab.Value);

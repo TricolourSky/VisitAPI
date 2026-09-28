@@ -12,7 +12,6 @@ namespace VisitAPI.ChapterUI;
 public static class BannerHost
 {
     const string Name = "VisitAPI_BannerHost";
-    static string _loggedFor;
     static readonly List<(BaseNotificationView view, RectTransform back, float flex)> _hosted = new();
 
     public static bool Attach(BaseNotificationView view, NotifierView notifier)
@@ -41,13 +40,12 @@ public static class BannerHost
             view.OnHideComplete += Restore;
             return true;
         }
-        catch (Exception e) { Plugin.Log.LogWarning("[banner] 挪到对话屏失败，按原位显示: " + e.Message); return false; }
+        catch (Exception e) { Plugin.Log.LogWarning("[banner] Failed to move onto the dialogue screen, showing in place: " + e.Message); return false; }
     }
 
     public static void ReturnAll()
     {
         if (_hosted.Count == 0) return;
-        var n = 0;
         foreach (var (view, back, flex) in _hosted)
         {
             try
@@ -58,12 +56,10 @@ public static class BannerHost
                 if (view.GetComponent<LayoutElement>() is LayoutElement l) l.flexibleHeight = flex;
                 view.transform.SetParent(back, false);
                 view.transform.SetAsLastSibling();
-                n++;
             }
-            catch (Exception e) { Plugin.Log.LogWarning("[banner] 横幅送回通知栏失败: " + e.Message); }
+            catch (Exception e) { Plugin.Log.LogWarning("[banner] Failed to return banner to the notification bar: " + e.Message); }
         }
         _hosted.Clear();
-        if (n > 0) Plugin.Log.LogInfo($"[banner] 对话屏关闭，{n} 条未播完的横幅送回通知栏");
     }
 
     [HarmonyPatch(typeof(TraderDialogScreen), "Close")]
@@ -109,16 +105,6 @@ public static class BannerHost
             host.anchoredPosition = Vector2.zero;
             host.sizeDelta = new Vector2(Mathf.Max(container.rect.width, 600f), Mathf.Max(container.rect.height, 120f));
         }
-        var key = dialogRoot.GetInstanceID() + ":" + host.anchoredPosition + host.sizeDelta;
-        if (_loggedFor != key)
-        {
-            _loggedFor = key;
-            var nc = container.GetComponentInParent<Canvas>(); var dc = dialogRoot.GetComponentInParent<Canvas>();
-            Plugin.Log.LogInfo($"[banner] 对话屏宿主就位：通知栏画布 {Describe(nc)}，对话屏画布 {Describe(dc)}，容器屏幕矩形 ({bl.x:0},{bl.y:0})-({tr.x:0},{tr.y:0}) → 宿主 pos={host.anchoredPosition} size={host.sizeDelta} 布局={(container.GetComponent<LayoutGroup>()?.GetType().Name ?? "无")} 横幅首选高 {bannerH:0}");
-        }
         return host;
     }
-
-    static string Describe(Canvas c) =>
-        c == null ? "无" : $"{c.rootCanvas.name}/{c.renderMode}/order {c.rootCanvas.sortingOrder}/scale {c.rootCanvas.scaleFactor:0.###}";
 }

@@ -18,7 +18,7 @@ public static class StoryMapLock
     static void Prefix(MatchMakerSelectionLocationScreen __instance)
     {
         try { Apply(Traverse.Create(__instance).Field<IEftSession>("_session").Value); }
-        catch (Exception e) { Plugin.Log.LogError("[maplock] 剧情地图锁计算失败（选图界面照原样）: " + e); }
+        catch (Exception e) { Plugin.Log.LogError("[maplock] Story map lock calculation failed (map selection left as-is): " + e); }
     }
 
     static void Apply(IEftSession session)
@@ -37,7 +37,6 @@ public static class StoryMapLock
             if (gates == null || gates.Count == 0) continue;
             if (_lastLocked.TryGetValue(loc._Id, out var last) && last == locked) continue;
             _lastLocked[loc._Id] = locked;
-            Plugin.Log.LogInfo($"[maplock] {loc.Id}（{loc._Id}）{(locked ? "剧情未到，锁住" : "已解锁")}：由任务 [{string.Join(", ", gates)}] 解锁");
         }
     }
 

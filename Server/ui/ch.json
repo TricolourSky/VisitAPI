@@ -16,5 +16,10 @@
   "DialogConfirmationWindow/Header": "关键抉择",
   "DialogConfirmationWindow/Description": "关键节点，无法折返",
   "PopUpWarningconsequences_Sky_05_give": "要把箱子交给 Prapor 吗？",
-  "PopUpWarningconsequences_Sky_05_keep": "要自己留着箱子吗？"
+  "PopUpWarningconsequences_Sky_05_keep": "要自己留着箱子吗？",
+  "Chat/DialogueInvitation/StartMethod/InLobby": "访问",
+  "Chat/DialogueInvitation/StartMethod/InRaid": "访问",
+  "Chat/DialogueInvitation/StartMethod/InRaid/Description": "你必须访问商人所在之处。",
+  "Chat/DialogueInvitation/StartMethod/ViaRadio": "回复",
+  "Chat/DialogueInvitation/StartMethod/ViaNotebook": "开始聊天"
 }

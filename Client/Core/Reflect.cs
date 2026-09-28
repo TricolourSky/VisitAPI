@@ -43,7 +43,7 @@ public static class Reflect
         }
         catch (Exception e)
         {
-            Plugin.Log.LogWarning($"[narrate] {target.GetType().Name}.{f.Name} 写不进去（{f.FieldType.Name} <- {value?.GetType().Name}）: {e.GetType().Name}");
+            Plugin.Log.LogWarning($"[narrate] {target.GetType().Name}.{f.Name} could not be written ({f.FieldType.Name} <- {value?.GetType().Name}):{e.GetType().Name}");
             return false;
         }
     }

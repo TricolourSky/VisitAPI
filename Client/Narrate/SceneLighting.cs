@@ -23,22 +23,15 @@ public static class SceneLighting
         }
         var level = Singleton<LevelSettings>.Instantiated ? Singleton<LevelSettings>.Instance : null;
         if (level != null) level.ApplySettings();
-        else Plugin.Log.LogWarning("[narrate] LevelSettings 单例不在（公共场景没进来或已销毁），公共灯光参数没应用");
+        else Plugin.Log.LogWarning("[narrate] LevelSettings singleton missing (shared scene not loaded or already destroyed); shared lighting parameters not applied");
         DimReflection();
-        if (scene.name != "Vendors_Scripts") DecalDraw.Schedule();
-        Plugin.Log.LogInfo($"[narrate] lighting armed: active='{SceneManager.GetActiveScene().name}' "
-            + $"包内天空盒={(RenderSettings.skybox != null ? RenderSettings.skybox.name : "无")} fog={RenderSettings.fog} "
-            + $"环境光={RenderSettings.ambientMode}/{RenderSettings.ambientIntensity:0.##} 反射={RenderSettings.defaultReflectionMode}/{RenderSettings.reflectionIntensity:0.##}");
     }
 
     static void DimReflection()
     {
-        if (!Plugin.DimReflection.Value) return;
-        var was = $"雾={RenderSettings.fog} 反射强度={RenderSettings.reflectionIntensity:0.##}";
         RenderSettings.fog = false;
         RenderSettings.ambientIntensity = 0f;
         RenderSettings.reflectionIntensity = 0f;
-        Plugin.Log.LogInfo($"[narrate] 环境反射压暗: {was} → 雾=关 反射强度=0（坑 #124）");
     }
 
     public static void Uncover(bool visiting)
