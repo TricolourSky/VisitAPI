@@ -155,7 +155,11 @@ public static class QuestOps
         var what = accept ? "accept" : "finish";
         var skip = accept ? quest.QuestStatus != EQuestStatus.AvailableForStart : quest.QuestStatus >= EQuestStatus.Success;
         // 09-26 F2：排队到下一帧这段时间里战局可能已经结束（撤离时任务状态在 CleanUp 同一帧改），调原生前再核一次
-        if (!skip && !IsLive(qc)) { result(false); yield break; }
+        if (!skip && !IsLive(qc))
+        {
+            Plugin.Log.LogWarning($"[quest] {tag} {what} {quest.Id} dropped: its quest controller is not live (raid not started yet, raid ending, result screen or a visit copy)");
+            result(false); yield break;
+        }
         Task task = null;
         Exception thrown = null;
         if (!skip)

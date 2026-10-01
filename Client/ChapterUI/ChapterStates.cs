@@ -1,3 +1,4 @@
+using System.Linq;
 using EFT.Quests;
 using UnityEngine;
 using VisitAPI.Native;
@@ -27,8 +28,32 @@ namespace VisitAPI.ChapterUI
                 }
                 else if (st == EQuestStatus.Success && SkipState.IsSkipped(cond.id.ToString())) return ERow.Skipped;
             }
+            if (TalkPending(quest, cond)) return chapterOver ? ERow.Skipped : ERow.Active;
             if (quest.IsConditionDone(cond) || quest.QuestStatus == EQuestStatus.Success) return ERow.Done;
             return chapterOver ? ERow.Skipped : ERow.Active;
+        }
+
+        /// <summary>10-02（SORA：「和 SORA 探讨…」还没谈就打勾了）：只能对话收的任务常拿「某条前置任务已完成」当目标——大厅交任务服务端要验条件，
+        /// 占位条件交不掉，所以用一条接下瞬间就满足的真条件，文案写的却是那场对话。这种目标在任务被对话收掉之前按未完成显示。
+        /// 认法：只能对话收（dialogOnly）+ 目标是「任务 X 已完成」+ X 在这条任务开始之前就已经完成了（X 写在它的 startAfter / 可接条件里，或者时间戳更早）。
+        /// 接下之后才完成的「完成任务 X」是真目标，照常打勾。</summary>
+        static bool TalkPending(Quest quest, Condition cond)
+        {
+            if (!(cond is ConditionQuest cq) || string.IsNullOrEmpty(cq.target)) return false;
+            var st = quest.QuestStatus;
+            if ((st != EQuestStatus.Started && st != EQuestStatus.AvailableForFinish) || !QuestFlags.DialogOnly(quest.Id)) return false;
+            try
+            {
+                if (QuestFlags.StartAfter(quest.Id)?.Contains(cq.target) == true) return true;
+                if (quest.Template?.Conditions != null && quest.Template.Conditions.TryGetValue(EQuestStatus.AvailableForStart, out var gates) && gates != null
+                    && gates.OfType<ConditionQuest>().Any(g => g.target == cq.target)) return true;
+                var target = QuestOps.Resolve()?.Quests?.GetConditional(cq.target);
+                return target != null && target.QuestStatus == EQuestStatus.Success
+                    && target.StatusStartTimestamps.TryGetValue(EQuestStatus.Success, out var doneAt)
+                    && quest.StatusStartTimestamps.TryGetValue(EQuestStatus.Started, out var startedAt)
+                    && doneAt <= startedAt + 5;
+            }
+            catch { return false; }
         }
 
         internal static bool DoneRaw(Quest quest, Condition cond)

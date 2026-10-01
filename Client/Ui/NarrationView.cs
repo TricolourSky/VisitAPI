@@ -24,7 +24,7 @@ public class NarrationView : MonoBehaviour
 
     void OnDialog(BaseTraderDialog dialog)
     {
-        if (dialog == null || !DialogTemplateBuilder.NarrationByDialog.TryGetValue(dialog.Id, out var text)) { Restore(); return; }
+        if (dialog == null || !DialogTemplateBuilder.NarrationByDialog.TryGetValue(dialog.Id, out var text)) { Restore(dialog); return; }
         _beat = dialog;
         _text = text;
         _armAt = Time.unscaledTime + 0.25f;
@@ -45,7 +45,7 @@ public class NarrationView : MonoBehaviour
         _dc.ExecuteLineByIndex(0);
     }
 
-    void Restore()
+    void Restore(BaseTraderDialog next)
     {
         if (_beat == null) return;
         _beat = null;
@@ -53,12 +53,13 @@ public class NarrationView : MonoBehaviour
         if (_screen == null) return;
         _screen._subtitlesView._textField.text = string.Empty;
         _screen._subtitlesView.HideGameObject();
-        _screen._dialogWindow.ShowGameObject();
+        // 10-02：旁白后面接的是「商人说话」那一段时先不亮对话窗，等选项段到了原生自己显示（见 SayBeatWindow），不然会先闪一个空的小框
+        if (next == null || !DialogTemplateBuilder.SayDialogs.Contains(next.Id)) _screen._dialogWindow.ShowGameObject();
     }
 
     void OnDestroy()
     {
         if (_dc != null) _dc.OnDialogChanged -= OnDialog;
-        Restore();
+        Restore(null);
     }
 }

@@ -31,10 +31,12 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, HttpRe
                         autoStart = Flag(x.vx, "autoStart"), autoFinish = Flag(x.vx, "autoFinish"), dialogOnly = Flag(x.vx, "dialogOnly"), icon = Str(x.vx, "icon"), items = Items(x.vx),
                         startAfter = StartAfter(x.vx), order = Num(x.vx, "order"), noteLinks = Obj(x.vx, "noteLinks"), x.subs, x.story, x.noCounter,
                         unlockDialogue = StrList(x.vx, "unlockDialogue"), x.talkTo, unlockLocations = StrList(x.vx, "unlockLocations"), x.call, x.mail, x.finishers, x.hidden,
-                        setVariables = Obj(x.vx, "setVariables"), x.missingSubs
+                        setVariables = Obj(x.vx, "setVariables"), x.missingSubs,
+                        // 10-01：内容包里的任务（战局内交了由 StoryRaidRewards 在结算时统一发奖励）；客户端凭它在局内交任务时不再当场发一份
+                        pack = QuestLoader.Loaded.Contains(x.id)
                     })
-                    .Where(x => x.anyOf != null || x.chapter || x.autoStart || x.autoFinish || x.dialogOnly || x.icon != null || x.notes != null || x.items.Count > 0 || x.startAfter != null || x.order != null || x.noteLinks != null || x.story || x.noCounter != null || x.unlockDialogue.Count > 0 || x.talkTo != null || x.unlockLocations.Count > 0 || x.call != null || x.mail != null || x.finishers.Count > 0 || x.hidden || x.setVariables != null)
-                    .ToDictionary(x => x.id, x => new { x.anyOf, x.chapter, x.autoStart, x.autoFinish, x.dialogOnly, x.icon, x.notes, x.items, x.startAfter, x.order, x.noteLinks, x.story, x.noCounter, x.unlockDialogue, x.talkTo, x.unlockLocations, x.call, x.mail, x.hidden, x.setVariables, finishers = x.finishers.Count > 0 ? x.finishers : null, subs = x.chapter ? x.subs : null, missingSubs = x.chapter && x.missingSubs.Count > 0 ? x.missingSubs : null })),
+                    .Where(x => x.pack || x.anyOf != null || x.chapter || x.autoStart || x.autoFinish || x.dialogOnly || x.icon != null || x.notes != null || x.items.Count > 0 || x.startAfter != null || x.order != null || x.noteLinks != null || x.story || x.noCounter != null || x.unlockDialogue.Count > 0 || x.talkTo != null || x.unlockLocations.Count > 0 || x.call != null || x.mail != null || x.finishers.Count > 0 || x.hidden || x.setVariables != null)
+                    .ToDictionary(x => x.id, x => new { x.anyOf, x.chapter, x.autoStart, x.autoFinish, x.dialogOnly, x.icon, x.notes, x.items, x.startAfter, x.order, x.noteLinks, x.story, x.noCounter, x.unlockDialogue, x.talkTo, x.unlockLocations, x.call, x.mail, x.hidden, x.setVariables, x.pack, finishers = x.finishers.Count > 0 ? x.finishers : null, subs = x.chapter ? x.subs : null, missingSubs = x.chapter && x.missingSubs.Count > 0 ? x.missingSubs : null })),
             typeof(QuestReadyRequest))
     ])
 {

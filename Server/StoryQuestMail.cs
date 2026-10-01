@@ -26,6 +26,10 @@ public class StoryQuestMail(TemplateTable templates, LocaleTable locales, ISptLo
     static ISptLogger<StoryQuestMail> _log;
     static readonly Regex QuestKey = new("^([0-9a-f]{24}) (description|startedMessageText|successMessageText|failMessageText)$", RegexOptions.Compiled);
 
+    /// 10-01 SORA：「我不喜欢 SORA 发邮件，除非信里有任务奖励附件」——章节 visitapi.mailRewardsOnly=true 时，章节和它名下所有子任务的
+    /// 接取信 / 完成信 / 失败信一律只在带附件时才寄。只限开了这个标记的章节（QuestLoader 装表），别的作者照 09-23 的老规矩
+    internal static HashSet<string> RewardsOnly = new();
+
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
         _templates = templates; _locales = locales; _log = log;
@@ -47,6 +51,7 @@ public class StoryQuestMail(TemplateTable templates, LocaleTable locales, ISptLo
             if (messageLocaleId == QuestLoader.RewardMailKey) return !hasItems;   // 1.1 通用奖励文案：没附件不寄
             var m = QuestKey.Match(messageLocaleId);
             if (!m.Success) return false;                                                                      // 不是任务键，照寄
+            if (RewardsOnly.Contains(m.Groups[1].Value)) return !hasItems;                                     // 章节开了 mailRewardsOnly：没附件不寄
             if (!_templates.Quests.TryGetValue(new MongoId(m.Groups[1].Value), out var quest)) return false;   // 任务不在库里，照寄
             var story = quest.ExtensionData != null && quest.ExtensionData.TryGetValue("isStoryQuest", out var v) && v is JsonElement e && e.ValueKind == JsonValueKind.True;
             // 只压剧情任务（isStoryQuest）没附件的信（#145）；别的任务——包括自己章节里没标剧情的——照 SPT 原样，只有「没正文且没物品」才不寄。

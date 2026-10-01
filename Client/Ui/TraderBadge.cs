@@ -32,7 +32,14 @@ public static class TraderBadge
         }
     }
 
-    public static string TalkTo(Quest q) => QuestFlags.CallTrader(q.Id) ?? QuestFlags.TalkTo(q.Id) ?? q.Template?.TraderId;
+    public static string TalkTo(Quest q)
+    {
+        var flagged = QuestFlags.CallTrader(q.Id) ?? QuestFlags.TalkTo(q.Id);
+        if (flagged != null) return flagged;
+        // 10-01 SORA：只能对话接/交的任务，对话选项写在谁的剧本里就亮谁的电话（隐藏商人没解锁，CanTalk 自然压掉）
+        if (QuestFlags.DialogOnly(q.Id)) return VisitAPI.ChapterUI.ChapterDialogButton.TraderFor(q)?.TraderId ?? q.Template?.TraderId;
+        return q.Template?.TraderId;
+    }
 
     static bool Timed(Quest q) =>
         q.Template?.Conditions != null && q.Template.Conditions.TryGetValue(EQuestStatus.AvailableForStart, out var cc)
@@ -40,7 +47,17 @@ public static class TraderBadge
 
     static bool NeedsTalk(Quest q, QuestController qc)
     {
-        if (q?.Template == null || q.QuestStatus != EQuestStatus.AvailableForStart) return false;
+        if (q?.Template == null) return false;
+        // 10-01 SORA：dialogOnly 的任务「下一步在对话里」就亮金色电话——可接（剧本里有 accept 选项）、
+        // 进行中 / 可交付（剧本里有 complete / handover 选项）都算；行里的「去找 X」按钮退役，指路统一走金色电话 + 金色访问
+        if (QuestFlags.DialogOnly(q.Id))
+        {
+            if (q.QuestStatus == EQuestStatus.Started || q.QuestStatus == EQuestStatus.AvailableForFinish)
+                return VisitAPI.ChapterUI.ChapterDialogButton.TraderFor(q) != null;
+            return q.QuestStatus == EQuestStatus.AvailableForStart
+                && VisitAPI.ChapterUI.ChapterDialogButton.TraderFor(q) != null && ChapterChain.Reachable(qc, q);
+        }
+        if (q.QuestStatus != EQuestStatus.AvailableForStart) return false;
         if (QuestFlags.CallTrader(q.Id) != null) return ChapterChain.Reachable(qc, q);
         if (QuestFlags.Get(q.Id)?.Story == true) return false;
         return QuestFlags.IsStory(q.Id) && Timed(q) && !QuestFlags.IsChapter(q.Id) && !QuestFlags.AutoStart(q.Id) && QuestFlags.StartAfter(q.Id) == null
@@ -64,20 +81,77 @@ public static class TraderBadge
 
     static QuestController Controller => ChapterChain.Controller ?? ChapterTab.Quests ?? QuestOps.Resolve();
 
+    /// 10-01（GitHub 商人页面卡顿 issue）：以前每张商人卡各自每秒把任务清单＋库存匹配全量走一遍（上交检查最重），
+    /// 8 张卡 = 同一份重活每秒 8 遍，商人页面周期性掉帧。现在全局 1.5 秒算一次两张名单（电话 / 可上交），各处只查表。
+    /// [Badge] 两个开关也一并尊重：关掉 = 名单直接不算，角标和开销一起归零。
+    static float _sweepUntil;
+    static QuestController _sweepQc;
+    static readonly HashSet<string> _callSet = new(StringComparer.OrdinalIgnoreCase);
+    static readonly HashSet<string> _handSet = new(StringComparer.OrdinalIgnoreCase);
+
+    static void Sweep(QuestController qc)
+    {
+        if (ReferenceEquals(qc, _sweepQc) && Time.unscaledTime < _sweepUntil) return;
+        _sweepQc = qc;
+        _sweepUntil = Time.unscaledTime + 1.5f;
+        _callSet.Clear();
+        _handSet.Clear();
+        var callOn = Plugin.CallBadge == null || Plugin.CallBadge.Value;
+        var handOn = Plugin.HandoverBadge == null || Plugin.HandoverBadge.Value;
+        try
+        {
+            foreach (var q in qc.Quests)
+            {
+                if (q?.Template == null) continue;
+                if (callOn && NeedsTalk(q, qc))
+                {
+                    var t = TalkTo(q);
+                    if (!string.IsNullOrEmpty(t)) _callSet.Add(t);
+                }
+                if (handOn && q.QuestStatus == EQuestStatus.Started && HandoverReady(q, qc))
+                {
+                    var t = TalkTo(q);
+                    if (!string.IsNullOrEmpty(t)) _handSet.Add(t);
+                }
+            }
+        }
+        catch (Exception e) { Plugin.Log.LogWarning("[badge] badge sweep failed: " + e.Message); }
+    }
+
+    static bool HandoverReady(Quest q, QuestController qc)
+    {
+        foreach (var cond in q.ProgressCheckers.Keys)
+        {
+            if (cond is not ConditionItem || !q.CheckVisibilityStatus(cond)) continue;
+            if (qc.CanHandoverItems(q.Id, cond.id, true)) return true;
+        }
+        return false;
+    }
+
     public static bool Wanted(string traderId, QuestController qc = null)
     {
-        if (string.IsNullOrEmpty(traderId)) return false;
+        if (string.IsNullOrEmpty(traderId) || Plugin.CallBadge?.Value == false) return false;
         qc ??= Controller;
         if (qc?.Quests == null) return false;
-        try { return CanTalk(traderId, qc) && qc.Quests.Any(q => NeedsTalk(q, qc) && string.Equals(TalkTo(q), traderId, StringComparison.OrdinalIgnoreCase)); }
+        try
+        {
+            Sweep(qc);
+            return _callSet.Contains(traderId) && CanTalk(traderId, qc);
+        }
         catch (Exception e) { Plugin.Log.LogWarning("[badge] Trader badge check failed: " + e.Message); return false; }
     }
 
     public static bool AnyWanted(QuestController qc = null)
     {
+        if (Plugin.CallBadge?.Value == false) return false;
         qc ??= Controller;
         if (qc?.Quests == null) return false;
-        try { return qc.Quests.Any(q => NeedsTalk(q, qc) && CanTalk(TalkTo(q), qc)); }
+        try
+        {
+            Sweep(qc);
+            foreach (var t in _callSet) if (CanTalk(t, qc)) return true;
+            return false;
+        }
         catch (Exception e) { Plugin.Log.LogWarning("[badge] Top bar badge check failed: " + e.Message); return false; }
     }
 
@@ -104,32 +178,13 @@ public static class TraderBadge
         img.preserveAspect = true;
     }
 
-    static readonly Dictionary<string, (float until, bool on)> _handCache = new(StringComparer.OrdinalIgnoreCase);
-
     public static bool HandoverWanted(string traderId, QuestController qc = null)
     {
-        if (string.IsNullOrEmpty(traderId)) return false;
-        if (_handCache.TryGetValue(traderId, out var cached) && Time.unscaledTime < cached.until) return cached.on;
+        if (string.IsNullOrEmpty(traderId) || Plugin.HandoverBadge?.Value == false) return false;
         qc ??= Controller;
-        var on = false;
-        if (qc?.Quests != null)
-            try
-            {
-                foreach (var q in qc.Quests)
-                {
-                    if (q?.Template == null || q.QuestStatus != EQuestStatus.Started) continue;
-                    if (!string.Equals(TalkTo(q), traderId, StringComparison.OrdinalIgnoreCase)) continue;
-                    foreach (var cond in q.ProgressCheckers.Keys)
-                    {
-                        if (cond is not ConditionItem || !q.CheckVisibilityStatus(cond)) continue;
-                        if (qc.CanHandoverItems(q.Id, cond.id, true)) { on = true; break; }
-                    }
-                    if (on) break;
-                }
-            }
-            catch (Exception e) { Plugin.Log.LogWarning("[badge] Hand-over badge check failed: " + e.Message); }
-        _handCache[traderId] = (Time.unscaledTime + 1f, on);
-        return on;
+        if (qc?.Quests == null) return false;
+        Sweep(qc);
+        return _handSet.Contains(traderId);
     }
 
     [HarmonyPatch(typeof(TraderCard), nameof(TraderCard.Show))]
@@ -330,7 +385,7 @@ public class CardBadge : MonoBehaviour
     bool _swapped;
     void SwapNativeIcons(TraderAvatar avatar)
     {
-        if (_swapped || avatar == null) return;
+        if (_swapped || avatar == null || Plugin.HandoverBadge?.Value == false) return;
         _swapped = true;
         TraderBadge.Swap(avatar._availableToStartQuestsIcon, TraderBadge.StartSprite);
         TraderBadge.Swap(avatar._availableToFinishQuestsIcon, TraderBadge.FinishSprite);

@@ -56,6 +56,9 @@ public class VisitTrigger : MonoBehaviour
         }
         if (Auto)
         {
+            // 10-01：自动线等战局正式开始才动作，enter 的秒数也从这一刻起算。以前从 MyPlayer 就位（还在加载 / 倒计时）起表，
+            // 到点时战局控制器还不算活（QuestOps.IsLive），接 / 交被挡掉而 _fired 已置位，这一局再也不触发（SORA 立交桥：加载 50 秒 > enter 45）
+            if (!RaidStarted()) return;
             if (!_fired && Data.Enter < 0f) NearLog();
             if (!_fired && GamePlayerOwner.MyPlayer != null && Time.unscaledTime >= _cooldown && ShouldShow())
             {
@@ -98,6 +101,10 @@ public class VisitTrigger : MonoBehaviour
         if (RequireLook && !LookPasses(main, point)) return false;
         return GatePasses() && BurnedAllows();
     }
+
+    /// 藏身处的线不看：那里没有开局倒计时，任务走大厅那份控制器
+    bool RaidStarted() => Data.Kind != "raid"
+        || (Comfort.Common.Singleton<AbstractGame>.Instantiated && Comfort.Common.Singleton<AbstractGame>.Instance.Status == GameStatus.Started);
 
     bool EnterDue()
     {

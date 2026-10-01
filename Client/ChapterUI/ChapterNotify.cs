@@ -91,12 +91,21 @@ public static class ChapterNotify
         show();
     }
 
+    /// 10-01 SORA 实测（战局里目标横幅抬头显示子任务名）：09-26 F2 之后进图时大厅控制器被释放、ChapterChain.Controller 置空，
+    /// 这里查不到章节就退回子任务自己的名字。改成先问当前活的控制器（战局里是玩家那份），再退到文案表里的「章节id name」
     internal static string ChapterTitle(Quest quest, bool chapter, string chapterId)
     {
         if (!chapter && chapterId != null)
         {
-            var owner = ChapterChain.Controller?.Quests?.GetConditional(chapterId);
+            var owner = (ChapterChain.Controller ?? QuestOps.Resolve())?.Quests?.GetConditional(chapterId);
             if (owner?.Template != null) return owner.Template.Name?.Trim();
+            try
+            {
+                var key = chapterId + " name";
+                var name = key.Localized();
+                if (!string.IsNullOrWhiteSpace(name) && name != key) return name.Trim();
+            }
+            catch { }
         }
         return quest.Template.Name?.Trim();
     }

@@ -211,6 +211,15 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
                 }
             }
         }
+        // 10-01：章节 visitapi.mailRewardsOnly=true → 章节 + 名下全部子任务进「没附件不寄信」名单（StoryQuestMail）
+        var rewardsOnly = new HashSet<string>();
+        foreach (var id in chapters)
+        {
+            if (!(all[id].ExtensionData!["visitapi"] is JsonElement cx && cx.TryGetProperty("mailRewardsOnly", out var mo) && mo.ValueKind == JsonValueKind.True)) continue;
+            rewardsOnly.Add(id);
+            foreach (var (sub, chapter) in chapterOf) if (chapter == id) rewardsOnly.Add(sub);
+        }
+        StoryQuestMail.RewardsOnly = rewardsOnly;
         if (chapterOf.Count == 0) return;
         foreach (var (_, lazy) in localeTable.Global)
             lazy.AddTransformer(data =>

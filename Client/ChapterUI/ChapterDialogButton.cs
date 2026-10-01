@@ -42,7 +42,8 @@ namespace VisitAPI.ChapterUI
             var tree = active ? TraderFor(quest) : null;
             var any = cond != null && AnyTalkText(quest);
             var custom = any ? TalkText(cond) : null;
-            var lobby = tree != null && !Raid.Now && c._visitTraderButton != null && (!any || custom != null);
+            // 10-01 SORA：默认的「去找 X」行按钮退役（指路改走金色电话 + 金色访问）；只有作者专门写了 talk 文案的行才保留按钮
+            var lobby = tree != null && !Raid.Now && c._visitTraderButton != null && custom != null;
             c.gameObject.SetActive(lobby);
             if (c._visitTraderButton != null)
             {
@@ -90,14 +91,11 @@ namespace VisitAPI.ChapterUI
             var quest = t.Field("_quest").GetValue<Quest>();
             if (quest == null || !QuestFlags.DialogOnly(quest.Id)) return;
             if (quest.QuestStatus != EQuestStatus.AvailableForStart && quest.QuestStatus != EQuestStatus.AvailableForFinish) return;
-            var button = __instance._button; button.OnClick.RemoveAllListeners();
-            var tree = ChapterDialogButton.TraderFor(quest);
-            if (tree == null || Raid.Now) { button.gameObject.SetActive(false); return; }
-            button.SetRawText(ChapterDialogButton.Label(tree), 24);
-            var profile = t.Field("_backendSession").GetValue<IEftSession>()?.Profile;
-            var quests = t.Field("_questController").GetValue<QuestController>();
-            var inventory = t.Field("_inventoryController").GetValue<InventoryController>();
-            button.OnClick.AddListener(() => ChapterDialogButton.Open(tree, profile, quests, inventory));
+            // 10-01 SORA：任务页不再放「去找 X」按钮，直接藏掉——接/交只能走对话，入口由商人头上的金色电话 + 金色访问指路。
+            // 原生按钮的监听也要摘干净，不然藏住的按钮还挂着「接受/完成」的旧动作
+            var button = __instance._button;
+            button.OnClick.RemoveAllListeners();
+            button.gameObject.SetActive(false);
         }
     }
 }

@@ -44,6 +44,7 @@ public static class VisitPatches
         typeof(StoryMapLock),
         typeof(LockedTraderSelect),
         typeof(QuestZoneSpawn),
+        typeof(StorySpawnStart),
         typeof(HideoutAudioRestore),
         // 1.3.4
         typeof(NarrateStartBroadcast), typeof(NarrateShowError),
@@ -51,6 +52,10 @@ public static class VisitPatches
         typeof(EyeFollowerGuard), typeof(EyeFollowerTarget), typeof(AmbianceGuard), typeof(NpcAnimations),
         // 09-26 SP-Mods 反馈：只对活的任务控制器下单（F1 / F2）
         typeof(LobbyQuestController.Register), typeof(LobbyQuestController.Disposed),
+        // 10-01：内容包任务在战局内交时不当场发奖励，统一由服务端结算时发
+        typeof(RaidRewardHold.Finish),
+        // 10-02：商人说话那一段不重画对话窗（点选项后小框闪一下）
+        typeof(SayBeatWindow),
     };
 
     public static void ApplyAll(Harmony harmony)

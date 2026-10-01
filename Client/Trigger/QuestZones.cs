@@ -19,6 +19,7 @@ public static class QuestZones
         public Vector3 Position, Size = Vector3.one;
         public Quaternion Rotation = Quaternion.identity;
         public Subtitle Subtitles;
+        public float[] Hours;   // 可选时段门（10-01 SORA：恢复「夜晚的海岸线」）：不在时段内就不生成触发器
     }
 
     public class Subtitle
@@ -51,6 +52,9 @@ public static class QuestZones
     static List<Zone> _zones = new();
     static readonly List<GameObject> _live = new();
 
+    /// 这个 id 在某个包的 zones\ 里有真区域（不管哪张图、在不在时段内）
+    internal static bool Defined(string id) => _zones.Any(z => z.Id == id);
+
     public static void Prefetch() => Plugin.Instance.StartCoroutine(VisitHttp.Fetch("/visitapi/zones", TryParse, "[zones]", _ => { }));
 
     static bool TryParse(string body)
@@ -70,6 +74,7 @@ public static class QuestZones
                         Position = V3(t["position"], Vector3.zero), Size = V3(t["size"], Vector3.one),
                         Rotation = t["rotation"] is JObject r ? new Quaternion(F(r, "x"), F(r, "y"), F(r, "z"), r["w"] != null ? F(r, "w") : 1f) : Quaternion.identity
                     };
+                    if (t["hours"] is JObject hh) z.Hours = new[] { hh["from"]?.Value<float>() ?? 0f, hh["to"]?.Value<float>() ?? 0f };
                     if (string.IsNullOrEmpty(z.Id) || z.Locations.Count == 0) { Plugin.Log.LogWarning("[zones] a zone is missing id or locations, skipped: " + t.ToString(Newtonsoft.Json.Formatting.None)); continue; }
                     if (t["subtitles"] is JObject s)
                     {
@@ -110,6 +115,24 @@ public static class QuestZones
     static float F(JObject o, string k) => o[k]?.Value<float>() ?? 0f;
     static Vector3 V3(JToken t, Vector3 fallback) => t is JObject o ? new Vector3(F(o, "x"), F(o, "y"), F(o, "z")) : fallback;
 
+    /// <summary>可选时段门：按战局内时钟（GameDateTime）算，跨零点规则照原生 daytime 的 TimeBetween（21→6 = 晚 9 点到早 6 点）。
+    /// from/to 都是 0 或相等 = 不限时；时钟读不到时放行——宁可白天也能打勾，不能把任务卡死。</summary>
+    internal static bool HoursOk(float[] hours)
+    {
+        if (hours == null || hours.Length != 2) return true;
+        float from = hours[0], to = hours[1];
+        if ((from <= 0f && to <= 0f) || Mathf.Approximately(from, to)) return true;
+        try
+        {
+            var dt = Singleton<GameWorld>.Instance?.GameDateTime?.Calculate();
+            if (dt == null) return true;
+            float now = dt.Value.Hour + dt.Value.Minute / 60f;
+            if (from < to) return from <= now && now <= to;
+            return now >= from || now <= to;
+        }
+        catch { return true; }
+    }
+
     public static void Spawn(GameWorld world)
     {
         foreach (var go in _live) if (go != null) UnityEngine.Object.Destroy(go);
@@ -118,6 +141,7 @@ public static class QuestZones
         if (string.IsNullOrEmpty(loc) || _zones.Count == 0) return;
         foreach (var z in _zones.Where(z => z.Locations.Any(l => string.Equals(l, loc, StringComparison.OrdinalIgnoreCase))))
         {
+            if (!HoursOk(z.Hours)) continue;   // 不在时段内：这一局压根不生成，目标自然打不了勾
             var go = new GameObject(z.Id);
             go.transform.SetPositionAndRotation(z.Position, z.Rotation);
             var box = go.AddComponent<BoxCollider>();

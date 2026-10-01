@@ -4,7 +4,7 @@
 
 An open-source framework that brings EFT 1.x-style trader **Visit** dialogues to SPT — write plain-text `.dlg` scripts to give any trader (including custom traders) a 3D room conversation, story chapters, standing rewards, quest zones and in-raid dialogue triggers. Content ships as drop-in **packs**; the EFT 1.1 main story with the trader rooms is one such pack.
 
-> Target: **SPT 4.1.x** (4.1.0 or newer 4.1 release, EFT 0.16.9) · Client: BepInEx 5.4.23 plugin (net472) · Server: SPT mod (net10.0) · Fika-compatible · Current version **1.3.4**
+> Target: **SPT 4.1.x** (4.1.0 or newer 4.1 release, EFT 0.16.9) · Client: BepInEx 5.4.23 plugin (net472) · Server: SPT mod (net10.0) · Fika-compatible · Current version **1.3.5**
 
 ![A custom trader's Visit dialogue](docs/Dialogue.png)
 

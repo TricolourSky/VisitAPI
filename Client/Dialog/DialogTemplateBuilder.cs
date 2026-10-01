@@ -19,6 +19,9 @@ public static class DialogTemplateBuilder
 
     public static readonly Dictionary<MongoID, string> NarrationByDialog = new();
 
+    /// 每个节点的「商人说话」那一段（#npc）。它只有一句商人台词、没有玩家选项，一出现就立刻跳到选项段，见 SayBeatWindow
+    public static readonly HashSet<MongoID> SayDialogs = new();
+
     public static MongoID Register(DialogTree tree, string entryNode, string startNode, string playerName, QuestController quests)
     {
         WhitelistPatch.RegisteredTraders.Add(tree.TraderId);
@@ -29,6 +32,7 @@ public static class DialogTemplateBuilder
             Beats(tree, node, loc, built);
             var rows = new List<DialogLineTemplate>();
             var open = false;
+            var gated = new List<DialogMainConditionGroup>();
             for (var i = 0; i < node.Options.Count; i++)
             {
                 var o = node.Options[i];
@@ -37,12 +41,15 @@ public static class DialogTemplateBuilder
                 var once = o.Once ? new VariableValueCondition(OnceService.OnceId(tree.TraderId, node.Name, i), 0) : null;
                 var trigger = QuestGates.Trigger(o, quests, once);
                 open |= trigger == null;
+                if (trigger != null) gated.Add(trigger);
                 var main = OptionMap.Act(tree, startNode, o.Target);
                 if (node.NpcSlot < node.Narration.Count) main = new DialogSwitchDialogAction(Epilogue(tree, node, i, main, e, loc, built));
                 rows.Add(Line(lineId, EDialogSide.Player, OptionMap.Icon(o), QuestGates.Actions(o, main), trigger, loc.Put(tree.TraderId, node.Name, "opt" + i, o.Text, o.Tr)));
             }
+            // 所有选项都带条件的节点留一个「（结束）」当出口；10-02 起它只在选项此刻一个都点不了时才出现（见 NoOptionOpen）
             if (!open && node.JumpTo == null)
-                rows.Add(Line(Id(tree.TraderId, node.Name + "#end"), EDialogSide.Player, DialogLineTemplate.EDialogLineIconType.QuitIcon, new DialogQuitAction(), loc.Put(tree.TraderId, node.Name, "end", Loc.Pick("（结束）", "(End)"), null)));
+                rows.Add(Line(Id(tree.TraderId, node.Name + "#end"), EDialogSide.Player, DialogLineTemplate.EDialogLineIconType.QuitIcon, new DialogAction[] { new DialogQuitAction() },
+                    QuestGates.OnlyIfNoneOpen(gated), loc.Put(tree.TraderId, node.Name, "end", Loc.Pick("（结束）", "(End)"), null)));
             built.Add((Id(tree.TraderId, node.Name + "#opt"), rows));
         }
         // 引擎按 LocalizationManager.Culture 挑表：每种语言的表 = 默认文字盖上该语言的译文；「当前文化」那张放玩家要的语言（Loc.Code）
@@ -94,6 +101,7 @@ public static class DialogTemplateBuilder
                 var say = Line(Id(tree.TraderId, node.Name + "#say"), EDialogSide.Npc, DialogLineTemplate.EDialogLineIconType.DialogBubble,
                     new DialogSwitchDialogAction(next), loc.Put(tree.TraderId, node.Name, "npc", node.NpcText ?? "……", node.NpcTr));
                 built.Add((Id(tree.TraderId, node.Name + "#npc"), new List<DialogLineTemplate> { say }));
+                SayDialogs.Add(Id(tree.TraderId, node.Name + "#npc"));
                 continue;
             }
             var narKey = loc.Put(tree.TraderId, node.Name, "nar" + s, node.Narration[s].Text, node.Narration[s].Tr);

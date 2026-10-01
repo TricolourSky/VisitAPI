@@ -11,6 +11,7 @@ public static class QuestFlags
     {
         public bool AnyOf, Chapter, AutoStart, AutoFinish, DialogOnly;
         public bool Hidden;
+        public bool Pack;   // 10-01：内容包里的任务——战局内交了，奖励由服务端在结算时统一发（见 RaidRewardHold）
         public List<string> AnyOfGroup;
         public bool Story;
         public string Icon;
@@ -52,6 +53,7 @@ public static class QuestFlags
     public static bool AutoStart(string id) => Get(id)?.AutoStart == true;
     public static bool AutoFinish(string id) => Get(id)?.AutoFinish == true;
     public static bool DialogOnly(string id) => Get(id)?.DialogOnly == true;
+    public static bool Pack(string id) => Get(id)?.Pack == true;
     /// 09-26 SORA：1.1 原版章节一律按这张固定位次（id 取自 1.1 服务端 getMainQuestsList 下发的章节列表），包数据里的 visitapi.order 对它们不起作用；
     /// 只有自制章节能自己定位置：包里写 visitapi.order，没写就用配置项 CustomChapterOrder（默认 100，排在原版章节后面）。
     /// 神秘蓝焰（Blue Fire）SORA 09-26 这张表里没列，暂按 1.1 章节列表的顺序放在无名者和他们已经来了之间，待确认
@@ -170,7 +172,7 @@ public static class QuestFlags
         var e = new Entry
         {
             AnyOf = On(v, "anyOf"), Chapter = On(v, "chapter"),
-            AutoStart = On(v, "autoStart"), AutoFinish = On(v, "autoFinish"), DialogOnly = On(v, "dialogOnly"), Story = On(v, "story"), Hidden = On(v, "hidden"),
+            AutoStart = On(v, "autoStart"), AutoFinish = On(v, "autoFinish"), DialogOnly = On(v, "dialogOnly"), Story = On(v, "story"), Hidden = On(v, "hidden"), Pack = On(v, "pack"),
             Icon = v["icon"]?.Value<string>(), TalkTo = v["talkTo"]?.Value<string>(), CallTrader = v["call"]?.Value<string>(),
             Order = v["order"]?.Type == JTokenType.Integer || v["order"]?.Type == JTokenType.Float ? v["order"].Value<double>() : double.MaxValue
         };
