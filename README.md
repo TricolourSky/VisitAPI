@@ -15,10 +15,11 @@ An open-source framework that brings EFT 1.x-style trader **Visit** dialogues to
 - **.dlg scripts** — nodes, options, condition gates (level / standing / quest state / `ifitems`), branch memory (`set:` / `ifvar:`), one-shot options (`once` / `always` / `first`), image / video / 3D-scene backgrounds, voice + BGM, standing rewards (`standing:`), quest transitions (`accept:` / `complete:` / `handover:` / `setstatus:`)
 - **Several languages in one script** — put `en: translation` on the line right under any displayed line; the game shows the translation for its language and falls back to the original. All 17 SPT language codes work
 - **Native narrate pipeline** — vanilla traders run on EFT's built-in visit system with retail dialogue playback (lip-sync, subtitles and branching variables are native), including the 1.1 key-decision confirmation window
-- **Quest system** — quest JSON in packs with fully native network transactions (accept / handover / complete), quest images, quest items with 3D models and their raid spawn points
-- **Quest zones** — `zones\*.json` in a pack places visit and item-placement zones at map coordinates; they are created as the game's own triggers when a raid starts, optionally with in-raid subtitles, voice and an interaction prompt
-- **In-raid & hideout triggers** — `trigger:` lines place dialogue points at map coordinates (distance + view cone + quest gating), or fire on a timer with `enter <seconds>`; `once` makes a trigger fire only once per profile
-- **Timed trader contact** — a story quest whose prerequisite carries `availableAfter` waits for the timer, then the 1.1 gold phone badge lights up on the trader's card and next to your name; talk to the trader to take the quest
+- **Quest system** — quest JSON in packs with fully native network transactions (accept / handover / complete), quest images, quest items with 3D models and their raid spawn points; rewards of a quest finished inside a raid arrive by mail when the raid ends
+- **Quest zones** — `zones\*.json` in a pack places visit and item-placement zones at map coordinates; they are created as the game's own triggers when a raid starts, optionally with in-raid subtitles, voice and an interaction prompt, and can be limited to hours of the day (`hours`)
+- **Story spawn points** — `spawns\*.json` in a pack spawns a group of bots near map coordinates while a quest is in a chosen state and keeps them at their post; these can be limited to hours of the day too
+- **In-raid & hideout triggers** — `trigger:` lines place dialogue points at map coordinates (distance + view cone + quest gating), or fire a number of seconds after the raid starts with `enter <seconds>`; `once` makes a trigger fire only once per profile
+- **Timed trader contact** — a story quest whose prerequisite carries `availableAfter` waits for the timer, then the 1.1 gold phone badge lights up on the trader's card and next to your name; talk to the trader to take the quest. The same gold phone points you to the trader for quests that are accepted or handed in through dialogue only
 - **Chat invites** — as in 1.1, a trader writes to you in chat when a story quest becomes available; the letter's Visit button takes you to the trader's room, and Reply opens the conversation on the spot, with voice and subtitles, for contacts that have no room (the radio, the laptop)
 - **Traders in packs** — a pack can add traders of its own (base file, avatar, names in every language) together with the voice lines of their dialogues
 - **Native subtitle narration** — `>` narration lines play in the game's own subtitle bar; click or press Space to advance
@@ -40,7 +41,9 @@ An open-source framework that brings EFT 1.x-style trader **Visit** dialogues to
 2. Put your `.dlg` scripts into `<SPT>\BepInEx\config\VisitAPI\<traderId>.dlg`; backgrounds and audio go into `backgrounds\` and `audio\` next to them.
 3. Quests, texts, zones and images of your own go into a pack: `<SPT>\SPT_Runtime\user\mods\VisitAPI-Server\packs\<any name>\` (the editor creates one for you).
 
-**Upgrading from 1.3.3:** extract the new framework zip over the game folder, then the EFT11 add-on 1.1.0 over the old add-on (1.1.0 adds The Labyrinth and needs framework 1.3.4). The settings page now has three options (see Configuration).
+**Upgrading from 1.3.4:** extract the new framework zip over the game folder; the EFT11 add-on stays as it is. Two things behave differently: the seconds of `enter <seconds>` now count from the moment the raid starts (they used to start counting during loading, so numbers that were padded for that can be lowered), and a quest finished inside a raid no longer puts its rewards into your backpack on the spot — they are mailed when the raid ends.
+
+**Upgrading from 1.3.3:** extract the new framework zip over the game folder, then the EFT11 add-on 1.1.0 over the old add-on (1.1.0 adds The Labyrinth and needs framework 1.3.4 or newer). The settings page was trimmed down (see Configuration).
 
 **Upgrading from 1.3.2 or older:** extract the new framework zip over the game folder, then move `VisitAPI-Server\db\`, `images\` and `bundles\` into `VisitAPI-Server\packs\<any name>\` (see the layout below), and rename `BepInEx\plugins\VisitAPI\bundles\` to `ui\` and `scenes\bundles\vendors\` to `rooms\`. The old places are still read in 1.3.x, with a warning in the log. If you had the experimental 1.1 story data in `db\`, delete it and install the EFT11 add-on instead.
 
@@ -57,7 +60,8 @@ packs\<pack>\
   dialogues\*.json   retail-format dialogues for the native narrate pipeline
   traders\<id>\      traders the pack adds: base.json + avatar.png (skipped if the server already has that trader)
   voice\<trader id>\ voice lines (.ogg / .wav / .mp3) for dialogues of traders without a room; file name = the voice id the dialogue uses
-  zones\*.json       quest zones (map, position, size, optional subtitles)
+  zones\*.json       quest zones (map, position, size, optional subtitles and hours {from, to})
+  spawns\*.json      story spawn points (map, at {x,y,z} + radius, role, min / max, difficulty, quest + statuses, optional hours and minX / maxX / minZ / maxZ bounds)
   items\*.json       quest item templates; loot\*.json their raid spawn points
   bundles\ + bundles.json   Unity bundles for those items
   variables\groups.json     1.1 variable groups (a group's value is the sum of its members)
@@ -115,9 +119,10 @@ A chapter is an ordinary quest JSON with a few switches; its "complete quest" ob
 - Sub-quest switches under `visitapi`: `autoStart` (accepted once the chapter has started and its own prerequisites are met; a sub-quest without a quest prerequisite also waits until the entry before it in the chapter's list has ended), `autoFinish` (turned in as soon as its objectives are met), `startAfter` (a quest id or a list of them: the quest is accepted once any one of them is completed), `anyOf` (`true`, or a list of objective ids: any one of them completes the quest), `items` (related item template ids; `craft:` / `offer:` prefixes mark the type), `noteLinks` (related items per journal entry), `unlockTraderOnReady` (the trader unlocks when the quest becomes ready), `setVariables` (`{ "Started" / "Success" / "Fail": { "<variable id>": value } }`: profile variables set when the quest reaches that status, like the 1.1 GlobalVariable rewards)
 - Chat invite: give a quest 1.1's `mailSettings` (`isEnabled`, `fromTraderId`, `entryPoint`, `dialogueId`, `dialogueTraderId`) and the locale text `<quest id> whileAvailableMessageText`; when the quest becomes available that trader sends the letter, once per profile. `entryPoint` `InLobby` gives it a Visit button (the trader's room), `ViaRadio` / `ViaNotebook` a Reply button (the dialogue opens on the spot)
 - `unlockDialogue`: a list of trader ids whose Visit button opens only after this quest is completed; `unlockLocations`: maps unlocked by this quest (new profiles only)
-- `order`: sort position of your own chapter on the STORY page, smaller first (the official 1.1 chapters are fixed at 1–9; without `order` the `CustomChapterOrder` setting applies, default 100); `dialogOnly`: the task list button becomes "VISIT X" so accepting and handing in go through dialogue only
+- `order`: sort position of your own chapter on the STORY page, smaller first (the official 1.1 chapters are fixed at 1–9; without `order` the `CustomChapterOrder` setting applies, default 100); `dialogOnly`: accepting and handing in go through dialogue only; the task list shows no button and the gold phone on that trader points the way. In such a quest a "talk to someone" objective ticks only once the conversation hands the quest in
+- `mailRewardsOnly` on a chapter: letters of that chapter and its sub-quests are sent only when they carry rewards
 - Top-level `isStoryQuest` marks a 1.1 story quest: a completion mail without item rewards is not sent for it; `notDisplayedQuest` hides a quest from the lists
-- Objective texts in the locale: `<condition id> desc` (small print), `<condition id> talk` (which row shows the "go and see X" button and what it says)
+- Objective texts in the locale: `<condition id> desc` (small print), `<condition id> talk` (keeps a button on that row which opens the dialogue directly; the text is the button's label, and without it there is no button)
 - A failed sub-quest does not fail the chapter; give the chapter's "complete quest" condition `"status": [4, 5, 6]` to let a written-off sub-quest count as done
 - Banners go into the pack's `images\banners\`, chapter icons into `images\icons\`; every id must be 24 hex characters
 - To put story quests back into the regular lists, turn off `HideStoryQuestsInLists` in `BepInEx\config\com.sora.visitapi.cfg`
@@ -126,15 +131,17 @@ The editor writes all of this for you; the list above is for reading files by ha
 
 ## Configuration
 
-`BepInEx\config\com.sora.visitapi.cfg` has three settings, all in the `Chapter` section:
+`BepInEx\config\com.sora.visitapi.cfg` has five settings: the first three in the `Chapter` section, the last two in `Badge`:
 
 | Key | Default | What it does |
 |---|---|---|
 | `ShowUnstartedChapters` | `false` | also show chapters that have not started yet on the STORY page |
 | `CustomChapterOrder` | `100` | sort position of your own chapters on the STORY page, smaller first (a chapter's own `order` wins); the official 1.1 chapters are fixed at 1–9 |
 | `HideStoryQuestsInLists` | `true` | keep story quests out of the regular quest and trader lists |
+| `CallBadge` | `true` | the gold phone badge on traders; turning it off also stops its checks |
+| `HandoverBadge` | `true` | the hand-over badge on traders; its check is the heaviest, so turn it off first if the trader screen stutters |
 
-Everything else is fixed: the interface and `.dlg` translations follow the game's language, the visit camera and lighting use the 1.1 look, and the 1.1 trader card badges and chat invites are always on. For trigger authoring, press **F11** in the hideout or in a raid: `BepInEx\LogOutput.log` gets a `[coord] (x, y, z)  location=…` line with the camera position. Apart from that line, VisitAPI writes to the logs only when something goes wrong.
+Everything else is fixed: the interface and `.dlg` translations follow the game's language, the visit camera and lighting use the 1.1 look, and chat invites are always on. For trigger authoring, press **F11** in the hideout or in a raid: `BepInEx\LogOutput.log` gets a `[coord] (x, y, z)  location=…` line with the camera position. Apart from that line, VisitAPI writes to the logs only when something goes wrong.
 
 ## Contributing
 

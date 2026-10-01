@@ -15,10 +15,11 @@
 - **.dlg 剧本** —— 节点、选项、条件门（等级 / 好感 / 任务状态 / `ifitems`）、分支记号（`set:` / `ifvar:`）、一次性选项（`once` / `always` / `first`）、图片 / 视频 / 3D 场景背景、语音+BGM、好感度（`standing:`）、任务推进（`accept:` / `complete:` / `handover:` / `setstatus:`）
 - **一份剧本多种语言** —— 任何一句显示文字的下一行写 `en: 译文`，游戏按自己的语言显示译文，没译的句子显示原文；SPT 的 17 种语言代码都行
 - **原生 Narrate 管线** —— 原版商人走 EFT 内置的访问系统 + 零售对话数据回放（口型 / 字幕 / 分支变量全原生），含 1.1 的「关键抉择」确认窗
-- **任务系统** —— 内容包里的任务 JSON，接取 / 上交 / 完成全部走原生网络事务；任务图片、带 3D 模型的任务物品和它们的战局刷新点
-- **任务区域** —— 包里的 `zones\*.json` 在地图坐标放置到访 / 放置物品区域，进图时按游戏自己的触发器生成，可带战局内字幕、语音和互动提示
-- **战局内 / 藏身处触发点** —— `trigger:` 在地图坐标放置对话点（距离 + 视角锥 + 任务门控），或 `enter <秒>` 按时间起爆；`once` 让触发点每个档案只触发一次
-- **商人定时联系** —— 剧情任务的前置带 `availableAfter` 时任务会等定时走完，到点后商人卡片上和玩家名旁边亮起 1.1 的金色电话角标，去找商人对话接下任务
+- **任务系统** —— 内容包里的任务 JSON，接取 / 上交 / 完成全部走原生网络事务；任务图片、带 3D 模型的任务物品和它们的战局刷新点；在战局里完成的任务，奖励在战局结束时用邮件发
+- **任务区域** —— 包里的 `zones\*.json` 在地图坐标放置到访 / 放置物品区域，进图时按游戏自己的触发器生成，可带战局内字幕、语音和互动提示，也可以限定在一天里的某个时段（`hours`）
+- **剧情刷兵点** —— 包里的 `spawns\*.json` 在任务处于指定状态时，在地图坐标附近刷出一组机器人并让它们守在原地，同样可以限定时段
+- **战局内 / 藏身处触发点** —— `trigger:` 在地图坐标放置对话点（距离 + 视角锥 + 任务门控），或 `enter <秒>` 在战局开始若干秒后起爆；`once` 让触发点每个档案只触发一次
+- **商人定时联系** —— 剧情任务的前置带 `availableAfter` 时任务会等定时走完，到点后商人卡片上和玩家名旁边亮起 1.1 的金色电话角标，去找商人对话接下任务；只能靠对话接 / 交的任务也由这枚金色电话指路
 - **聊天邀请** —— 和 1.1 一样，剧情任务一可接，商人就在聊天里给你来信；信上的「访问」带你进商人房间，没有房间的联系人（电台、笔记本）点「回复」当场开对话，带语音和字幕
 - **包里带商人** —— 内容包可以自带商人（基础文件、头像、各语言的名字）和他们对话用的语音
 - **原生字幕框旁白** —— `>` 旁白行走游戏自己的字幕条；点击或按空格推进
@@ -40,7 +41,9 @@
 2. `.dlg` 剧本放 `<SPT>\BepInEx\config\VisitAPI\<商人id>.dlg`；背景和音频放旁边的 `backgrounds\`、`audio\`。
 3. 你自己的任务、文案、区域、图片放进一个包：`<SPT>\SPT_Runtime\user\mods\VisitAPI-Server\packs\<随便起个名>\`（编辑器会替你建）。
 
-**从 1.3.3 升级：** 把新的框架 zip 覆盖解压到游戏目录，再把 EFT11 附加包 1.1.0 覆盖解压到旧附加包上（1.1.0 加了探秘“迷宫”，需要框架 1.3.4）。设置页现在只有三项（见「配置」）。
+**从 1.3.4 升级：** 把新的框架 zip 覆盖解压到游戏目录即可，EFT11 附加包不用动。两处行为变了：`enter <秒>` 的秒数现在从战局正式开始起算（以前从加载时就开始数，剧本里写得偏大的可以调小）；在战局里完成的任务不再当场把奖励塞进背包，统一在战局结束时用邮件发。
+
+**从 1.3.3 升级：** 把新的框架 zip 覆盖解压到游戏目录，再把 EFT11 附加包 1.1.0 覆盖解压到旧附加包上（1.1.0 加了探秘“迷宫”，需要框架 1.3.4 或更新）。设置页精简过（见「配置」）。
 
 **从 1.3.2 或更早升级：** 把新的框架 zip 覆盖解压到游戏目录，然后把 `VisitAPI-Server\db\`、`images\`、`bundles\` 搬进 `VisitAPI-Server\packs\<随便起个名>\`（布局见下），再把 `BepInEx\plugins\VisitAPI\bundles\` 改名 `ui\`、`scenes\bundles\vendors\` 改名 `rooms\`。老位置 1.3.x 照读，日志里会有警告。以前装过实验版 1.1 主线数据（在 `db\` 里）的，删掉它、改装 EFT11 附加包。
 
@@ -57,7 +60,8 @@ packs\<包名>\
   dialogues\*.json   零售格式的对话，给原生 Narrate 管线用
   traders\<id>\      包自带的商人：base.json + avatar.png（服务端已有同 id 商人就跳过）
   voice\<商人id>\    没有房间的商人对话用的语音（.ogg / .wav / .mp3），文件名 = 对话里引用的语音 id
-  zones\*.json       任务区域（地图、坐标、尺寸，可带字幕）
+  zones\*.json       任务区域（地图、坐标、尺寸，可带字幕和时段 hours {from, to}）
+  spawns\*.json      剧情刷兵点（map、at {x,y,z} + radius、role、min / max、difficulty、quest + statuses，可选 hours 和 minX / maxX / minZ / maxZ 边界）
   items\*.json       任务物品模板；loot\*.json 它们的战局刷新点
   bundles\ + bundles.json   这些物品的 Unity 资源包
   variables\groups.json     1.1 变量组（组的值 = 成员变量之和）
@@ -115,9 +119,10 @@ start: root
 - 子任务的 `visitapi` 开关：`autoStart`（所属章节已开始、自己的前置也满足时自动接下；没有任务前置的子任务还要等章节清单里排在它前面的那条结束）、`autoFinish`（一达成就自动交）、`startAfter`（一个任务 id 或一组：其中任一完成就接下这条任务）、`anyOf`（`true`，或一组目标 id：其中任一完成即算完成）、`items`（相关物品模板 id，`craft:` / `offer:` 前缀标类型）、`noteLinks`（每条日记各自挂的相关物品）、`unlockTraderOnReady`（任务达成即解锁商人）、`setVariables`（`{ "Started" / "Success" / "Fail": { "<变量id>": 值 } }`：任务进入该状态时给档案变量赋值，相当于 1.1 的 GlobalVariable 奖励）
 - 聊天邀请：任务带上 1.1 的 `mailSettings`（`isEnabled`、`fromTraderId`、`entryPoint`、`dialogueId`、`dialogueTraderId`），locale 里写 `<任务id> whileAvailableMessageText` 作信的正文；任务一可接，这位商人就寄出这封信，每个档案只寄一次。`entryPoint` 为 `InLobby` 时信上是「访问」按钮（进商人房间），`ViaRadio` / `ViaNotebook` 是「回复」按钮（当场开对话）
 - `unlockDialogue`：一组商人 id，这条任务完成后这些商人的访问按钮才出现；`unlockLocations`：这条任务解锁的地图（只对新建角色）
-- `order`：自制章节在剧情页的位次，小的在前（1.1 原版章节固定是 1～9；没写 `order` 的按配置项 `CustomChapterOrder`，默认 100）；`dialogOnly`：任务列表的按钮换成「去找 X」，接交只走对话
+- `order`：自制章节在剧情页的位次，小的在前（1.1 原版章节固定是 1～9；没写 `order` 的按配置项 `CustomChapterOrder`，默认 100）；`dialogOnly`：接交只走对话，任务列表里不放按钮，由那位商人头上的金色电话指路；这种任务里「去和某人谈」的目标要等对话把任务收掉才打勾
+- 章节上的 `mailRewardsOnly`：这一章和它的子任务的来信，只在带奖励附件时才寄
 - 顶层 `isStoryQuest` 标记 1.1 剧情任务：没有物品奖励的完成信不寄；`notDisplayedQuest` 把任务藏出列表
-- locale 里的目标文案：`<条件id> desc`（小字）、`<条件id> talk`（哪一行出「去找 X」按钮、写什么字）
+- locale 里的目标文案：`<条件id> desc`（小字）、`<条件id> talk`（给这一行留一个直接打开对话的按钮，内容就是按钮上的字；不写就没有按钮）
 - 子任务失败不影响章节；想让被作废的子任务不挡住章节完成，把章节里那条「完成任务」条件的 `status` 写成 `[4, 5, 6]`
 - 横幅放包的 `images\banners\`，章节图标放 `images\icons\`；所有 id 必须 24 位十六进制
 - 想让剧情任务回到普通列表：`BepInEx\config\com.sora.visitapi.cfg` 里关掉 `HideStoryQuestsInLists`
@@ -126,15 +131,17 @@ start: root
 
 ## 配置
 
-`BepInEx\config\com.sora.visitapi.cfg` 里只有三项，都在 `Chapter` 段：
+`BepInEx\config\com.sora.visitapi.cfg` 里有五项，前三项在 `Chapter` 段，后两项在 `Badge` 段：
 
 | 键 | 默认 | 作用 |
 |---|---|---|
 | `ShowUnstartedChapters` | `false` | 剧情页也显示还没开始的章节 |
 | `CustomChapterOrder` | `100` | 自制章节在剧情页的位次，小的在前（章节自己写了 `order` 的以它为准）；1.1 原版章节固定是 1～9 |
 | `HideStoryQuestsInLists` | `true` | 剧情任务不进普通任务列表和商人列表 |
+| `CallBadge` | `true` | 商人头上的金色电话角标；关掉后连同它的检查一起停 |
+| `HandoverBadge` | `true` | 商人头上的「可上交」角标；这项检查最重，商人页面卡顿时可以先关它 |
 
-其余都是固定的：界面和 `.dlg` 译文跟随游戏语言，访问画面的相机和光照按 1.1 的效果，1.1 的商人卡片角标和聊天邀请一直开着。填触发点坐标时在藏身处或战局里按 **F11**，`BepInEx\LogOutput.log` 会记一行 `[coord] (x, y, z)  location=…`，是相机位置。除这一行外，VisitAPI 只在出问题时写日志。
+其余都是固定的：界面和 `.dlg` 译文跟随游戏语言，访问画面的相机和光照按 1.1 的效果，聊天邀请一直开着。填触发点坐标时在藏身处或战局里按 **F11**，`BepInEx\LogOutput.log` 会记一行 `[coord] (x, y, z)  location=…`，是相机位置。除这一行外，VisitAPI 只在出问题时写日志。
 
 ## 参与开发
 
