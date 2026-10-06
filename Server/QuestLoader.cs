@@ -196,6 +196,11 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
         foreach (var id in chapters)
             foreach (var sub in QuestTargets(all[id], all))
                 if (sub != id && !chapterOf.ContainsKey(sub)) chapterOf[sub] = id;
+        // 10-06 意外证人：章节 visitapi.startAfter 点名的起点也算这一章的（隐藏的开章任务 68f0f549 不在章节的完成条件里，上面找不到它）——
+        // 不然它没名字，Dynamic Maps 给它画的目标点直接显示「<id> name」原始键（SORA 实测「任务名称是乱码」）
+        foreach (var id in chapters)
+            foreach (var s in StartAfterOf(all[id]))
+                if (s != id && all.ContainsKey(s) && !chapters.Contains(s) && !chapterOf.ContainsKey(s)) chapterOf[s] = id;
         foreach (var id in chapters)
         {
             var queue = new Queue<string>(chapterOf.Where(kv => kv.Value == id).Select(kv => kv.Key).ToList());
@@ -233,6 +238,15 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
                 }
                 return data;
             });
+    }
+
+    static IEnumerable<string> StartAfterOf(Quest q)
+    {
+        if (q.ExtensionData == null || !q.ExtensionData.TryGetValue("visitapi", out var v) || v is not JsonElement vx || vx.ValueKind != JsonValueKind.Object
+            || !vx.TryGetProperty("startAfter", out var sa)) yield break;
+        if (sa.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(sa.GetString())) yield return sa.GetString()!;
+        else if (sa.ValueKind == JsonValueKind.Array)
+            foreach (var e in sa.EnumerateArray()) if (e.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(e.GetString())) yield return e.GetString()!;
     }
 
     static IEnumerable<string> QuestTargets(Quest q, Dictionary<string, Quest> all)

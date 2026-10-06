@@ -10,7 +10,8 @@ namespace VisitAPI.Native;
 /// <summary>10-01（SORA：疗养院的碰面点别提前露在动态地图上）：Dynamic Maps 给「进行中」任务的每个未完成目标画点，不看目标现在显不显示——
 /// 靠 visibilityConditions 藏着的后续目标从接下任务起就标在图上。它筛目标用 QuestUtils.IsConditionCompleted（true = 不画），
 /// 这里在它后面补一句：任务页上还没显示出来的目标也不画。
-/// 它是可选模组：没装就什么都不做；它的程序集可能比我们晚加载，所以等第一次进战局再挂（TriggerHost）。</summary>
+/// 它是可选模组：没装就什么都不做；它的程序集可能比我们晚加载，所以等第一次进战局再挂（TriggerHost）。
+/// 10-06（SORA：「藏」）：隐藏任务（1.1 的 notDisplayedQuest，玩家看不见的机制件——意外证人的开章步骤、塔科夫之旅 / 迷宫里的几条）的目标一律不画，1.1 里它们哪儿都不显示。</summary>
 public static class DynamicMapsHidden
 {
     static bool _tried;
@@ -35,6 +36,7 @@ public static class DynamicMapsHidden
         if (__result || player == null || questData == null || condition == null) return;
         try
         {
+            if (QuestFlags.Get(questData.Id)?.Hidden == true) { __result = true; return; }
             var quest = player.QuestController?.Quests?.GetConditional(questData.Id);
             if (quest != null && !quest.CheckVisibilityStatus(condition)) __result = true;
         }

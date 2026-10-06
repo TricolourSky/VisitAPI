@@ -4,7 +4,7 @@
 
 An open-source framework that brings EFT 1.x-style trader **Visit** dialogues to SPT — write plain-text `.dlg` scripts to give any trader (including custom traders) a 3D room conversation, story chapters, standing rewards, quest zones and in-raid dialogue triggers. Content ships as drop-in **packs**; the EFT 1.1 main story with the trader rooms is one such pack.
 
-> Target: **SPT 4.1.x** (4.1.0 or newer 4.1 release, EFT 0.16.9) · Client: BepInEx 5.4.23 plugin (net472) · Server: SPT mod (net10.0) · Fika-compatible · Current version **1.3.5**
+> Target: **SPT 4.1.x** (4.1.0 or newer 4.1 release, EFT 0.16.9) · Client: BepInEx 5.4.23 plugin (net472) · Server: SPT mod (net10.0) · Fika-compatible · Current version **1.3.6**
 
 ![A custom trader's Visit dialogue](docs/Dialogue.png)
 
@@ -37,9 +37,11 @@ An open-source framework that brings EFT 1.x-style trader **Visit** dialogues to
 
 1. Grab the packages from [Releases](https://github.com/TricolourSky/VisitAPI/releases):
    - `VisitAPI-x.y.z.zip` — client plugin + server mod + `VisitAPI.Editor.exe`. **Required.** Extract into your SPT root. It deliberately contains **no** scripts, quests, rooms or texts — only the folders they go in. The editor lands next to `EscapeFromTarkov.exe`; double-click it and it opens in your browser (binds to 127.0.0.1 only).
-   - `VisitAPI-EFT11-x.y.z.zip` — the **EFT11 add-on**: the EFT 1.1 main story (Tour of Tarkov, Falling Skies, The Labyrinth) together with the seven 3D trader rooms and the retail trader dialogues. Optional. At about 4 GB it is too big for GitHub, so it is hosted separately; the release notes link to it. Extract it into the SPT root like the framework. Without it, custom `.dlg` scripts still work with image / video backgrounds, but the Visit button of a vanilla trader has no room to open.
+   - `VisitAPI-EFT11-x.y.z.zip` — the **EFT11 add-on**: the EFT 1.1 main story (Tour of Tarkov, Falling Skies, The Labyrinth, Blue Fire, Accidental Witness) together with the seven 3D trader rooms and the retail trader dialogues. Optional. At about 4 GB it is too big for GitHub, so it is hosted separately; the release notes link to it. Extract it into the SPT root like the framework. Without it, custom `.dlg` scripts still work with image / video backgrounds, but the Visit button of a vanilla trader has no room to open.
 2. Put your `.dlg` scripts into `<SPT>\BepInEx\config\VisitAPI\<traderId>.dlg`; backgrounds and audio go into `backgrounds\` and `audio\` next to them.
 3. Quests, texts, zones and images of your own go into a pack: `<SPT>\SPT_Runtime\user\mods\VisitAPI-Server\packs\<any name>\` (the editor creates one for you).
+
+**Upgrading from 1.3.5:** extract the new framework zip over the game folder. The EFT11 add-on 1.2.0 adds Blue Fire and Accidental Witness and needs framework 1.3.6; extract it over the old add-on.
 
 **Upgrading from 1.3.4:** extract the new framework zip over the game folder; the EFT11 add-on stays as it is. Two things behave differently: the seconds of `enter <seconds>` now count from the moment the raid starts (they used to start counting during loading, so numbers that were padded for that can be lowered), and a quest finished inside a raid no longer puts its rewards into your backpack on the spot — they are mailed when the raid ends.
 

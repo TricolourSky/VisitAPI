@@ -49,13 +49,20 @@ public static class ChapterChain
         // 回到大厅后 QuestOps.OnLobby 会对大厅那份整本重扫一遍
         if (!QuestOps.IsLive(qc)) return;
         Controller = qc; QuestFlags.MarkStory(quest);
+        ItemStart.Watch(qc);
         ChapterUI.SkipState.Use(qc.Profile?.Id);
         if (QuestFlags.IsStory(quest.Id)) { ChapterEvents.Raise(); ChapterUI.SkipState.Note(quest); }
         QuestConditionNotify.Seed(quest);
         var st = quest.QuestStatus;
         LocalFail.Check(qc, quest);   // 09-24：大厅里按全局变量失败的剧情任务，引擎不上报服务端，替它发 QuestFail
         QuestVars.Apply(quest, live); // 09-24：任务进入 Started / Success / Fail 时按 visitapi.setVariables 给档案变量赋值（1.1 的 GlobalVariable 奖励）
+        // 10-06 意外证人 6917c6ef：1.1 有「一个完成条件都没有」的子任务（读门上便条开的那步），1.1 / SPT5 服务端一开就算完成；
+        // 0.16 客户端没有条件变化就不会把它推到可交，链停在它这里、下一步永远不开（SORA 实测「拿了门上的便签然后就没有任务提示了」）。替它推到可交，下面照常交掉
+        // （正在接的那一笔还没走完时不插手——AutoAccept 对这种任务直接走「接完紧接着交」）
+        if (st == EQuestStatus.Started && QuestFlags.AutoFinish(quest.Id) && NoFinishConditions(quest) && !QuestOps.Busy(quest.Id)) { qc.SetConditionalStatus(quest, EQuestStatus.AvailableForFinish); st = quest.QuestStatus; }
         if (AutoReady(qc, quest.Id) && st == EQuestStatus.AvailableForStart && ChapterOpen(qc, quest.Id)) AutoAccept(qc, quest);
+        // 10-05：拿到物品就开的任务（visitapi.startOnItems），仓库里本来就有其中一件的，一变成可接就接（捡起来那一下由 ItemStart 当场接）
+        if (st == EQuestStatus.AvailableForStart && ItemStart.Has(qc, QuestFlags.StartOnItems(quest.Id))) StartByItem(qc, quest);
         if ((QuestFlags.IsChapter(quest.Id) || QuestFlags.AutoFinish(quest.Id)) && st == EQuestStatus.AvailableForFinish) QuestOps.Finish(qc, quest, "chain");
         var chapterId = QuestFlags.IsChapter(quest.Id) ? quest.Id : QuestFlags.ChapterOf(quest.Id);
         var chapter = chapterId == null ? null : chapterId == quest.Id ? quest : qc.Quests.GetConditional(chapterId);
@@ -66,7 +73,8 @@ public static class ChapterChain
             foreach (var id in QuestFlags.SubsOf(chapterId))
             {
                 var sub = qc.Quests.GetConditional(id);
-                if (sub != null && AutoReady(qc, id) && sub.QuestStatus == EQuestStatus.AvailableForStart) AutoAccept(qc, sub);
+                if (sub != null && sub.QuestStatus == EQuestStatus.AvailableForStart
+                    && (AutoReady(qc, id) || ItemStart.Has(qc, QuestFlags.StartOnItems(id)))) AutoAccept(qc, sub);
             }
         if (st == EQuestStatus.Success)
             foreach (var id in QuestFlags.WaitingOn(quest.Id))
@@ -76,14 +84,38 @@ public static class ChapterChain
             }
     }
 
+    /// 10-05：ItemStart 在玩家拿到开章物品时调；只接还停在「可接」的，前置照常核
+    /// 10-06 SORA 实测「先弹任务完成、后弹章节开始」：章节和它的第一步写着同样的开章物品，两条一起接时第一步先开、
+    /// 它的子目标（塔科夫之旅那步早已完成）当场打勾，横幅抢在章节前面。章节没开门时只接章节本身（和不属于任何章节的任务），
+    /// 章节里的步骤等章节开门后由上面的自动链接——章节的开始横幅在状态变化里先发，链在它之后跑
+    /// 10-06 意外证人：有的物品只写在子任务上（房间里的信只开 68f0f54d；章节自己写的物品也开，但别的章节未必）。章节没开门时改成先开章节，
+    /// 这一步等章节开门后由子任务循环按「身上有这件物品」接上；同一帧里章节被点两次由 QuestOps 的在途去重挡掉
+    public static void StartByItem(QuestController qc, Quest quest)
+    {
+        if (quest == null || quest.QuestStatus != EQuestStatus.AvailableForStart || !QuestOps.IsLive(qc)) return;
+        if (!QuestFlags.IsChapter(quest.Id) && !ChapterOpen(qc, quest.Id))
+        {
+            var chapterId = QuestFlags.ChapterOf(quest.Id);
+            var chapter = chapterId == null ? null : qc.Quests.GetConditional(chapterId);
+            if (chapter != null && chapter.QuestStatus == EQuestStatus.AvailableForStart) AutoAccept(qc, chapter);
+            return;
+        }
+        AutoAccept(qc, quest);
+    }
+
     static void AutoAccept(QuestController qc, Quest quest)
     {
         if (!PrereqsMet(qc, quest)) return;
         // 09-24 14:14 曾在对话屏开着时把自动接攒到对话结束（SORA 觉得同一场对话顺进下一条任务「乱」），14:40 撤了：
         // 1.1 的对话树本来就是「我会联系你的」之后跳回枢纽重新评估、当场给下一个话题（SPT5 服务端也是接下即自动开章节里的任务）；
         // 攒着不接反而让枢纽没话可说——退出线的条件不满足、任务清单又是空的，只剩一个红色「返回」来回死循环（SORA 14:35 卡住那次）
-        QuestOps.Accept(qc, quest, "chain");
+        // 10-06：一个完成条件都没有的步骤（意外证人 6917c6ef）接完紧接着交，一笔做完，不留「进行中」的空档
+        if (QuestFlags.AutoFinish(quest.Id) && NoFinishConditions(quest)) QuestOps.AcceptThenFinish(qc, quest, "chain");
+        else QuestOps.Accept(qc, quest, "chain");
     }
+
+    static bool NoFinishConditions(Quest quest) =>
+        quest.Template?.Conditions == null || !quest.Template.Conditions.TryGetValue(EQuestStatus.AvailableForFinish, out var list) || list == null || !list.Any();
 
     static bool PrereqsMet(QuestController qc, Quest quest)
     {

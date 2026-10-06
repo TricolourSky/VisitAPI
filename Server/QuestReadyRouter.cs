@@ -24,7 +24,7 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, HttpRe
         new RouteAction("/visitapi/quest/flags",
             async (url, info, sessionId, output, ct) =>
                 httpResponse.GetBody(templates.Quests.Values
-                    .Select(q => (id: q.Id.ToString(), vx: Visit(q.ExtensionData), notes: Notes(q), subs: Subs(q), story: Story(q.ExtensionData), noCounter: NoCounter(q), talkTo: TalkTo(q, templates), call: Call(q.ExtensionData), mail: Mail(q.ExtensionData), finishers: Finishers(q), hidden: Hidden(q.ExtensionData), missingSubs: MissingSubs(q, templates)))
+                    .Select(q => (id: q.Id.ToString(), vx: Visit(q.ExtensionData), notes: Notes(q), subs: Subs(q), story: Story(q.ExtensionData), noCounter: NoCounter(q), talkTo: TalkTo(q, templates), call: Call(q.ExtensionData), mail: Mail(q.ExtensionData), finishers: Finishers(q), hidden: Hidden(q.ExtensionData), missingSubs: MissingSubs(q, templates), rewardXp: RewardXp(q)))
                     .Select(x => new
                     {
                         x.id, x.notes, anyOf = AnyOf(x.vx), chapter = Flag(x.vx, "chapter"),
@@ -32,11 +32,14 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, HttpRe
                         startAfter = StartAfter(x.vx), order = Num(x.vx, "order"), noteLinks = Obj(x.vx, "noteLinks"), x.subs, x.story, x.noCounter,
                         unlockDialogue = StrList(x.vx, "unlockDialogue"), x.talkTo, unlockLocations = StrList(x.vx, "unlockLocations"), x.call, x.mail, x.finishers, x.hidden,
                         setVariables = Obj(x.vx, "setVariables"), x.missingSubs,
+                        // 10-05：拿到其中任意一件就接（1.1 AutoStart 桶里「读到就开」的物品，adapt 搬进 visitapi.startOnItems）
+                        startOnItems = StrList(x.vx, "startOnItems"),
                         // 10-01：内容包里的任务（战局内交了由 StoryRaidRewards 在结算时统一发奖励）；客户端凭它在局内交任务时不再当场发一份
-                        pack = QuestLoader.Loaded.Contains(x.id)
+                        pack = QuestLoader.Loaded.Contains(x.id),
+                        x.rewardXp
                     })
-                    .Where(x => x.pack || x.anyOf != null || x.chapter || x.autoStart || x.autoFinish || x.dialogOnly || x.icon != null || x.notes != null || x.items.Count > 0 || x.startAfter != null || x.order != null || x.noteLinks != null || x.story || x.noCounter != null || x.unlockDialogue.Count > 0 || x.talkTo != null || x.unlockLocations.Count > 0 || x.call != null || x.mail != null || x.finishers.Count > 0 || x.hidden || x.setVariables != null)
-                    .ToDictionary(x => x.id, x => new { x.anyOf, x.chapter, x.autoStart, x.autoFinish, x.dialogOnly, x.icon, x.notes, x.items, x.startAfter, x.order, x.noteLinks, x.story, x.noCounter, x.unlockDialogue, x.talkTo, x.unlockLocations, x.call, x.mail, x.hidden, x.setVariables, x.pack, finishers = x.finishers.Count > 0 ? x.finishers : null, subs = x.chapter ? x.subs : null, missingSubs = x.chapter && x.missingSubs.Count > 0 ? x.missingSubs : null })),
+                    .Where(x => x.pack || x.rewardXp != null || x.anyOf != null || x.chapter || x.autoStart || x.autoFinish || x.dialogOnly || x.icon != null || x.notes != null || x.items.Count > 0 || x.startAfter != null || x.order != null || x.noteLinks != null || x.story || x.noCounter != null || x.unlockDialogue.Count > 0 || x.talkTo != null || x.unlockLocations.Count > 0 || x.call != null || x.mail != null || x.finishers.Count > 0 || x.hidden || x.setVariables != null || x.startOnItems.Count > 0)
+                    .ToDictionary(x => x.id, x => new { x.anyOf, x.chapter, x.autoStart, x.autoFinish, x.dialogOnly, x.icon, x.notes, x.items, x.startAfter, x.order, x.noteLinks, x.story, x.noCounter, x.unlockDialogue, x.talkTo, x.unlockLocations, x.call, x.mail, x.hidden, x.setVariables, x.pack, finishers = x.finishers.Count > 0 ? x.finishers : null, subs = x.chapter ? x.subs : null, missingSubs = x.chapter && x.missingSubs.Count > 0 ? x.missingSubs : null, startOnItems = x.startOnItems.Count > 0 ? x.startOnItems : null, startItemRules = StartItemRules(x.startOnItems), x.rewardXp })),
             typeof(QuestReadyRequest))
     ])
 {
@@ -92,6 +95,18 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, HttpRe
         return list;
     }
 
+    /// 10-06（SORA：蓝焰、意外证人做完没弹经验）：1.1 每完成一步，把这一步完成奖励里标了 isImportant 的逐条弹「剧情通关奖励：」
+    /// （QuestNotificationManager.NotifyReward，1.1.0 反汇编核过）。0.16 的 QuestReward 没有 isImportant，这里替客户端把要弹的经验加好带下去；
+    /// 各包里标了 isImportant 的奖励目前只有经验（蓝焰 / 意外证人的经验都挂在最后一步上）
+    static double? RewardXp(Quest q)
+    {
+        if (q.Rewards == null || !q.Rewards.TryGetValue("Success", out var list) || list == null) return null;
+        var xp = list.Where(r => r?.Type == RewardType.Experience && r.ExtensionData != null
+                && r.ExtensionData.TryGetValue("isImportant", out var v) && v is JsonElement e && e.ValueKind == JsonValueKind.True)
+            .Sum(r => r.Value ?? 0);
+        return xp > 0 ? xp : null;
+    }
+
     static List<string> Finishers(Quest q)
     {
         var list = new List<string>();
@@ -106,6 +121,23 @@ public class QuestReadyRouter(JsonUtil jsonUtil, TemplateTable templates, HttpRe
     }
 
     static List<string> Items(JsonElement? vx) => StrList(vx, "items");
+
+    /// 10-06：开章物品在 1.1 里的「个人可见」规矩（ItemLoader 登记包里物品时记下）；客户端 ItemStart.Visible 在刷任务物品时照着判断这名玩家看不看得到
+    static Dictionary<string, object> StartItemRules(List<string> tpls)
+    {
+        Dictionary<string, object> result = null;
+        foreach (var tpl in tpls)
+        {
+            if (!ItemLoader.PersonalRules.TryGetValue(tpl, out var r)) continue;
+            (result ??= new Dictionary<string, object>())[tpl] = new
+            {
+                quests = r.Quests.Select(q => new { id = q.Id, started = q.Started, completed = q.Completed, failed = q.Failed }).ToList(),
+                items = r.Items.Select(i => new { tpl = i.Tpl, completed = i.Completed }).ToList(),
+                bear = r.Bear, usec = r.Usec, savage = r.Savage, level = r.Level,
+            };
+        }
+        return result;
+    }
 
     static List<string> StrList(JsonElement? vx, string name) =>
         vx?.TryGetProperty(name, out var p) == true && p.ValueKind == JsonValueKind.Array

@@ -5,7 +5,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>VisitAPI-Server</AssemblyName>
     <RootNamespace>VisitAPI.Server</RootNamespace>
-    <Version>1.3.5</Version>
+    <Version>1.3.6</Version>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <SptDir Condition="'$(SptDir)' == ''">D:\EFT\SPT_Runtime</SptDir>
     <!-- 内容包布局的共享源码住在编辑器仓库（和 .dlg 解析器一个路数：链源码，不引 DLL） -->
@@ -20,13 +20,16 @@
     <Compile Include="$(PacksSrc)\*.cs" LinkBase="Packs\Shared" />
   </ItemGroup>
 
+  <!-- 10-06（用户 SPT 4.1.5：「Could not load file or assembly 'SPTarkov.Server.Core, Version=4.1.6.0'」，模组没加载）：
+       以前直接引用本机 SPT 目录里的 DLL，编出来就钉死在本机那一版（10-01 起是 4.1.6），4.1.0～4.1.5 的服务端都加载不了，和 ModMetadata 写的 ~4.1.0 对不上。
+       改成照 SPT 官方 NuGet 包 4.1.0 编：引用的版本低，4.1.x 里哪一版都能装；4.1.0 之后改了写法的地方运行时现判（ItemLoader.LoadBundles）。
+       SptDir 只剩部署用 -->
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <Reference Include="SPTarkov.Server.Core" HintPath="$(SptDir)\SPTarkov.Server.Core.dll" Private="false" />
-    <Reference Include="SPTarkov.DI" HintPath="$(SptDir)\SPTarkov.DI.dll" Private="false" />
-    <Reference Include="SPTarkov.Common" HintPath="$(SptDir)\SPTarkov.Common.dll" Private="false" />
-    <Reference Include="SPTarkov.Reflection" HintPath="$(SptDir)\SPTarkov.Reflection.dll" Private="false" />
-    <Reference Include="SemanticVersioning" HintPath="$(SptDir)\SemanticVersioning.dll" Private="false" />
+    <PackageReference Include="SPTarkov.Server.Core" Version="4.1.0" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="SPTarkov.DI" Version="4.1.0" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="SPTarkov.Common" Version="4.1.0" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="SPTarkov.Reflection" Version="4.1.0" ExcludeAssets="runtime" PrivateAssets="all" />
   </ItemGroup>
 
   <Target Name="Deploy" AfterTargets="Build" Condition="Exists('$(SptDir)\user') And '$(SkipDeploy)' != 'true'">

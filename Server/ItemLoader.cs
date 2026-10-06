@@ -60,6 +60,8 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
             using (doc)
                 foreach (var entry in doc.RootElement.EnumerateObject())
                 {
+                    try { RecordPersonal(entry.Name, entry.Value); RecordQuestItem(entry.Name, entry.Value); }
+                    catch (Exception e) { log.Warning($"[VisitAPI] items {label} {entry.Name}: could not read its 1.1 visibility rule (the item itself still loads; if it starts a story, it stays hidden in raids): {e.Message}"); }
                     try
                     {
                         if (templates.Items.ContainsKey(entry.Name))
@@ -117,6 +119,44 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
     static string Text(JsonElement o, string key) =>
         o.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
+    static bool Bool(JsonElement o, string key) => o.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.True;
+
+    /// <summary>10-06：1.1 的「个人」可读物品（模板 _props.Personal = true）谁能看到。1.1 GameWorld.ManageQuestLoot 的规矩（1.1.0 反汇编核过）：
+    /// 阵营允许（AllowBear / AllowUsec / AllowSavage）、等级够（RequiredLevel）、CompletableConditions 里的物品都找到过、QuestConditions 里的任务都处于指定状态。
+    /// 0.16 没有这套，这些字段原样留在包里的物品模板上；登记时记下来，QuestReadyRouter 给开章物品（visitapi.startOnItems）随 flags 带下去，客户端 ItemStart.Visible 照着判断。
+    /// 别的模组已经登记了同一件物品也照记（规矩是 1.1 的数据，跟谁的模板无关）</summary>
+    public static readonly Dictionary<string, PersonalRule> PersonalRules = new(StringComparer.Ordinal);
+
+    static void RecordPersonal(string id, JsonElement entry)
+    {
+        if (!entry.TryGetProperty("template", out var t) || t.ValueKind != JsonValueKind.Object) return;
+        if (!t.TryGetProperty("_props", out var p) || p.ValueKind != JsonValueKind.Object || !Bool(p, "Personal")) return;
+        var rule = new PersonalRule
+        {
+            Bear = Bool(p, "AllowBear"), Usec = Bool(p, "AllowUsec"), Savage = Bool(p, "AllowSavage"),
+            Level = p.TryGetProperty("RequiredLevel", out var lv) && lv.ValueKind == JsonValueKind.Number ? lv.GetInt32() : 0,
+        };
+        if (p.TryGetProperty("QuestConditions", out var qc) && qc.ValueKind == JsonValueKind.Array)
+            foreach (var c in qc.EnumerateArray())
+                if (c.ValueKind == JsonValueKind.Object && Text(c, "QuestId") is { Length: > 0 } quest)
+                    rule.Quests.Add(new PersonalRule.QuestReq { Id = quest, Started = Bool(c, "Started"), Completed = Bool(c, "Completed"), Failed = Bool(c, "Failed") });
+        if (p.TryGetProperty("CompletableConditions", out var cc) && cc.ValueKind == JsonValueKind.Array)
+            foreach (var c in cc.EnumerateArray())
+                if (c.ValueKind == JsonValueKind.Object && Text(c, "CompletableItem") is { Length: > 0 } tpl)
+                    rule.Items.Add(new PersonalRule.ItemReq { Tpl = tpl, Completed = Bool(c, "IsCompleted") });
+        PersonalRules[id] = rule;
+    }
+
+    /// <summary>包里写着 QuestItem = true 的物品（见 PackQuestItems）</summary>
+    public static readonly HashSet<string> QuestItemWanted = new(StringComparer.Ordinal);
+
+    static void RecordQuestItem(string id, JsonElement entry)
+    {
+        if (entry.TryGetProperty("template", out var t) && t.ValueKind == JsonValueKind.Object
+            && t.TryGetProperty("_props", out var p) && p.ValueKind == JsonValueKind.Object && Bool(p, "QuestItem"))
+            QuestItemWanted.Add(id);
+    }
+
     void LoadLoot(PackInfo p)
     {
         foreach (var file in PackLayout.DataFiles(p, "loot"))
@@ -163,11 +203,73 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
             if (bundles.GetBundle(entry.Key) != null) continue;   // 别的模组或先加载的包已提供，沿用
             var path = Path.Combine(PackLayout.BundlesDir(p), entry.Key.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(path)) { log.Error($"[VisitAPI] Bundle file missing: {path}"); continue; }
-            var hash = await bundleHashes.GetOrCalculateHashAsync(Path.Join(modPath, "bundles", entry.Key).Replace('\\', '/'), ct);
+            var hash = await BundleHash(Path.Join(modPath, "bundles", entry.Key).Replace('\\', '/'), ct);
             if (hash == null) { log.Error($"[VisitAPI] Bundle is not a valid Unity bundle: {entry.Key}"); continue; }
-            bundles.AddBundle(entry.Key, new BundleInfo { ModPath = modPath, Bundle = entry, Crc = hash.Crc, Size = hash.Size, ModifiedUtcTicks = hash.ModifiedUtcTicks });
+            var info = new BundleInfo { ModPath = modPath, Bundle = entry, Crc = hash.Value.Crc };
+            BundleSize?.SetValue(info, hash.Value.Size);
+            BundleTicks?.SetValue(info, hash.Value.Ticks);
+            bundles.AddBundle(entry.Key, info);
             added++;
         }
         return added;
     }
+
+    /// 10-06（SPT 4.1.x 全兼容，见 csproj）：模型包校验值在 4.1.0 之后换了写法——4.1.0 是 CalculateMatchAndStoreHashAsync（只回 CRC），
+    /// 4.1.6 是 GetOrCalculateHashAsync（回 CRC + 大小 + 修改时间，不是 Unity 包就回 null），BundleInfo 也多了必填的 Size / ModifiedUtcTicks。
+    /// 现在照 4.1.0 编，这里看当前服务端有哪个方法就调哪个；新字段 4.1.0 的 BundleInfo 里没有，有就用反射填上
+    static readonly MethodInfo NewHash = typeof(BundleHashCacheService).GetMethod("GetOrCalculateHashAsync", [typeof(string), typeof(CancellationToken)]);
+    static readonly MethodInfo OldHash = typeof(BundleHashCacheService).GetMethod("CalculateMatchAndStoreHashAsync", [typeof(string), typeof(CancellationToken)]);
+    static readonly PropertyInfo BundleSize = typeof(BundleInfo).GetProperty("Size");
+    static readonly PropertyInfo BundleTicks = typeof(BundleInfo).GetProperty("ModifiedUtcTicks");
+
+    async Task<(uint Crc, long Size, long Ticks)?> BundleHash(string path, CancellationToken ct)
+    {
+        if (NewHash != null)
+        {
+            var task = (Task)NewHash.Invoke(bundleHashes, [path, ct]);
+            await task;
+            var entry = task.GetType().GetProperty("Result")?.GetValue(task);
+            if (entry == null) return null;
+            var t = entry.GetType();
+            return (Convert.ToUInt32(t.GetProperty("Crc")?.GetValue(entry)), Convert.ToInt64(t.GetProperty("Size")?.GetValue(entry)), Convert.ToInt64(t.GetProperty("ModifiedUtcTicks")?.GetValue(entry)));
+        }
+        if (OldHash != null)
+        {
+            var crc = await (Task<uint>)OldHash.Invoke(bundleHashes, [path, ct]);
+            var file = new FileInfo(path);
+            return (crc, file.Length, file.LastWriteTimeUtc.Ticks);
+        }
+        if (!_noHashLogged) log.Error("[VisitAPI] This SPT version has no known bundle hash method (neither GetOrCalculateHashAsync nor CalculateMatchAndStoreHashAsync); pack item models will not load");
+        _noHashLogged = true;
+        return null;
+    }
+
+    static bool _noHashLogged;
+}
+
+/// <summary>10-06 SORA 实测开章线索「还是进背包里了啊」：Manimal 的立交桥 backport 自己也登记了 EMERCOM 传单（照 1.1 数据 QuestItem = false），
+/// 同一件物品先登记的赢，包里改成任务物品的那份没生效（包里 75 件物品逐件比过别的模组，只有这一处不一致）。
+/// 这里等所有模组都加载完，把包里写着 QuestItem = true、却被别人登记成 false 的物品改回任务物品——只动这一个字段，模板其余部分仍用对方的。
+/// /client/items 是请求时现读 templates.Items，所以在这里改就能下发到客户端</summary>
+[Injectable(typePriority: OnLoadOrder.PostLoad + 1)]
+public class PackQuestItems(TemplateTable templates) : IOnLoad
+{
+    public Task OnLoadAsync(CancellationToken cancellationToken)
+    {
+        foreach (var id in ItemLoader.QuestItemWanted)
+            if (templates.Items.TryGetValue(id, out var t) && t?.Properties != null && t.Properties.QuestItem != true)
+                t.Properties.QuestItem = true;
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>1.1 CompletableTemplate 的可见条件，见 ItemLoader.PersonalRules</summary>
+public sealed class PersonalRule
+{
+    public sealed class QuestReq { public string Id; public bool Started, Completed, Failed; }
+    public sealed class ItemReq { public string Tpl; public bool Completed; }
+    public readonly List<QuestReq> Quests = new();
+    public readonly List<ItemReq> Items = new();
+    public bool Bear, Usec, Savage;
+    public int Level;
 }

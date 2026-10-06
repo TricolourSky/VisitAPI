@@ -56,6 +56,10 @@ public static class VisitPatches
         typeof(RaidRewardHold.Finish),
         // 10-02：商人说话那一段不重画对话窗（点选项后小框闪一下）
         typeof(SayBeatWindow),
+        // 10-05：拿到物品就开的任务（神秘蓝焰开章）——进图时盯上战局里的背包
+        typeof(ItemStart.RaidStart),
+        // 10-06：开章线索改成任务物品后，按 1.1 的规矩决定谁能在战局里看到它
+        typeof(ItemStart.Visible),
     };
 
     public static void ApplyAll(Harmony harmony)

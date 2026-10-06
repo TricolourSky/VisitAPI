@@ -33,18 +33,41 @@ public static class ChapterNotify
             var xp = rewards.Where(r => r != null && r.type == ERewardType.Experience).Sum(r => (double)r.value);
             if (xp <= 0) return;
             var title = ChapterTitle(chapter, true, chapter.Id);
-            var text = Word("UI/Quest/Reward/Notification/QuestChapter", "完成章节奖励：", "Reward for finishing a chapter:") + " "
-                + Word("UI/Quest/Reward/Notification/Experience", "经验：", "Experience:") + " +"
-                + ((int)xp).ToString("#,0", System.Globalization.CultureInfo.InvariantCulture).Replace(',', ' ');
-            Display(() => NotificationManager.DisplayNotification(new ChapterBanner
-            {
-                Title = title, Text = text, IsChapter = true,
-                Sprite = VisitArt.Load("reward_exp.png") ?? ChapterImages.Cached(QuestFlags.Get(chapter.Id)?.Icon),
-                Silent = true, Status = ChapterBanner.EStatus.Success, SoundType = EUISoundType.QuestFinished, Duration = ENotificationDurationType.Long
-            }), $"reward banner \"{title}\" {text}");
+            var text = Word("UI/Quest/Reward/Notification/QuestChapter", "完成章节奖励：", "Reward for finishing a chapter:") + " " + XpText(xp);
+            Display(() => NotificationManager.DisplayNotification(RewardBanner(title, text, chapter.Id)), $"reward banner \"{title}\" {text}");
         }
         catch (Exception e) { Plugin.Log.LogWarning("[banner] Reward banner failed: " + e.Message); }
     }
+
+    /// 10-06（SORA：蓝焰、意外证人做完没弹经验）：1.1 每完成一步，把这一步完成奖励里标了 isImportant 的逐条弹出来，抬头「剧情通关奖励：」
+    /// （UI/Quest/Reward/Notification/MainQuest，见 #148；1.1.0 QuestNotificationManager.NotifyReward 反汇编核过）。
+    /// 原版章节本身只带成就，经验挂在步骤上（蓝焰、意外证人都在最后一步），以前只看章节本身的经验，这两章就什么都不弹。
+    /// 各包里标了 isImportant 的目前只有经验，服务端加好随 flags 下发（QuestFlags.RewardXp）；战局里完成的，经验照旧撤离结算时到账
+    public static void ShowStepRewards(Quest quest)
+    {
+        try
+        {
+            var xp = QuestFlags.RewardXp(quest?.Id);
+            if (xp <= 0 || !Singleton<NotificationManager>.Instantiated) return;
+            var chapterId = QuestFlags.ChapterOf(quest.Id);
+            var title = ChapterTitle(quest, false, chapterId);
+            var text = Word("UI/Quest/Reward/Notification/MainQuest", "剧情通关奖励：", "Reward for completing the story:") + " " + XpText(xp);
+            Display(() => NotificationManager.DisplayNotification(RewardBanner(title, text, chapterId)), $"step reward banner \"{title}\" {text}");
+        }
+        catch (Exception e) { Plugin.Log.LogWarning("[banner] Step reward banner failed: " + e.Message); }
+    }
+
+    static string XpText(double xp) =>
+        Word("UI/Quest/Reward/Notification/Experience", "经验：", "Experience:") + " +"
+        + ((int)xp).ToString("#,0", System.Globalization.CultureInfo.InvariantCulture).Replace(',', ' ');
+
+    /// 1.1 章节和步骤的奖励用的是同一种横幅（NotificationQuestReward），两头外观一样
+    static ChapterBanner RewardBanner(string title, string text, string chapterId) => new ChapterBanner
+    {
+        Title = title, Text = text, IsChapter = true,
+        Sprite = VisitArt.Load("reward_exp.png") ?? ChapterImages.Cached(QuestFlags.Get(chapterId)?.Icon),
+        Silent = true, Status = ChapterBanner.EStatus.Success, SoundType = EUISoundType.QuestFinished, Duration = ENotificationDurationType.Long
+    };
 
     static string Word(string key, string ch, string en)
     {
@@ -156,7 +179,12 @@ public static class QuestNotify
         else if (st == EQuestStatus.Success) { status = Loc.Pick("任务完成", "Task completed"); sound = EUISoundType.QuestFinished; }
         else if (ChapterStates.Failed(st)) { status = Loc.Pick("任务失败", "Task failed"); hue = Bad; sound = EUISoundType.QuestFailed; }
         else return;
-        if (sub) { ChapterNotify.Show(quest, false, status, sound); return; }
+        if (sub)
+        {
+            ChapterNotify.Show(quest, false, status, sound);
+            if (st == EQuestStatus.Success) ChapterNotify.ShowStepRewards(quest);
+            return;
+        }
         ChapterNotify.Display(() => NotificationManager.DisplayNotification(new VisitBanner
         {
             Text = $"<color={Name}>{quest.Template.Name?.Trim()}</color>\n<size=88%><color={hue}>{status}</color></size>",

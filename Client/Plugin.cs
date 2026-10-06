@@ -12,7 +12,7 @@ namespace VisitAPI;
 [BepInPlugin("com.sora.visitapi", "VisitAPI", Version)]
 public class Plugin : BaseUnityPlugin
 {
-    public const string Version = "1.3.5";
+    public const string Version = "1.3.6";
     public static Plugin Instance;
     public static ManualLogSource Log;
     // 09-25 SORA：BepInEx 设置页只留剧情页的三个个人偏好。其余（访问画面的 7 个调参项、2 个调试热键、访问按钮偏移、界面语言、

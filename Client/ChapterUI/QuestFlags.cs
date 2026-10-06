@@ -32,6 +32,12 @@ public static class QuestFlags
         public Dictionary<string, Dictionary<string, int>> SetVariables = new();
         /// 09-24：章节点名但本机没有定义的子任务（门票缺的 44 条），按章节顺序开任务时跳过它们
         public List<string> MissingSubs = new();
+        /// 10-05：拿到其中任意一件物品就接这条任务（1.1 AutoStart 桶里「读到就开」的 CompletableItem，adapt 搬进 visitapi.startOnItems，见 ItemStart）
+        public List<string> StartOnItems = new();
+        /// 10-06：开章物品在 1.1 里谁能看到（物品 id → 规矩，见 ItemStart.Visible）
+        public Dictionary<string, ItemStart.Rule> StartItemRules = new();
+        /// 10-06：这一步完成时要弹的「剧情通关奖励：经验」（1.1 只弹完成奖励里标了 isImportant 的，0.16 读不到那个字段，服务端加好带下来）
+        public double RewardXp;
     }
 
     public class Mail { public string From, Entry, Dialogue, DialogueTrader, TextKey; }
@@ -54,6 +60,7 @@ public static class QuestFlags
     public static bool AutoFinish(string id) => Get(id)?.AutoFinish == true;
     public static bool DialogOnly(string id) => Get(id)?.DialogOnly == true;
     public static bool Pack(string id) => Get(id)?.Pack == true;
+    public static double RewardXp(string id) => Get(id)?.RewardXp ?? 0;
     /// 09-26 SORA：1.1 原版章节一律按这张固定位次（id 取自 1.1 服务端 getMainQuestsList 下发的章节列表），包数据里的 visitapi.order 对它们不起作用；
     /// 只有自制章节能自己定位置：包里写 visitapi.order，没写就用配置项 CustomChapterOrder（默认 100，排在原版章节后面）。
     /// 神秘蓝焰（Blue Fire）SORA 09-26 这张表里没列，暂按 1.1 章节列表的顺序放在无名者和他们已经来了之间，待确认
@@ -84,6 +91,24 @@ public static class QuestFlags
     /// 任务进入 status（"Started" / "Success" / "Fail"）时要赋的变量；没有就 null
     public static Dictionary<string, int> VariablesOn(string questId, string status) => Get(questId)?.SetVariables.TryGetValue(status ?? "", out var m) == true && m.Count > 0 ? m : null;
     public static bool IsMissingSub(string chapterId, string questId) => chapterId != null && questId != null && Get(chapterId)?.MissingSubs.Contains(questId) == true;
+    /// 拿到其中任意一件就接的物品；没有就 null
+    public static List<string> StartOnItems(string id) { var s = Get(id)?.StartOnItems; return s != null && s.Count > 0 ? s : null; }
+
+    /// 拿到这件物品会接哪些任务
+    public static List<string> StartedBy(string tpl)
+    {
+        lock (_byQuest) return string.IsNullOrEmpty(tpl) ? new List<string>() : _byQuest.Where(kv => kv.Value.StartOnItems.Contains(tpl)).Select(kv => kv.Key).ToList();
+    }
+
+    /// 开章物品的 1.1 可见规矩；不是开章物品（或包里没带规矩）就 null。同一件物品挂在章节和第一步上，规矩一样，取到一份即可
+    public static ItemStart.Rule StartItemRule(string tpl)
+    {
+        if (string.IsNullOrEmpty(tpl)) return null;
+        lock (_byQuest)
+            foreach (var e in _byQuest.Values)
+                if (e.StartItemRules.TryGetValue(tpl, out var r)) return r;
+        return null;
+    }
     public static string TalkTo(string id) { var s = Get(id)?.TalkTo; return string.IsNullOrEmpty(s) ? null : s; }
     public static string CallTrader(string id) { var s = Get(id)?.CallTrader; return string.IsNullOrEmpty(s) ? null : s; }
 
@@ -174,7 +199,8 @@ public static class QuestFlags
             AnyOf = On(v, "anyOf"), Chapter = On(v, "chapter"),
             AutoStart = On(v, "autoStart"), AutoFinish = On(v, "autoFinish"), DialogOnly = On(v, "dialogOnly"), Story = On(v, "story"), Hidden = On(v, "hidden"), Pack = On(v, "pack"),
             Icon = v["icon"]?.Value<string>(), TalkTo = v["talkTo"]?.Value<string>(), CallTrader = v["call"]?.Value<string>(),
-            Order = v["order"]?.Type == JTokenType.Integer || v["order"]?.Type == JTokenType.Float ? v["order"].Value<double>() : double.MaxValue
+            Order = v["order"]?.Type == JTokenType.Integer || v["order"]?.Type == JTokenType.Float ? v["order"].Value<double>() : double.MaxValue,
+            RewardXp = v["rewardXp"]?.Type == JTokenType.Integer || v["rewardXp"]?.Type == JTokenType.Float ? v["rewardXp"].Value<double>() : 0
         };
         if (v["startAfter"] is JArray sa) e.StartAfter = sa.Select(x => x.Value<string>()).Where(s => !string.IsNullOrEmpty(s)).ToList();
         else if (v["startAfter"]?.Type == JTokenType.String && !string.IsNullOrEmpty(v["startAfter"].Value<string>())) e.StartAfter = new List<string> { v["startAfter"].Value<string>() };
@@ -193,6 +219,10 @@ public static class QuestFlags
         if (v["unlockLocations"] is JArray ul) e.UnlockLocations = ul.Select(x => x.Value<string>()).Where(s => !string.IsNullOrEmpty(s)).ToList();
         if (v["finishers"] is JArray fin) e.Finishers = fin.Select(x => x.Value<string>()).Where(s => !string.IsNullOrEmpty(s)).ToList();
         if (v["missingSubs"] is JArray miss) e.MissingSubs = miss.Select(x => x.Value<string>()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        if (v["startOnItems"] is JArray soi) e.StartOnItems = soi.Select(x => x.Value<string>()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        if (v["startItemRules"] is JObject sir)
+            foreach (var p in sir.Properties())
+                if (p.Value is JObject ro) e.StartItemRules[p.Name] = ItemStart.Rule.Parse(ro);
         if (v["setVariables"] is JObject sv)
             foreach (var st in sv.Properties())
             {

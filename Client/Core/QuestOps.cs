@@ -65,6 +65,11 @@ public static class QuestOps
 
     public static void Finish(QuestController qc, Quest quest, string tag) => Run(qc, quest, Op.Finish, tag);
 
+    /// 10-06：接下来紧接着交（一个完成条件都没有的剧情步骤，1.1 服务端开了就算完成）
+    public static void AcceptThenFinish(QuestController qc, Quest quest, string tag) => Run(qc, quest, Op.AcceptThenFinish, tag);
+
+    public static bool Busy(string questId) => questId != null && _busy.Contains(questId);
+
     enum Op { Accept, Finish, AcceptThenFinish }
 
     /// <summary>对话 setstatus: 和触发器改任务状态。1.3.4 B3：以前一律只改本地（TryExecuteTransition 在基类恒返回 false，
@@ -126,9 +131,18 @@ public static class QuestOps
         }
     }
 
+    /// 10-06 意外证人实测（「只有在撤离战局之后这个任务目标才会出来」）：一条任务在自己「接」的那一下就满足了完成条件（空步骤、身上已有要找的物品），
+    /// 嵌套的状态事件里链要求「交」，撞上在途标记以前直接丢、也不留痕；战局里之后再没有事件来推，一直卡到回大厅整本重扫才交掉。
+    /// 现在在途时来的「交」先记下，等这一笔做完接着交（「接」重复了就是真重复，照旧丢）
+    static readonly Dictionary<string, (QuestController qc, Quest quest, Op op, string tag)> _queued = new();
+
     static void Run(QuestController qc, Quest quest, Op op, string tag)
     {
-        if (!_busy.Add(quest.Id)) return;
+        if (!_busy.Add(quest.Id))
+        {
+            if (op != Op.Accept) _queued[quest.Id] = (qc, quest, op, tag);
+            return;
+        }
         Plugin.Instance.StartCoroutine(Later(qc, quest, op, tag));
     }
 
@@ -147,7 +161,15 @@ public static class QuestOps
             }
             yield return Step(qc, quest, accept: false, tag, _ => { });
         }
-        finally { _busy.Remove(quest.Id); }
+        finally
+        {
+            _busy.Remove(quest.Id);
+            if (_queued.TryGetValue(quest.Id, out var next))
+            {
+                _queued.Remove(quest.Id);
+                if (IsLive(next.qc) && next.quest.QuestStatus < EQuestStatus.Success) Run(next.qc, next.quest, next.op, next.tag);
+            }
+        }
     }
 
     static IEnumerator Step(QuestController qc, Quest quest, bool accept, string tag, Action<bool> result)
