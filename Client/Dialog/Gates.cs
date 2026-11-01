@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using EFT;
 using EFT.Dialogs;
 using EFT.Quests;
 using VisitAPI.Dialog;
@@ -47,7 +46,7 @@ public class ItemsGate : DialogCondition
 
 /// <summary>10-02（SORA：接 / 交任务的节点总多出一个「（结束）」，手抖点到就退出对话，而那段对话可能再也打不开）：
 /// 「（结束）」是给「这个节点的选项全都带条件、而且此刻一个都不满足」留的出口，不然玩家会卡在一个没有选项的对话里。
-/// 以前它不看情况一直在；现在挂上这个条件——只要还有任何一个选项点得了，它就不出现。</summary>
+/// 挂上这个条件——只要还有任何一个选项点得了，它就不出现。</summary>
 public class NoOptionOpen : DialogCondition
 {
     readonly List<DialogMainConditionGroup> _options;

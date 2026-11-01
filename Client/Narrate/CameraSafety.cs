@@ -3,7 +3,6 @@ using System.Linq;
 using System.Reflection;
 using EFT.CameraControl;
 using HarmonyLib;
-using UnityEngine;
 
 namespace VisitAPI.Native;
 
@@ -11,11 +10,7 @@ namespace VisitAPI.Native;
 public static class CameraSafety
 {
     [HarmonyPrefix, HarmonyPatch(typeof(CameraManager), "IsActive", MethodType.Setter)]
-    static bool SetIsActive(CameraManager __instance)
-    {
-        if (__instance.Camera != null) return true;
-        return false;
-    }
+    static bool SetIsActive(CameraManager __instance) => __instance.Camera != null;
 
     [HarmonyPrefix, HarmonyPatch(typeof(CameraManager), "IsActive", MethodType.Getter)]
     static bool GetIsActive(CameraManager __instance, ref bool __result)
@@ -37,8 +32,6 @@ public static class CameraSafety
 [HarmonyPatch]
 public static class UpscalerGuard
 {
-    static readonly FieldInfo SsaaImplField = AccessTools.Field(typeof(CameraManager), "_ssaaImpl");
-
     static IEnumerable<MethodBase> TargetMethods() => new MethodBase[]
     {
         AccessTools.Method(typeof(CameraManager), "SetFSR"),
@@ -47,9 +40,5 @@ public static class UpscalerGuard
         AccessTools.Method(typeof(CameraManager), "SetDLSSPreset"),
     }.Where(m => m != null);
 
-    static bool Prefix(CameraManager __instance)
-    {
-        if (SsaaImplField == null || SsaaImplField.GetValue(__instance) as Object != null) return true;
-        return false;
-    }
+    static bool Prefix(CameraManager __instance) => __instance._ssaaImpl != null;
 }

@@ -19,8 +19,8 @@ public static class EffectActions
         if (info == null && session == null) { Plugin.Log.LogWarning("[standing] trader not found: " + traderId); return; }
         var old = session?.Standing ?? info.Standing;
         // 对话效果不把声望减到 0 以下（已经是负的就不再往下减）；加声望不钳。
-        // 09-24 审查低项：服务端 TraderHelper.AddStandingToTrader 是「原值 + 增量」不钳，以前客户端钳了却把原始增量发过去，两边对不上；
-        // 现在发钳过之后的实际变化量
+        // 09-24 审查低项：服务端 TraderHelper.AddStandingToTrader 是「原值 + 增量」不钳，客户端钳了却把原始增量发过去的话，两边对不上；
+        // 所以发钳过之后的实际变化量
         var value = delta >= 0 ? old + delta : System.Math.Max(System.Math.Min(old, 0.0), old + delta);
         var applied = value - old;
         if (info != null) info.SetStanding(value);
@@ -40,6 +40,7 @@ public static class EffectActions
     public static void Handover(QuestController quests, Profile profile, InventoryController inventory, string questId)
     {
         var quest = quests?.Quests?.GetConditional(questId);
+        if (quest == null) { Plugin.Log.LogWarning("[handover] quest not found: " + questId); return; }
         var cond = QuestGates.PendingItems(quest);
         if (cond == null) return;
         var items = quests.GetItemsForCondition(cond);
@@ -54,7 +55,8 @@ public static class EffectActions
             quests.HandoverItem(quest, cond, selected, true)
                 .ContinueWith(t => { if (t.IsFaulted) Plugin.Log.LogWarning("[handover] failed: " + t.Exception?.GetBaseException().Message); });
         }, true);
-        ctx.OnClose += () => { if (dialogWindow != null) dialogWindow.SetActive(true); };
-        ctx.OnCloseSilent += () => { if (dialogWindow != null) dialogWindow.SetActive(true); };
+        void Restore() { if (dialogWindow != null) dialogWindow.SetActive(true); }
+        ctx.OnClose += Restore;
+        ctx.OnCloseSilent += Restore;
     }
 }

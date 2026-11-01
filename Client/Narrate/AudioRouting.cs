@@ -1,5 +1,4 @@
 using System.Linq;
-using EFT;
 using UnityEngine;
 using UnityEngine.Audio;
 using UnityEngine.SceneManagement;

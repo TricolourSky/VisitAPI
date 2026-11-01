@@ -5,8 +5,8 @@ namespace VisitAPI.Native;
 
 /// <summary>
 /// 一份 .dlg 的字幕表（多语言，09-23）：默认文字一张表，各语言的译文各一张（来自 DialogLangs 的译文行）。
-/// 给引擎的 locByLang 按「默认盖上该语言的译文」合成；引擎按 LocalizationManager.Culture 挑表，
-/// 所以「当前文化」那张放的是玩家要的语言（Loc.Code：配置强制 zh/en 时也照它）。
+/// 给引擎的 locByLang 按「默认文字，盖上英文译文，再盖上该语言的译文」合成（中文、英文那两张不叠英文）；引擎按 LocalizationManager.Culture 挑表，
+/// 所以「当前文化」那张放的是玩家要的语言（Loc.Code）。
 /// </summary>
 sealed class LocTable
 {
@@ -31,8 +31,10 @@ sealed class LocTable
         return k;
     }
 
-    /// <summary>这一键按玩家语言该显示的字（旁白面板自己画的那份 NarrationByDialog）。</summary>
-    public string Shown(string k) => _byLang.TryGetValue(_want, out var d) && d.TryGetValue(k, out var s) ? s : _default[k];
+    /// <summary>这一键按玩家语言该显示的字（旁白面板自己画的那份 NarrationByDialog）：玩家的语言 → 英文 → 默认文字（同 Loc.Tr）。</summary>
+    public string Shown(string k) => Find(_want, k) ?? (_want != "ch" ? Find("en", k) : null) ?? _default[k];
+
+    string Find(string code, string k) => _byLang.TryGetValue(code, out var d) && d.TryGetValue(k, out var s) ? s : null;
 
     public Dictionary<string, Dictionary<string, string>> Tables(string culture)
     {
@@ -43,10 +45,17 @@ sealed class LocTable
         return r;
     }
 
+    /// 默认文字 → 英文译文 → 这门语言的译文，后盖前（10-26：没有这门语言的译文就直接退回默认文字的话，俄语界面下 SORA 的对话全是中文）
     Dictionary<string, string> Table(string code)
     {
         var d = new Dictionary<string, string>(_default);
-        if (_byLang.TryGetValue(code, out var over)) foreach (var kv in over) d[kv.Key] = kv.Value;
+        if (code != "ch" && code != "en") Overlay(d, "en");
+        Overlay(d, code);
         return d;
+    }
+
+    void Overlay(Dictionary<string, string> d, string code)
+    {
+        if (_byLang.TryGetValue(code, out var over)) foreach (var kv in over) d[kv.Key] = kv.Value;
     }
 }

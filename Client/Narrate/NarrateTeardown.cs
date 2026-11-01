@@ -17,17 +17,13 @@ namespace VisitAPI.Native;
 [HarmonyPatch(typeof(TarkovApplication.NarrateController), "Hide")]
 public static class NarrateHideGuard
 {
-    /// 09-24 审查 M2：这些清理以前直接排在 Prefix 里，任何一个抛异常，Harmony 就跳过原版 Hide（不切回主菜单、不关访问混音、不释放访问相机），
-    /// 排在最后的 EnsureMenu 兜底也跑不到，访问后只能强退。现在每步单独兜住。
+    /// 09-24 审查 M2：每步单独兜住。Prefix 里任何一步抛异常，Harmony 就跳过原版 Hide（不切回主菜单、不关访问混音、不释放访问相机），
+    /// 排在最后的 EnsureMenu 兜底也跑不到，访问后只能强退。
     /// 同时只在真有访问要收尾时才做：引擎把 HandleActionFinished 挂在常驻的菜单对话控制器上，那上面任何一个 Quit 都会调 Hide，
     /// 没有访问时去清「当前」贴花渲染器（那时可能是藏身处的）、复位战局标记是误伤。
     static void Prefix(TarkovApplication.NarrateController __instance)
     {
-        if (__instance == null || (!__instance.GameExist && __instance._gameWorld == null))
-        {
-            return;
-        }
-        LocalSteps();
+        if (__instance != null && (__instance.GameExist || __instance._gameWorld != null)) LocalSteps();
     }
 
     /// 访问收尾里我们自己的本地清理（Hide 前缀和 Show 半途失败的清理共用），每步单独兜住
@@ -45,7 +41,7 @@ public static class NarrateHideGuard
     }
 
     /// 09-24 审查 M5：引擎 Show 半途失败、没建成 NarrateGame 时的清理。引擎在 try 外就开了 JobScheduler 强制模式、打开藏身处加载屏、
-    /// 加载了访问场景；try 里失败还可能留下一个建了一半的访问世界（GameWorld 单例还指着它）。以前这里只做本地还原，这些都没人管
+    /// 加载了访问场景；try 里失败还可能留下一个建了一半的访问世界（GameWorld 单例还指着它）
     internal static void CleanupFailedShow(TarkovApplication.NarrateController nc)
     {
         LocalSteps();
@@ -60,18 +56,14 @@ public static class NarrateHideGuard
         else Step("scenes", () => Plugin.Instance.StartCoroutine(UnloadScenes()));
     }
 
-    static void Step(string name, Action act)
-    {
-        try { act(); }
-        catch (Exception e) { Plugin.Log.LogError($"[narrate] Visit teardown step '{name}' failed (continuing with the rest, original Hide still runs): {e}"); }
-    }
+    static void Step(string name, Action act) => VisitSteps.Run("[narrate] Visit teardown step '{0}' failed (continuing with the rest, original Hide still runs): {1}", name, act);
 
     static void Postfix(TarkovApplication.NarrateController __instance) => Teardown(__instance);
 
     /// 每次访问结束都把访问世界和 NarrateGame 拆掉（下次访问重新建，房间场景也卸掉）。
-    /// 09-24 审查 H2：以前只 Stop + 手工释放单例和销毁世界，然后用新的 _unsubscriber 直接替换旧的——旧袋子从不 Dispose，
-    /// 于是 GameWorld.Dispose 和 NarrateGame.Dispose（AbstractGame.Dispose：DestroyImmediate 那个 "GAME" 物体，连同它逐帧跑的协程）每次访问都漏掉；
-    /// NarrateGame.Create 里建的任务 / 成就控制器引擎自己也从不释放。现在按原版 Unload 的做法整袋释放，并单独收掉那两个控制器。
+    /// 09-24 审查 H2：按原版 Unload 的做法整袋释放 _unsubscriber——只换上新袋子、旧袋子不 Dispose 的话，
+    /// GameWorld.Dispose 和 NarrateGame.Dispose（AbstractGame.Dispose：DestroyImmediate 那个 "GAME" 物体，连同它逐帧跑的协程）每次访问都漏掉；
+    /// NarrateGame.Create 里建的任务 / 成就控制器引擎自己也从不释放，这里单独收掉。
     static void Teardown(TarkovApplication.NarrateController nc)
     {
         var game = nc._game;
@@ -79,9 +71,8 @@ public static class NarrateHideGuard
         if (game == null && world == null) return;
         try { game?.Stop(); }
         catch (Exception ex) { Plugin.Log.LogWarning("[narrate] game stop failed: " + ex.Message); }
-        // 1.3.4 B1：Stop 之后还开着的访问玩家是建到一半的孤儿（PlayerOwner 没赋值，原生 Stop 不管它）
-        try { NarrateOrphans.Collect(); }
-        catch (Exception ex) { Plugin.Log.LogWarning("[narrate] orphan player sweep failed: " + ex.Message); }
+        // 1.3.4 B1：Stop 之后还开着的访问玩家是建到一半的孤儿（PlayerOwner 没赋值，原生 Stop 不管它）。Collect 里每一步自己兜住
+        NarrateOrphans.Collect();
         VisitGameGuard.Release(game);
         // 袋子里依次是：world.Dispose → 「释放 GameWorld / IGameLevel 单例 + 销毁 _gameWorld」→ game.Dispose。
         // 第二项读的是 _gameWorld 字段，而上面 Stop 经 End 回调已经把它置空了——先放回去，否则那一项空引用，后面的 game.Dispose 也跟着不执行
@@ -102,15 +93,15 @@ public static class NarrateHideGuard
                 UnityEngine.Object.Destroy(world.gameObject);
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[narrate] Manual visit world teardown failed: " + ex.Message); }
+            // 引擎 GameWorld.Dispose 末尾无条件调 DataProvider.Instance.Dispose（只清 Raid 生命期那一组，重复调无害）。
+            // Show 在 InitLevel 就失败时世界还没进袋子、袋子 Dispose 碰不到它，袋子半途失败时也可能没走到——不补的话下一个世界 CreateData 返回 false、战局倒计时卡死（#93）。
+            // 所以只要有世界就补一次（10-29）
+            try { EFT.DataProviding.DataProvider.Instance.Dispose(); }
+            catch (Exception ex2) { Plugin.Log.LogWarning("[narrate] data provider cleanup failed: " + ex2.Message); }
         }
         if (!disposed)
         {
-            // 袋子半途失败时 world.Dispose 可能没走到末尾的 DataProvider.Dispose、game.Dispose 也没执行
-            if (world != null)
-            {
-                try { EFT.DataProviding.DataProvider.Instance.Dispose(); }
-                catch (Exception ex2) { Plugin.Log.LogWarning("[narrate] data provider cleanup failed: " + ex2.Message); }
-            }
+            // 袋子半途失败时 game.Dispose 也没执行
             try { if (game != null) UnityEngine.Object.Destroy(game.gameObject); }
             catch (Exception ex) { Plugin.Log.LogWarning("[narrate] Failed to destroy NarrateGame object: " + ex.Message); }
         }
@@ -205,8 +196,7 @@ public static class VisitGameGuard
     {
         static void Postfix(QuestControllerClientBackend __instance)
         {
-            if (!_creating) return;
-            _controllers.Add(__instance);
+            if (_creating) _controllers.Add(__instance);
         }
     }
 

@@ -22,10 +22,11 @@ public class PendingInvite
 {
     public Quest Quest;
     public QuestFlags.Mail Mail;
-    public bool Test;   // visit_testinvite 造的显示用邀请：没有任务，不向服务端要信
-    public string QuestId => Quest != null ? Quest.Id : "test-invite";
+    public string QuestId => Quest.Id;
     public string Trader => Mail.From;
-    public string TextKey => string.IsNullOrEmpty(Mail.TextKey) ? Quest.Id + " whileAvailableMessageText" : Mail.TextKey;
+    /// 按下按钮要开的对话属于哪家：mail 里写了 dialogueTrader 就是那家，没写就是发信的商人
+    public string DialogueTrader => string.IsNullOrEmpty(Mail.DialogueTrader) ? Trader : Mail.DialogueTrader;
+    public string TextKey => string.IsNullOrEmpty(Mail.TextKey) ? Quest.Id + InviteState.MailKeySuffix : Mail.TextKey;
 }
 
 /// <summary>1.1 的对话邀请（09-24 照 SORA 给的 1.1 截图重做外观）：任务可接 → 该商人往聊天里发一封信；聊天列表条目右下角挂金色电话角标（顶掉原生的未读数），
@@ -34,11 +35,9 @@ public class PendingInvite
 /// PMC 频段 = 玩家之间的对话，特殊通讯 = 商人 / 系统 / 跳蚤这些非玩家的（SORA 09-24：商人属于特殊通讯），浅色是当前页（1.1 / 0.16 页签都是亮的那个是选中）。</summary>
 public static class InviteState
 {
-    const string MailKeySuffix = " whileAvailableMessageText";
+    internal const string MailKeySuffix = " whileAvailableMessageText";
     static float _at = -1f;
     static List<PendingInvite> _cache = new();
-
-    public static QuestController Controller => ChapterChain.Controller ?? ChapterTab.Quests ?? QuestOps.Resolve();
 
     public static List<PendingInvite> Pending(bool force = false)
     {
@@ -47,7 +46,7 @@ public static class InviteState
         var list = new List<PendingInvite>();
         try
         {
-            var qc = Controller;
+            var qc = QuestOps.Current;
             if (qc?.Quests == null) return _cache = list;
             foreach (var q in qc.Quests)
             {
@@ -59,68 +58,63 @@ public static class InviteState
             }
         }
         catch (Exception e) { Plugin.Log.LogWarning("[invite] Pending invite scan failed: " + e.Message); }
-        if (!string.IsNullOrEmpty(TestTrader) && !list.Any(p => string.Equals(p.Trader, TestTrader, StringComparison.OrdinalIgnoreCase)))
-            list.Add(new PendingInvite { Test = true, Mail = new QuestFlags.Mail { From = TestTrader, Entry = "InLobby", TextKey = "VisitAPI test invite" } });
         return _cache = list;
     }
-
-    /// 控制台 visit_testinvite 设的商人：只在界面上多出一封「访问」邀请（测 1.1 标题栏 / 访问按钮用），不改档案、不碰服务端；点「访问」照常进房间
-    public static string TestTrader;
 
     public static List<PendingInvite> For(string traderId) =>
         string.IsNullOrEmpty(traderId) ? new List<PendingInvite>() : Pending().Where(p => string.Equals(p.Trader, traderId, StringComparison.OrdinalIgnoreCase)).ToList();
 
-    public static bool Has(string traderId) => For(traderId).Count > 0;
+    /// 聊天列表每个条目每 0.5 秒问一次，直接在缓存里找、不先建 List
+    public static bool Has(string traderId) =>
+        !string.IsNullOrEmpty(traderId) && Pending().Any(p => string.Equals(p.Trader, traderId, StringComparison.OrdinalIgnoreCase));
+
+    /// 「现在接不通」的提示（Act 和 InviteHideout.Fail 共用）
+    public static string CannotConnect => Loc.Pick("现在接不通，看日志里 [invite] 的原因", "Cannot connect right now, see [invite] in the log");
+
+    /// 关掉聊天窗再去开对话 / 访问（三个入口共用）
+    public static void CloseChat(ChatScreen screen)
+    {
+        try { screen?.Close(); }
+        catch (Exception e) { Plugin.Log.LogWarning("[invite] Failed to close chat window: " + e.Message); }
+    }
 
     /// 服务端寄邀请信用的文案键就是消息的 templateId（QuestId + " whileAvailableMessageText"）——凭这个认出邀请信，不看是否还在待处理
     public static bool IsInviteMessage(DialogueChatMessage m) =>
         m != null && !string.IsNullOrEmpty(m.templateId) && m.templateId.EndsWith(MailKeySuffix, StringComparison.Ordinal);
 
-    public static string Text(string key, string ch, string en)
-    {
-        var t = key.Localized();
-        return string.IsNullOrEmpty(t) || t == key ? Loc.Pick(ch, en) : t;
-    }
-
     /// 1.1 的文案表里只有 InLobby / InRaid / ViaRadio 三个入口键（09-24 对着 SPT5 文案表核过），笔记本入口在 1.1 截图里也显示「回复」
     public static string ButtonLabel(string entry) => entry switch
     {
-        "ViaRadio" or "ViaNotebook" => Text("Chat/DialogueInvitation/StartMethod/ViaRadio", "回复", "REPLY"),
-        "InRaid" => Text("Chat/DialogueInvitation/StartMethod/InRaid", "访问", "VISIT"),
-        _ => Text("Chat/DialogueInvitation/StartMethod/InLobby", "访问", "VISIT"),
+        "ViaRadio" or "ViaNotebook" => Loc.Text("Chat/DialogueInvitation/StartMethod/ViaRadio", "回复", "REPLY"),
+        "InRaid" => Loc.Text("Chat/DialogueInvitation/StartMethod/InRaid", "访问", "VISIT"),
+        _ => Loc.Text("Chat/DialogueInvitation/StartMethod/InLobby", "访问", "VISIT"),
     };
-
-    public static string TraderName(string traderId)
-    {
-        var t = (traderId + " Nickname").Localized();
-        return string.IsNullOrEmpty(t) || t.EndsWith(" Nickname", StringComparison.Ordinal) ? traderId : t;
-    }
 
     public static void Act(PendingInvite p, ChatScreen screen)
     {
         var entry = p.Mail.Entry ?? "InLobby";
-        var trader = string.IsNullOrEmpty(p.Mail.DialogueTrader) ? p.Trader : p.Mail.DialogueTrader;
+        var trader = p.DialogueTrader;
         if (entry == "InLobby")
         {
             if (!NarrateEntry.CanVisit(trader))
             {
                 Plugin.Log.LogWarning($"[invite] Trader {trader} cannot be visited right now (room pack not installed, or dialogue not unlocked yet)");
-                NotificationManager.DisplayMessageNotification(Text("Chat/DialogueInvitation/StartMethod/InRaid/Description", "你必须访问商人所在之处。", "You must visit the trader on the location."));
+                NotificationManager.DisplayMessageNotification(Loc.Text("Chat/DialogueInvitation/StartMethod/InRaid/Description", "你必须访问商人所在之处。", "You must visit the trader on the location."));
                 return;
             }
-            try { screen?.Close(); }
-            catch (Exception e) { Plugin.Log.LogWarning("[invite] Failed to close chat window: " + e.Message); }
+            CloseChat(screen);
             NarrateEntry.Visit(trader);
             return;
         }
+        // 10-15：对话商人有 .dlg 且剧本里挂着这条任务的藏身处触发线 → 进藏身处、传到那条线前、触发它（InviteHideout）；别的照旧
+        if (InviteHideout.TryStart(p, screen)) return;
         // 09-24 第三步：笔记本 / 电台入口直接开原生对话屏放 1.1 的对话（InviteDialog），语音字幕由 InvitePresenter 顶上
-        if (!InviteDialog.Open(p, screen))
-            NotificationManager.DisplayMessageNotification(Loc.Pick("现在接不通，看日志里 [invite] 的原因", "Cannot connect right now, see [invite] in the log"));
+        if (!InviteDialog.Open(p, screen)) NotificationManager.DisplayMessageNotification(CannotConnect);
     }
 }
 
 /// 09-24 审查 H1：待处理的邀请每 60 秒再请求一次。服务端只在档案里这个商人的对话里已经没有这封信时才补寄（玩家右键删掉了对话），
-/// 信还在就直接返回；以前客户端本会话只请求一次，删掉对话后要重开游戏才可能再收到
+/// 信还在就直接返回；本会话只请求一次的话，删掉对话后要重开游戏才可能再收到
 public static class InviteWatcher
 {
     const float RequestEvery = 60f;
@@ -141,17 +135,13 @@ public static class InviteWatcher
         {
             yield return wait;
             // 09-26 F3：只在大厅（含藏身处、访问）里请求寄信。战局、撤离结算、结算页、转移途中没有大厅控制器，
-            // 以前照样按战局那份任务书每 60 秒 POST 一次，服务端收到就存档，会和撤离结算同时改档案
+            // 这时还按战局那份任务书每 60 秒 POST 一次的话，服务端收到就存档，会和撤离结算同时改档案
             if (QuestOps.Lobby == null) continue;
-            List<PendingInvite> pending;
-            try { pending = InviteState.Pending(force: true); }
-            catch (Exception e) { Plugin.Log.LogWarning("[invite] Scan failed: " + e.Message); continue; }
+            var pending = InviteState.Pending(force: true);
             var now = Time.unscaledTime;
             foreach (var p in pending)
             {
-                if (p.Test) continue;
-                var first = !_requestedAt.TryGetValue(p.QuestId, out var at);
-                if (!first && now - at < RequestEvery) continue;
+                if (_requestedAt.TryGetValue(p.QuestId, out var at) && now - at < RequestEvery) continue;
                 _requestedAt[p.QuestId] = now;
                 VisitHttp.Post("/visitapi/mail/invite", "{\"questId\":\"" + p.QuestId + "\"}", "[invite]");
             }
@@ -159,15 +149,15 @@ public static class InviteWatcher
     }
 }
 
-/// 聊天窗用的程序生成小贴图。09-25 起页签、关闭盒、悬停块、「收取全部」栏都换成 1.1 原图（Chat11 / Client\art\chat11_*.png），这里只剩窗底的斜纹
+/// 聊天窗用的程序生成小贴图：只有窗底的斜纹（页签、关闭盒、悬停块、「收取全部」栏用的是 1.1 原图，见 Chat11 / Client\art\chat11_*.png）
 public static class ChatArt
 {
-    static readonly Dictionary<string, Sprite> _cache = new();
+    static Sprite _hatch;
 
     /// 1.1 聊天窗的底子是一层很淡的深色斜纹（截图上亮度 19～25 周期 4 的条纹），平铺一张 8×8 的小纹理盖在窗底上
     public static Sprite Hatch()
     {
-        if (_cache.TryGetValue("hatch", out var s) && s != null) return s;
+        if (_hatch != null) return _hatch;
         const int n = 8;
         var tex = new Texture2D(n, n, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Point };
         var px = new Color32[n * n];
@@ -175,13 +165,14 @@ public static class ChatArt
             for (var x = 0; x < n; x++)
                 px[y * n + x] = ((x + y) % 4) == 0 ? new Color32(0xFF, 0xFF, 0xFF, 0x12) : new Color32(0, 0, 0, 0);
         tex.SetPixels32(px); tex.Apply();
-        return _cache["hatch"] = Sprite.Create(tex, new Rect(0f, 0f, n, n), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
+        return _hatch = Sprite.Create(tex, new Rect(0f, 0f, n, n), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
     }
 }
 
 /// 列表顶上 1.1 的两个页签（0.16.9 的聊天窗没有「行动人员」抬头，页签条挂在列表容器上方）：「PMC 频段」= 玩家 / 群聊，「特殊通讯」= 商人 / 系统 / 跳蚤。
 /// 09-25 按 1.1MCP 导出的 1.1 结构重做：页签条高 34、底边比列表顶边高 3；两页各 (宽-4)/2（390 宽时 193）、中间隔 4；
 /// 底图平时 / 悬停 / 选中 = Social_Tab_Backgrounds_2 / _1 / _0（四周各比页签多 4），图标 30×30 在 x 4，文字 Bender Normal 16 粗 #C7D3D9 在 x 44，三种状态文字颜色不变。
+/// 聊天窗 Show 只挂这一个后缀，按先后做页签、信头、皮肤
 [HarmonyPatch(typeof(ChatScreen), nameof(ChatScreen.Show))]
 public static class ChatInviteTabs
 {
@@ -194,6 +185,9 @@ public static class ChatInviteTabs
     static TabParts _pmc, _special;
     static BindableList<UpdatableChatDialogue> _filtered;
     static float _next;
+    // _social / toggleGroup_0 是 private，没在公开化范围里；反射只查一次
+    static readonly FieldInfo SocialField = AccessTools.Field(typeof(DialoguesContainer), "_social");
+    static readonly FieldInfo ToggleGroupField = AccessTools.Field(typeof(DialoguesContainer), "toggleGroup_0");
 
     class TabParts { public Image Bg; public Chat11TabHover Hover; }
 
@@ -203,41 +197,40 @@ public static class ChatInviteTabs
 
     public static bool IsSpecialType(EMessageType t) => t != EMessageType.UserMessage && t != EMessageType.GroupChatMessage && t != EMessageType.GlobalChat;
 
+    static SocialNetwork Social(DialoguesContainer dc) => dc != null ? SocialField?.GetValue(dc) as SocialNetwork : null;
+
     static void Postfix(ChatScreen __instance)
     {
         Screen = __instance;
         try { Build(__instance); Rebuild(); }
         catch (Exception e) { Plugin.Log.LogError("[invite] Failed to attach chat tabs (chat is unaffected): " + e); }
+        try { InviteHeader.Ensure(__instance).Select(null, null); }
+        catch (Exception e) { Plugin.Log.LogWarning("[invite] Failed to attach invite header: " + e.Message); }
+        try { ChatSkin.Apply(__instance); }
+        catch (Exception e) { Plugin.Log.LogWarning("[invite] Chat window outline failed: " + e.Message); }
     }
 
     static void Build(ChatScreen screen)
     {
         if (_bar != null) { _bar.SetActive(true); Style(); return; }
-        var fallbackFont = screen.GetComponentsInChildren<TMP_Text>(true).Select(t => t.font).FirstOrDefault(f => f != null);
-        var font = Chat11.Font("Bender Normal", fallbackFont);
+        var font = Chat11.Font("Bender Normal", screen);
         var want = "Chat/PMCDialoguesHeaderLabel".Localized();
         var old = screen.GetComponentsInChildren<TMP_Text>(true).FirstOrDefault(t => t != null && !string.IsNullOrEmpty(want) && string.Equals(t.text?.Trim(), want, StringComparison.OrdinalIgnoreCase));
         if (old != null) old.gameObject.SetActive(false);
         var parent = (RectTransform)screen._dialoguesContainer.transform;
-        _bar = new GameObject("VisitChatTabs", typeof(RectTransform), typeof(LayoutElement));
-        _bar.GetComponent<LayoutElement>().ignoreLayout = true;
-        var rt = (RectTransform)_bar.transform;
-        rt.SetParent(parent, false);
-        rt.anchorMin = new Vector2(0f, 1f); rt.anchorMax = new Vector2(1f, 1f); rt.pivot = new Vector2(0.5f, 0f);
-        rt.anchoredPosition = new Vector2(0f, Lift); rt.sizeDelta = new Vector2(0f, TabHeight);   // 1.1 的 Tabs：pos(0,3) 高 34
+        // 1.1 的 Tabs：pos(0,3) 高 34
+        var rt = Chat11.Rect(parent, "VisitChatTabs", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 0f), new Vector2(0f, Lift), new Vector2(0f, TabHeight), ignoreLayout: true);
+        _bar = rt.gameObject;
         rt.SetAsLastSibling();
-        _pmc = Tab(rt, "PmcTab", 0f, 0.5f, 0f, -Gap / 2f, InviteState.Text("Chat/PMCFrequency", "PMC 频段", "PMC frequency"), "chat11_tab_icon_pmc.png", font, () => Select(false));
-        _special = Tab(rt, "SpecialTab", 0.5f, 1f, Gap / 2f, 0f, InviteState.Text("Chat/SpecialCommunications", "特殊通讯", "Special comms"), "chat11_tab_icon_special.png", font, () => Select(true));
+        _pmc = Tab(rt, "PmcTab", 0f, 0.5f, 0f, -Gap / 2f, Loc.Text("Chat/PMCFrequency", "PMC 频段", "PMC frequency"), "chat11_tab_icon_pmc.png", font, () => Select(false));
+        _special = Tab(rt, "SpecialTab", 0.5f, 1f, Gap / 2f, 0f, Loc.Text("Chat/SpecialCommunications", "特殊通讯", "Special comms"), "chat11_tab_icon_special.png", font, () => Select(true));
         Style();
     }
 
     static TabParts Tab(RectTransform bar, string name, float x0, float x1, float left, float right, string text, string iconFile, TMP_FontAsset font, Action onClick)
     {
-        var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(bar, false);
-        rt.anchorMin = new Vector2(x0, 0f); rt.anchorMax = new Vector2(x1, 1f);
-        rt.offsetMin = new Vector2(left, 0f); rt.offsetMax = new Vector2(right, 0f);
+        var rt = Chat11.Span(bar, name, new Vector2(x0, 0f), new Vector2(x1, 1f), new Vector2(left, 0f), new Vector2(right, 0f), false, typeof(Image), typeof(Button));
+        var go = rt.gameObject;
         var hit = go.GetComponent<Image>();
         hit.color = new Color(0f, 0f, 0f, 0f); hit.raycastTarget = true;   // 只接点击，画面由 Background 负责
         var button = go.GetComponent<Button>();
@@ -245,20 +238,10 @@ public static class ChatInviteTabs
         button.onClick.AddListener(() => onClick());
         var bg = Chat11.Fill(rt, "Background", VisitArt.Load("chat11_tab_normal.png"), Color.white, new Vector2(-4f, -4f), new Vector2(4f, 4f));
 
-        var igo = new GameObject("Icon", typeof(RectTransform), typeof(Image));
-        var irt = (RectTransform)igo.transform;
-        irt.SetParent(rt, false);
-        irt.anchorMin = irt.anchorMax = new Vector2(0f, 0.5f); irt.pivot = new Vector2(0f, 0.5f);
-        irt.anchoredPosition = new Vector2(4f, 0f); irt.sizeDelta = new Vector2(30f, 30f);
-        var icon = igo.GetComponent<Image>();
-        icon.sprite = VisitArt.Load(iconFile); icon.preserveAspect = true; icon.raycastTarget = false; icon.color = Color.white;
+        Chat11.Img(rt, "Icon", VisitArt.Load(iconFile), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(4f, 0f), new Vector2(30f, 30f));
 
-        var lgo = new GameObject("Label", typeof(RectTransform));
-        var lrt = (RectTransform)lgo.transform;
-        lrt.SetParent(rt, false);
-        lrt.anchorMin = new Vector2(0f, 0f); lrt.anchorMax = new Vector2(1f, 1f);
-        lrt.offsetMin = new Vector2(44f, 0f); lrt.offsetMax = new Vector2(-4f, 0f);
-        var label = lgo.AddComponent<TextMeshProUGUI>();
+        var lrt = Chat11.Span(rt, "Label", new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(44f, 0f), new Vector2(-4f, 0f));
+        var label = lrt.gameObject.AddComponent<TextMeshProUGUI>();
         label.text = text; label.font = font; label.fontSize = 16f; label.fontStyle = FontStyles.Bold; label.alignment = TextAlignmentOptions.Left; label.raycastTarget = false;
         label.overflowMode = TextOverflowModes.Ellipsis; label.enableWordWrapping = false; label.color = TabText;
         label.enableAutoSizing = true; label.fontSizeMin = 12f; label.fontSizeMax = 16f;
@@ -290,10 +273,9 @@ public static class ChatInviteTabs
     static void Rebuild()
     {
         var dc = Screen?._dialoguesContainer;
-        if (dc == null) return;
-        var social = (SocialNetwork)AccessTools.Field(typeof(DialoguesContainer), "_social").GetValue(dc);
+        var social = Social(dc);
         if (social == null) return;
-        var toggleGroup = (ToggleGroup)AccessTools.Field(typeof(DialoguesContainer), "toggleGroup_0").GetValue(dc);
+        var toggleGroup = ToggleGroupField?.GetValue(dc) as ToggleGroup;
         _filtered = new BindableList<UpdatableChatDialogue>();
         foreach (var d in social.Dialogues) if (d != null && IsSpecial(d) == Special) _filtered.Add(d);
         var converted = new ConvertedBindableList<UpdatableChatDialogue, DialogueData>(_filtered, dc.DialogueDataFromDialogue, DialogueData.Comparer);
@@ -306,11 +288,16 @@ public static class ChatInviteTabs
         if (_filtered == null || Screen == null || !Screen.gameObject.activeInHierarchy) return;
         if (Time.unscaledTime < _next) return;
         _next = Time.unscaledTime + 1f;
-        var dc = Screen._dialoguesContainer;
-        var social = (SocialNetwork)AccessTools.Field(typeof(DialoguesContainer), "_social").GetValue(dc);
+        var social = Social(Screen._dialoguesContainer);
         if (social == null) return;
         var want = social.Dialogues.Where(d => d != null && IsSpecial(d) == Special).ToList();
-        if (want.Count == _filtered.Count && want.All(_filtered.Contains)) return;
+        if (want.Count == _filtered.Count && want.All(_filtered.Contains))
+        {
+            // 原生把「没有对话」占位绑在全量列表上：别的页签来了信会把它藏掉，这页空着也不显示；按本页的数补回来（10-29）
+            var ph = Screen._dialoguesContainer?._noDialogsPlaceholder;
+            if (ph != null && ph.activeSelf != (_filtered.Count == 0)) ph.SetActive(_filtered.Count == 0);
+            return;
+        }
         try { Rebuild(); }
         catch (Exception e) { Plugin.Log.LogWarning("[invite] Chat list refresh failed: " + e.Message); }
     }
@@ -434,20 +421,9 @@ public class InviteBadge : MonoBehaviour
     {
         // 09-24 实机：条目根上有布局组，新挂的子物体会被它排到头像后面——加 ignoreLayout 才能按锚点落到右下角
         var host = _view._backgroundImage != null ? _view._backgroundImage.transform : transform;
-        var go = new GameObject("VisitInviteBadge", typeof(RectTransform), typeof(LayoutElement), typeof(Image));
-        go.GetComponent<LayoutElement>().ignoreLayout = true;
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(host, false);
-        rt.anchorMin = rt.anchorMax = new Vector2(1f, 0f);
-        rt.pivot = new Vector2(1f, 0f);
         // 09-25 1.1MCP 导出：1.1 的 DialogueInvitation 角标 24×24（贴图 Social_Trader_Chat_Full-Call-Icon (2)_1），右沿离条目右边 5、底边离条目底 4.5
-        rt.sizeDelta = new Vector2(24f, 24f);
-        rt.anchoredPosition = new Vector2(-5f, 4.5f);
-        rt.SetAsLastSibling();
-        _img = go.GetComponent<Image>();
-        _img.sprite = VisitArt.Load("chat11_list_call.png");
-        _img.preserveAspect = true;
-        _img.raycastTarget = false;
+        _img = Chat11.Img(host, "VisitInviteBadge", VisitArt.Load("chat11_list_call.png"), new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-5f, 4.5f), new Vector2(24f, 24f), ignoreLayout: true);
+        _img.rectTransform.SetAsLastSibling();
     }
 }
 
@@ -457,17 +433,7 @@ public static class ChatInviteHeader
 {
     static readonly FieldInfo Containers = AccessTools.Field(typeof(ChatScreen), "_instantiatedContainers");
 
-    [HarmonyPatch(typeof(ChatScreen), nameof(ChatScreen.Show))]
-    public static class OnShow
-    {
-        static void Postfix(ChatScreen __instance)
-        {
-            try { InviteHeader.Ensure(__instance).Select(null, null); }
-            catch (Exception e) { Plugin.Log.LogWarning("[invite] Failed to attach invite header: " + e.Message); }
-            try { ChatSkin.Apply(__instance); }
-            catch (Exception e) { Plugin.Log.LogWarning("[invite] Chat window outline failed: " + e.Message); }
-        }
-    }
+    // 聊天窗 Show 时挂信头 / 套皮肤在 ChatInviteTabs 的后缀里
 
     [HarmonyPatch(typeof(ChatScreen), nameof(ChatScreen.DialogueSelected))]
     public static class OnSelected
@@ -497,7 +463,7 @@ public static class ChatInviteHeader
 }
 
 /// 09-24：聊天窗往 1.1 靠——12:30 按 SORA 给的 1.1 / SPT 同分辨率对照图重量：0.16.9 自带的窗框灰线（#585D60）1.1 也有、位置一样，
-/// 之前我们另加的四条边线是多余的（叠出 2 像素粗边）——撤掉；1.1 多的是列表和消息区之间那条通高的分割线，补上；整窗只是列表加宽 90（右栏尺寸不变）
+/// 不用另加边线（会叠出 2 像素粗边）；1.1 多的是列表和消息区之间那条通高的分割线，补上；整窗只是列表加宽 90（右栏尺寸不变）
 public static class ChatSkin
 {
     static readonly HashSet<int> _done = new();
@@ -517,7 +483,7 @@ public static class ChatSkin
     }
 
     // 12:30 对照图（2560×1440，1 单位 = 1.333 像素）量的 1.1 聊天窗：整窗 1522 像素 = 1141 单位，列表 520 像素 = 390，分割线 1 像素，右栏 998 像素 = 750，高 602 像素 = 450
-    // ——就是 0.16.9 原生（1052 / 300 / 750 / 450）只把列表加宽 90，右栏一点没动。之前那套 1371×542 是按一张缩放过的裁图算错的
+    // ——就是 0.16.9 原生（1052 / 300 / 750 / 450）只把列表加宽 90，右栏一点没动
     // 12:55 日志核实：聊天窗根是 HorizontalLayoutGroup（spacing 2）+ ContentSizeFitter，列表和右栏各带 LayoutElement——两栏之间那 2 单位露的是根的 #222222 底，不是右栏的边；
     // 1.1 的 1141.5 = 390 + 1 + 750：把 spacing 改成 1，分割线（1 单位）正好填满这道缝，整窗 1141
     public const float Gap = 1f;
@@ -526,12 +492,15 @@ public static class ChatSkin
     static RectTransform RightPanel(ChatScreen screen) =>
         screen._captionPanel != null ? screen._captionPanel.transform.parent as RectTransform : null;
 
+    static RectTransform ListPanel(ChatScreen screen) =>
+        screen._dialoguesContainer != null ? screen._dialoguesContainer.transform as RectTransform : null;
+
     /// 聊天窗是个 StretchWindow（根下的 StretchButtons 能拖着改大小）：尺寸由 LayoutElement 的 preferredWidth/Height 经布局系统驱动，
     /// 直接写 sizeDelta 下一次布局重排就被冲回去（12:20 截图窗体还是 1052 宽、日志里却记着改成了 1371，就是这么回事）——所以改 preferred 值，再强制重排一次
     public static bool Resize(ChatScreen screen, bool first)
     {
         var root = screen.RectTransform;
-        var list = screen._dialoguesContainer != null ? screen._dialoguesContainer.transform as RectTransform : null;
+        var list = ListPanel(screen);
         var right = RightPanel(screen);
         if (root == null || list == null || right == null) { if (first) Plugin.Log.LogWarning("[invite] Chat window resize: missing panel references, skipping"); return false; }
         var old = root.rect.size;
@@ -547,14 +516,10 @@ public static class ChatSkin
             if (lle.preferredWidth < TargetList) lle.preferredWidth = TargetList;
             if (lle.minWidth > 0f && lle.minWidth < TargetList) lle.minWidth = TargetList;
         }
+        // 12:55 的日志已经核实聊天窗根就是 HorizontalLayoutGroup，右栏由它排
         var group = root.GetComponent<HorizontalOrVerticalLayoutGroup>();
         if (group != null) group.spacing = Gap;   // 原生 2；1.1 两栏之间只有 1 像素灰线
         if (Mathf.Approximately(list.anchorMin.x, list.anchorMax.x)) list.sizeDelta = new Vector2(TargetList, list.sizeDelta.y);
-        if (group == null)
-        {
-            if (Mathf.Approximately(right.anchorMin.x, right.anchorMax.x)) right.anchoredPosition = new Vector2(TargetList + Gap + right.pivot.x * right.rect.width, right.anchoredPosition.y);
-            else right.offsetMin = new Vector2(TargetList + Gap, right.offsetMin.y);
-        }
         LayoutRebuilder.ForceRebuildLayoutImmediate(root);
         return root.rect.width >= TargetW - 1f && list.rect.width >= TargetList - 1f;
     }
@@ -564,7 +529,7 @@ public static class ChatSkin
     {
         if (screen == null || !_done.Contains(screen.GetInstanceID())) return;
         var root = screen.RectTransform;
-        var list = screen._dialoguesContainer != null ? screen._dialoguesContainer.transform as RectTransform : null;
+        var list = ListPanel(screen);
         if (root == null || list == null) return;
         var rootBack = Mathf.Abs(root.rect.width - 1052f) < 1f;
         var listBack = Mathf.Abs(list.rect.width - 300f) < 1f;
@@ -575,35 +540,23 @@ public static class ChatSkin
     /// 1.1 列表和消息区之间那条通高的 1 像素灰线（#585D60，对照图 x=1110 从窗框顶到底）：挂在列表容器右沿外侧，正好填满布局组留的那 Gap 单位缝
     static void SplitLine(ChatScreen screen)
     {
-        var list = screen._dialoguesContainer != null ? screen._dialoguesContainer.transform as RectTransform : null;
+        var list = ListPanel(screen);
         if (list == null) return;
-        var go = new GameObject("VisitSplitLine", typeof(RectTransform), typeof(LayoutElement), typeof(Image));
-        go.GetComponent<LayoutElement>().ignoreLayout = true;
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(list, false);
-        rt.anchorMin = new Vector2(1f, 0f); rt.anchorMax = Vector2.one;
-        rt.offsetMin = Vector2.zero; rt.offsetMax = new Vector2(Gap, 0f);
-        var img = go.GetComponent<Image>();
-        img.color = new Color32(0x58, 0x5D, 0x60, 0xFF); img.raycastTarget = false;
+        var rt = Chat11.Span(list, "VisitSplitLine", new Vector2(1f, 0f), Vector2.one, Vector2.zero, new Vector2(Gap, 0f), true, typeof(Image));
+        var img = rt.GetComponent<Image>();
+        img.color = Chat11.Border; img.raycastTarget = false;
         rt.SetAsLastSibling();
     }
 
     /// 1.1 聊天窗的底子是很淡的深色斜纹；平铺一层盖在窗底上、压在其它内容下面（放在第一个带 Image 的子物体之后，别被窗底图盖住）
     static void HatchBackground(RectTransform root)
     {
-        var go = new GameObject("VisitChatHatch", typeof(RectTransform), typeof(LayoutElement), typeof(Image));
-        go.GetComponent<LayoutElement>().ignoreLayout = true;
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(root, false);
-        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one; rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
-        var img = go.GetComponent<Image>();
-        img.sprite = ChatArt.Hatch(); img.type = Image.Type.Tiled; img.color = Color.white; img.raycastTarget = false;
+        var rt = Chat11.Fill(root, "VisitChatHatch", ChatArt.Hatch(), Color.white, Vector2.zero, Vector2.zero, Image.Type.Tiled).rectTransform;
         var index = 0;
         for (var i = 0; i < root.childCount; i++)
         {
             var c = root.GetChild(i);
-            if (c == rt) continue;
-            if (index == 0 && c.GetComponent<Image>() != null) index = i + 1;
+            if (c != rt && c.GetComponent<Image>() != null) { index = i + 1; break; }
         }
         rt.SetSiblingIndex(Mathf.Clamp(index, 0, root.childCount - 1));
     }
@@ -627,23 +580,11 @@ public static class ChatSkin
         }
         catch (Exception e) { Plugin.Log.LogWarning("[invite] Failed to move friends button: " + e.Message); }
     }
-
-    static void Line(RectTransform root, string name, Vector2 aMin, Vector2 aMax, Vector2 offMin, Vector2 offMax, Color color)
-    {
-        var go = new GameObject(name, typeof(RectTransform), typeof(LayoutElement), typeof(Image));
-        go.GetComponent<LayoutElement>().ignoreLayout = true;
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(root, false);
-        rt.anchorMin = aMin; rt.anchorMax = aMax; rt.offsetMin = offMin; rt.offsetMax = offMax;
-        var img = go.GetComponent<Image>();
-        img.color = color; img.raycastTarget = false;
-        rt.SetAsLastSibling();
-    }
 }
 
 public class InviteHeader : MonoBehaviour
 {
-    // 09-25 1.1MCP 导出的 1.1 CaptionPanel：高 53.61（之前照截图量的 53）
+    // 09-25 1.1MCP 导出的 1.1 CaptionPanel：高 53.61
     const float Height = 53.61f;
     ChatScreen _screen;
     UpdatableChatDialogue _dialogue;
@@ -686,11 +627,12 @@ public class InviteHeader : MonoBehaviour
         try { ApplySpecialLayout(); }
         catch (Exception e) { Plugin.WarnOnce("invite/input-area", "[invite] Input area show/hide failed: " + e.Message); }
         var live = _dialogue != null && _screen != null && _screen.gameObject.activeInHierarchy;
-        var list = live ? InviteState.For(_dialogue._id) : new List<PendingInvite>();
+        if (!live) { Hide(); return; }
+        var list = InviteState.For(_dialogue._id);
         if (list.Count == 0)
         {
             // 09-25 SORA 给的 1.1 截图：特殊通讯里没有邀请时，标题行也是 1.1 的样子（34.5 单位高、纯色底、↰ + 商人名 + 红 ×），不是原生 25 单位的那条
-            if (!live || !ChatInviteTabs.IsSpecial(_dialogue)) { Hide(); return; }
+            if (!ChatInviteTabs.IsSpecial(_dialogue)) { Hide(); return; }
             if (_panel == null && !Build()) return;
             SetMode(plain: true);
             _current = null;
@@ -703,9 +645,8 @@ public class InviteHeader : MonoBehaviour
         if (_panel == null && !Build()) return;
         SetMode(plain: false);
         _current = list[0];
-        _name.text = InviteState.TraderName(_current.Trader);
-        var text = _current.TextKey.Localized();
-        if (string.IsNullOrEmpty(text) || text == _current.TextKey) text = Loc.Pick("有话要说。", "Wants to talk.");
+        _name.text = Loc.TraderName(_current.Trader);
+        var text = Loc.Text(_current.TextKey, "有话要说。", "Wants to talk.");
         _text.text = list.Count > 1 ? text + $"  (+{list.Count - 1})" : text;
         var label = InviteState.ButtonLabel(_current.Mail.Entry);
         if (label != _replyText)
@@ -721,13 +662,13 @@ public class InviteHeader : MonoBehaviour
 
     // 09-25 按 SORA 的 1.1 截图（1.png / 3.png，2560×1440）量的「没有邀请时」标题行：从窗框顶线到自己底线 46 像素 = 34.5 单位，
     // 底色纯 #191B1B、底线 2 像素 #585D60；↰ 图形左沿离右栏左边 9.75 单位、顶离行顶 12；商人名和 × 的位置、颜色和邀请横幅相同
-    const float PlainHeight = 33.61f;   // 09-25 1.1MCP 导出：没有邀请时 CaptionPanel 高 33.61（= 上 8 + 行 17.61 + 下 8；之前照截图量的 34.5）
+    const float PlainHeight = 33.61f;   // 09-25 1.1MCP 导出：没有邀请时 CaptionPanel 高 33.61（= 上 8 + 行 17.61 + 下 8）
     static readonly Color PlainBg = new Color32(0x19, 0x1B, 0x1B, 0xFF);
     bool _plain, _modeSet;
     float _height = Height;
-    Image _bg, _art;
+    Image _art;
     GameObject _reply;
-    RectTransform _arrowRt, _nameRt;
+    RectTransform _nameRt;
 
     /// 有邀请 = 1.1 的 CaptionPanel：底图 Social_Trader_Chat_Hader-Background + 名字 / 信文两行 + 回复按钮；
     /// 没邀请 = 同一个 CaptionPanel 关掉底图、信文行和按钮，高度收到 33.61——图标和名字就是第一行原来的位置（离顶 8、行高 17.61，正好上下居中）
@@ -740,10 +681,8 @@ public class InviteHeader : MonoBehaviour
         _art.gameObject.SetActive(!plain);
         _text.gameObject.SetActive(!plain);
         _reply.SetActive(!plain);
-        // 1.1：CaptionBlock 内边距 左 8 上 8，第一行（图标 16 + 间距 5 + 名字）17.61 高，行距 3，第二行（信文）17 高；两种状态第一行位置相同
-        _arrowRt.anchoredPosition = new Vector2(8f, -8f - 17.61f / 2f);
-        _nameRt.anchorMin = new Vector2(0f, 1f); _nameRt.anchorMax = new Vector2(1f, 1f);
-        _nameRt.offsetMin = new Vector2(29f, -8f - 17.61f); _nameRt.offsetMax = new Vector2(plain ? -60f : -230f, -8f);
+        // 1.1：CaptionBlock 内边距 左 8 上 8，第一行（图标 16 + 间距 5 + 名字）17.61 高，行距 3，第二行（信文）17 高；两种状态第一行位置相同（Build 里摆好），只换名字的右沿
+        _nameRt.offsetMax = new Vector2(plain ? -60f : -230f, -8f);
         Unshift();   // 高度变了，消息列表顶端按新高度重让（下一次 Shift）
     }
 
@@ -755,7 +694,7 @@ public class InviteHeader : MonoBehaviour
             if (!string.IsNullOrEmpty(n)) return n;
         }
         catch { }
-        return InviteState.TraderName(d._id);
+        return Loc.TraderName(d._id);
     }
 
     Vector2? _nativeMsgMin;   // 改消息区底边之前原生的 offsetMin；回到玩家对话时还原
@@ -790,8 +729,8 @@ public class InviteHeader : MonoBehaviour
         if (!_bar.activeSelf) _bar.SetActive(true);
     }
 
-    /// 09-25 SORA 实机：新消息从底下冒出来时被「收取全部」栏挡住。以前按「比原生多伸长多少」增量改消息区，原生中途重排消息区或发送栏高度一变，
-    /// 记下的增量就和实际对不上。现在每次刷新都按世界坐标直接对齐底边（顶边不动）：特殊通讯有附件 → 底边 = 栏的顶线；特殊通讯没附件 → 底边 = 发送栏底边（一黑到底）；
+    /// 09-25 SORA 实机：新消息从底下冒出来时被「收取全部」栏挡住。不按「比原生多伸长多少」记增量改消息区：原生中途重排消息区或发送栏高度一变，
+    /// 记下的增量就和实际对不上。每次刷新都按世界坐标直接对齐底边（顶边不动）：特殊通讯有附件 → 底边 = 栏的顶线；特殊通讯没附件 → 底边 = 发送栏底边（一黑到底）；
     /// 其他对话 → 还原成改之前原生的底边
     void FitMessagesBottom(RectTransform mp, RectTransform inputRt, bool special, bool rewards)
     {
@@ -821,12 +760,9 @@ public class InviteHeader : MonoBehaviour
     {
         var root = Root;
         if (root == null) return false;
-        var fallbackFont = _screen.GetComponentsInChildren<TMP_Text>(true).Select(t => t.font).FirstOrDefault(f => f != null);
-        _bar = new GameObject("VisitReceiveAllBar", typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
-        _bar.GetComponent<LayoutElement>().ignoreLayout = true;
-        var rt = (RectTransform)_bar.transform;
-        rt.SetParent(root, false);
-        rt.anchorMin = rt.anchorMax = Vector2.zero; rt.pivot = Vector2.zero;
+        // 位置 / 尺寸由 PlaceBar 按原生发送栏现算，这里只定锚点 + 轴心（左下）
+        var rt = Chat11.Rect(root, "VisitReceiveAllBar", Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, true, typeof(Image), typeof(Button));
+        _bar = rt.gameObject;
         var bg = _bar.GetComponent<Image>();
         bg.sprite = VisitArt.Load("chat11_receive_0.png"); bg.type = Image.Type.Simple; bg.color = Color.white; bg.raycastTarget = true;
         var button = _bar.GetComponent<Button>();
@@ -837,20 +773,10 @@ public class InviteHeader : MonoBehaviour
             catch (Exception e) { Plugin.Log.LogWarning("[invite] receive-all bar: native receive-all failed: " + e.Message); }
         });
         // 回形针和文字的位置沿用照 1.1 截图量的（回形针左沿在栏中线左边 69.5、文字左沿在中线左边 37）；图标盒 22（1.1 是 22.01）
-        var icon = new GameObject("Icon", typeof(RectTransform), typeof(Image));
-        var irt = (RectTransform)icon.transform;
-        irt.SetParent(rt, false);
-        irt.anchorMin = irt.anchorMax = new Vector2(0.5f, 0.5f); irt.pivot = new Vector2(0f, 0.5f);
-        irt.anchoredPosition = new Vector2(-69.5f, 0f); irt.sizeDelta = new Vector2(22f, 22f);
-        var iimg = icon.GetComponent<Image>();
-        iimg.sprite = VisitArt.Load("chat11_attach.png"); iimg.preserveAspect = true; iimg.raycastTarget = false; iimg.color = Color.white;
-        var lgo = new GameObject("Label", typeof(RectTransform));
-        var lrt = (RectTransform)lgo.transform;
-        lrt.SetParent(rt, false);
-        lrt.anchorMin = new Vector2(0.5f, 0f); lrt.anchorMax = new Vector2(0.5f, 1f); lrt.pivot = new Vector2(0f, 0.5f);
-        lrt.anchoredPosition = new Vector2(-37f, 0f); lrt.sizeDelta = new Vector2(300f, 0f);
-        _barLabel = lgo.AddComponent<TextMeshProUGUI>();
-        _barLabel.font = Chat11.Font("Bender Shadowed", fallbackFont); _barLabel.fontSize = 20f; _barLabel.color = Chat11.ButtonText;
+        var iimg = Chat11.Img(rt, "Icon", VisitArt.Load("chat11_attach.png"), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 0.5f), new Vector2(-69.5f, 0f), new Vector2(22f, 22f));
+        var lrt = Chat11.Rect(rt, "Label", new Vector2(0.5f, 0f), new Vector2(0.5f, 1f), new Vector2(0f, 0.5f), new Vector2(-37f, 0f), new Vector2(300f, 0f));
+        _barLabel = lrt.gameObject.AddComponent<TextMeshProUGUI>();
+        _barLabel.font = Chat11.Font("Bender Shadowed", _screen); _barLabel.fontSize = 20f; _barLabel.color = Chat11.ButtonText;
         _barLabel.alignment = TextAlignmentOptions.MidlineLeft; _barLabel.enableWordWrapping = false; _barLabel.raycastTarget = false;
         _barLabel.text = ReceiveAllText(input);
         Chat11.Fill(rt, "Border", Chat11.BorderSprite, Chat11.Border, Vector2.zero, Vector2.zero, Image.Type.Sliced);
@@ -860,11 +786,15 @@ public class InviteHeader : MonoBehaviour
         return true;
     }
 
+    TMP_Text _receiveSrc;   // 原生「全部领取」按钮上的文字控件：找一次记住，每半秒只读它的 text
+
     /// 文字用原生「全部领取」按钮上的文案再查一次本地化表：0.16.9 的按钮直接写着英文 "RECEIVE ALL"（09-25 SORA 截图），
-    /// 而这串字本身就是文案键——游戏的中文表里 "RECEIVE ALL" = 「收取全部」，和 1.1 一样
-    static string ReceiveAllText(ChatMessageSendBlock input)
+    /// 而这串字本身就是文案键——游戏的中文表里 "RECEIVE ALL" = 「收取全部」，和 1.1 一样。每次刷新都重算，中途切语言跟得上（10-17 定）
+    string ReceiveAllText(ChatMessageSendBlock input)
     {
-        var t = input._receiveAllButton != null ? input._receiveAllButton.GetComponentsInChildren<TMP_Text>(true).Select(x => x.text).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) : null;
+        if (_receiveSrc == null && input._receiveAllButton != null)
+            _receiveSrc = input._receiveAllButton.GetComponentsInChildren<TMP_Text>(true).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.text));
+        var t = _receiveSrc != null ? _receiveSrc.text : null;
         var key = string.IsNullOrWhiteSpace(t) ? "RECEIVE ALL" : t.Trim();
         var s = key.Localized();
         return string.IsNullOrWhiteSpace(s) ? Loc.Pick("收取全部", "Receive all") : s;
@@ -894,15 +824,12 @@ public class InviteHeader : MonoBehaviour
     {
         var root = Root;
         if (root == null) return false;
-        var fallbackFont = _screen.GetComponentsInChildren<TMP_Text>(true).Select(t => t.font).FirstOrDefault(f => f != null);
-        var font = Chat11.Font("Bender Normal", fallbackFont);
-        _panel = new GameObject("VisitInviteHeader", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
-        var rt = (RectTransform)_panel.transform;
-        rt.SetParent(root, false);
-        rt.anchorMin = rt.anchorMax = new Vector2(0f, 0f); rt.pivot = new Vector2(0f, 0f);
-        _panel.GetComponent<LayoutElement>().ignoreLayout = true;   // 聊天窗根上若有布局组，别让它排我
+        var font = Chat11.Font("Bender Normal", _screen);
+        // 位置 / 尺寸由 Place 按标题行现算，这里只定锚点 + 轴心（左下）；聊天窗根上若有布局组，别让它排我（ignoreLayout）
+        var rt = Chat11.Rect(root, "VisitInviteHeader", new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0f, 0f), Vector2.zero, Vector2.zero, true, typeof(Image));
+        _panel = rt.gameObject;
         // 1.1 CaptionPanel 底色 #191B1B；不透明，盖住下面 0.16 原生标题行的字和按钮，关窗走自己的 ×
-        var bg = _bg = _panel.GetComponent<Image>();
+        var bg = _panel.GetComponent<Image>();
         bg.sprite = null; bg.type = Image.Type.Simple; bg.color = PlainBg; bg.raycastTarget = true;
         // 12:55 SORA：按住横幅拖不动窗口——原生是标题行上挂的 UIDragComponent 在拖，横幅把标题行盖住后事件到不了它；横幅自己也挂一个，拖的目标同样是聊天窗根
         try { _panel.AddComponent<UIDragComponent>().Init(root, putOnTop: true); }
@@ -911,13 +838,7 @@ public class InviteHeader : MonoBehaviour
         _art = Chat11.Fill(rt, "Background", VisitArt.Load("chat11_header_bg.png"), Color.white, new Vector2(-5f, -3f), new Vector2(5f, 5f));
 
         // 1.1：标题图标 Social_Header_Icons_1 16×16，左沿离左边 8
-        var arrow = new GameObject("Icon", typeof(RectTransform), typeof(Image));
-        var art = _arrowRt = (RectTransform)arrow.transform;
-        art.SetParent(rt, false);
-        art.anchorMin = art.anchorMax = new Vector2(0f, 1f); art.pivot = new Vector2(0f, 0.5f);
-        art.anchoredPosition = new Vector2(8f, -8f - 17.61f / 2f); art.sizeDelta = new Vector2(16f, 16f);
-        var aimg = arrow.GetComponent<Image>();
-        aimg.sprite = VisitArt.Load("chat11_header_icon.png"); aimg.preserveAspect = true; aimg.raycastTarget = false;
+        Chat11.Img(rt, "Icon", VisitArt.Load("chat11_header_icon.png"), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 0.5f), new Vector2(8f, -8f - 17.61f / 2f), new Vector2(16f, 16f));
 
         // 1.1：名字 Bender Normal 16 粗 #B6B4A5，信文 14 #C3CDD3；两行都从左边 29（8 + 图标 16 + 间距 5）开始，第二行离顶 28.61、高 17
         _name = Label(rt, "Name", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(29f, -8f - 17.61f), new Vector2(-230f, -8f), font, 16f, new Color32(0xB6, 0xB4, 0xA5, 0xFF), FontStyles.Bold);
@@ -939,27 +860,17 @@ public class InviteHeader : MonoBehaviour
         else _reply = PlainReply(rt, font);
 
         // 1.1：关闭 = close_button 27×17（右沿离右边 15、竖直居中）+ 叉 close_window_x 9×11
-        var close = new GameObject("Close", typeof(RectTransform), typeof(Image), typeof(Button));
-        var crt = (RectTransform)close.transform;
-        crt.SetParent(rt, false);
-        crt.anchorMin = crt.anchorMax = new Vector2(1f, 0.5f); crt.pivot = new Vector2(1f, 0.5f);
-        crt.anchoredPosition = new Vector2(-15f, 0f); crt.sizeDelta = new Vector2(27f, 17f);
-        var cimg = close.GetComponent<Image>();
+        var crt = Chat11.Rect(rt, "Close", new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-15f, 0f), new Vector2(27f, 17f), false, typeof(Image), typeof(Button));
+        var cimg = crt.GetComponent<Image>();
         cimg.sprite = VisitArt.Load("chat11_close.png"); cimg.type = Image.Type.Simple; cimg.color = Color.white;
-        var cbtn = close.GetComponent<Button>();
+        var cbtn = crt.GetComponent<Button>();
         cbtn.transition = Selectable.Transition.None;
         cbtn.onClick.AddListener(() =>
         {
             try { if (_screen._closeButton != null) _screen._closeButton.onClick.Invoke(); else _screen.Close(); }
             catch (Exception e) { Plugin.Log.LogWarning("[invite] Failed to close chat window: " + e.Message); }
         });
-        var x = new GameObject("X", typeof(RectTransform), typeof(Image));
-        var xrt = (RectTransform)x.transform;
-        xrt.SetParent(crt, false);
-        xrt.anchorMin = xrt.anchorMax = new Vector2(0.5f, 0.5f); xrt.pivot = new Vector2(0.5f, 0.5f);
-        xrt.anchoredPosition = Vector2.zero; xrt.sizeDelta = new Vector2(9f, 11f);
-        var ximg = x.GetComponent<Image>();
-        ximg.sprite = VisitArt.Load("chat11_close_x.png"); ximg.raycastTarget = false;
+        Chat11.Img(crt, "X", VisitArt.Load("chat11_close_x.png"), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(9f, 11f), preserveAspect: false);
 
         Chat11.Frame(rt);   // 1.1 的 Border 在 CaptionPanel 最后一个子物体，压在最上面
         return true;
@@ -983,8 +894,8 @@ public class InviteHeader : MonoBehaviour
         var capH = Mathf.Max(0f, tr.y - bl.y);
         var extra = Mathf.Max(0f, _height - capH);
         var r = root.rect;
-        // 横向撑满右栏（11:38 那版按消息区分隔线缩窄是误会，SORA 11:45 说的是高度：横幅底边要和列表里第一条商人条目下面的分隔线齐）。
-        // 09-25 起灰边由自己的 Border（1.1 的 border_generic，比本体右上各多 1）画，不再给窗框线让位
+        // 横向撑满右栏（SORA 11:45 说的是高度：横幅底边要和列表里第一条商人条目下面的分隔线齐）。
+        // 09-25 起灰边由自己的 Border（1.1 的 border_generic，比本体右上各多 1）画，不给窗框线让位
         rt.anchoredPosition = new Vector2(bl.x - r.xMin, bl.y - extra - r.yMin);
         rt.sizeDelta = new Vector2(tr.x - bl.x, capH + extra);
         rt.SetAsLastSibling();
@@ -1018,20 +929,11 @@ public class InviteHeader : MonoBehaviour
     /// 克隆原生按钮失败时的兜底：一个没有动画的普通按钮（电话图标 + 文字），位置和 1.1 的回复按钮一样
     GameObject PlainReply(RectTransform rt, TMP_FontAsset font)
     {
-        var btn = new GameObject("Reply", typeof(RectTransform), typeof(Image), typeof(Button));
-        var brt = (RectTransform)btn.transform;
-        brt.SetParent(rt, false);
-        brt.anchorMin = brt.anchorMax = new Vector2(1f, 0.5f); brt.pivot = new Vector2(1f, 0.5f);
-        brt.anchoredPosition = new Vector2(-55f, 0f); brt.sizeDelta = new Vector2(110f, 31.4f);
+        var brt = Chat11.Rect(rt, "Reply", new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-55f, 0f), new Vector2(110f, 31.4f), false, typeof(Image), typeof(Button));
+        var btn = brt.gameObject;
         btn.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.001f);
         btn.GetComponent<Button>().onClick.AddListener(() => { if (_current != null) InviteState.Act(_current, _screen); });
-        var icon = new GameObject("Icon", typeof(RectTransform), typeof(Image));
-        var irt = (RectTransform)icon.transform;
-        irt.SetParent(brt, false);
-        irt.anchorMin = irt.anchorMax = new Vector2(0f, 0.5f); irt.pivot = new Vector2(0f, 0.5f);
-        irt.anchoredPosition = new Vector2(16f, 0f); irt.sizeDelta = new Vector2(23.4f, 23.4f);
-        var iimg = icon.GetComponent<Image>();
-        iimg.sprite = VisitArt.Load("chat11_call_idle.png"); iimg.preserveAspect = true; iimg.raycastTarget = false;
+        Chat11.Img(brt, "Icon", VisitArt.Load("chat11_call_idle.png"), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(16f, 0f), new Vector2(23.4f, 23.4f));
         _btnLabel = Label(brt, "Label", Vector2.zero, Vector2.one, new Vector2(20f, 0f), new Vector2(-20f, 0f), Chat11.Font("Bender Shadowed", font), 14f, Chat11.ButtonText, FontStyles.Normal);
         _btnLabel.alignment = TextAlignmentOptions.Center;
         _btnLabel.text = InviteState.ButtonLabel("InLobby");
@@ -1040,18 +942,15 @@ public class InviteHeader : MonoBehaviour
 
     static TMP_Text Label(RectTransform parent, string name, Vector2 aMin, Vector2 aMax, Vector2 offMin, Vector2 offMax, TMP_FontAsset font, float size, Color color, FontStyles style)
     {
-        var go = new GameObject(name, typeof(RectTransform));
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(parent, false);
-        rt.anchorMin = aMin; rt.anchorMax = aMax; rt.offsetMin = offMin; rt.offsetMax = offMax;
-        var t = go.AddComponent<TextMeshProUGUI>();
+        var t = Chat11.Span(parent, name, aMin, aMax, offMin, offMax).gameObject.AddComponent<TextMeshProUGUI>();
         t.font = font; t.fontSize = size; t.color = color; t.fontStyle = style; t.raycastTarget = false;
         t.alignment = TextAlignmentOptions.Left; t.enableWordWrapping = false; t.overflowMode = TextOverflowModes.Ellipsis;   // 1.1 的 Caption 都是 Left（左对齐、竖直居中）
         return t;
     }
 }
 
-/// 底栏「消息」按钮旁的金色电话（1.1：有待处理邀请时，未读数绿框左边亮一个金色电话 + 气泡图标；SORA 09-24 圈出来要的）
+/// 底栏「消息」按钮旁的金色电话（1.1：有待处理邀请时，未读数绿框左边亮一个金色电话 + 气泡图标；SORA 09-24 圈出来要的）。
+/// 底栏 Awake 只挂这一个后缀，按先后挂这里的电话和顶栏名字旁的金色电话（HeaderBadge）
 [HarmonyPatch(typeof(MenuTaskBar), "Awake")]
 public static class ChatInviteTaskbar
 {
@@ -1059,6 +958,8 @@ public static class ChatInviteTaskbar
     {
         try { if (__instance.GetComponent<InviteTaskbarBadge>() == null) __instance.gameObject.AddComponent<InviteTaskbarBadge>(); }
         catch (Exception e) { Plugin.Log.LogWarning("[invite] Failed to attach bottom bar phone badge: " + e.Message); }
+        try { if (__instance.GetComponent<HeaderBadge>() == null) __instance.gameObject.AddComponent<HeaderBadge>(); }
+        catch (Exception e) { Plugin.Log.LogError("[badge] Failed to attach top bar badge (the task bar itself is unaffected): " + e); }
     }
 }
 
@@ -1067,7 +968,6 @@ public class InviteTaskbarBadge : MonoBehaviour
     MenuTaskBar _bar;
     Image _img;
     float _next;
-    bool _failed;
 
     void Awake() { _bar = GetComponent<MenuTaskBar>(); }
 
@@ -1076,7 +976,7 @@ public class InviteTaskbarBadge : MonoBehaviour
         if (Time.unscaledTime < _next) return;
         _next = Time.unscaledTime + 0.5f;
         try { Refresh(); }
-        catch (Exception e) { if (!_failed) { _failed = true; Plugin.Log.LogWarning("[invite] Bottom bar phone badge refresh failed: " + e.Message); } }
+        catch (Exception e) { Plugin.WarnOnce("invite/taskbar-badge", "[invite] Bottom bar phone badge refresh failed: " + e.Message); }
     }
 
     void Refresh()
@@ -1111,14 +1011,19 @@ public class InviteTaskbarBadge : MonoBehaviour
         rt.anchoredPosition = target - new Vector2(_host.rect.xMin, _host.rect.yMin);   // 锚在父物体左下角，直接用父物体局部坐标
     }
 
+    Image[] _buttonImages;   // 按钮框下面算可见矩形用的那些图：找一次记住，有一张没了就重找；显隐按当时的状态算
+
     Rect VisualRect()
     {
+        if (_buttonImages == null || _buttonImages.Any(im => im == null))
+            _buttonImages = _host.GetComponentsInChildren<Image>(true)
+                .Where(im => im != null && im != _img && !im.transform.IsChildOf(_img.transform) && (_badge == null || !im.transform.IsChildOf(_badge)))   // 自己和绿框不算按钮
+                .ToArray();
         var min = new Vector2(float.MaxValue, float.MaxValue); var max = new Vector2(float.MinValue, float.MinValue); var any = false;
         var corners = new Vector3[4];
-        foreach (var im in _host.GetComponentsInChildren<Image>(false))
+        foreach (var im in _buttonImages)
         {
-            if (im == null || im == _img || im.transform.IsChildOf(_img.transform)) continue;
-            if (_badge != null && im.transform.IsChildOf(_badge)) continue;   // 绿框不算按钮
+            if (!im.gameObject.activeInHierarchy) continue;
             ((RectTransform)im.transform).GetWorldCorners(corners);
             for (var i = 0; i < 4; i++) { var p = (Vector2)_host.InverseTransformPoint(corners[i]); min = Vector2.Min(min, p); max = Vector2.Max(max, p); any = true; }
         }
@@ -1136,23 +1041,16 @@ public class InviteTaskbarBadge : MonoBehaviour
         }
         catch { _host = null; }
         if (_host == null) return false;
-        var go = new GameObject("VisitInviteTaskbarBadge", typeof(RectTransform), typeof(LayoutElement), typeof(Image));
-        go.GetComponent<LayoutElement>().ignoreLayout = true;
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(_host, false);
-        rt.anchorMin = rt.anchorMax = Vector2.zero; rt.pivot = new Vector2(0.5f, 0.5f);   // 锚在父物体左下角，Place 里按按钮可见矩形算电话中心
-        rt.sizeDelta = new Vector2(Size, Size);
-        rt.SetAsLastSibling();
-        _img = go.GetComponent<Image>();
-        _img.sprite = VisitArt.Load("chat11_list_call.png"); _img.preserveAspect = true; _img.raycastTarget = false;
-        Place();
+        // 锚在父物体左下角，Place 里按按钮可见矩形算电话中心
+        _img = Chat11.Img(_host, "VisitInviteTaskbarBadge", VisitArt.Load("chat11_list_call.png"), Vector2.zero, Vector2.zero, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(Size, Size), ignoreLayout: true);
+        _img.rectTransform.SetAsLastSibling();
         return true;
     }
 }
 
 /// 消息区里不显示邀请信本身（1.1 里邀请不是一条消息）：把那条消息的格子压成 0 高。
-/// 09-25 SORA「特殊频段里有机率看不到商人的消息」：消息格子是 LightScroller 循环复用的，以前压扁 / 藏掉的格子被拿去显示普通消息时
-/// 从不恢复——还是 0 高、子物体还关着，那条消息就不见了。现在记下藏之前的样子，格子下一次显示前（前缀，原生 Show 之前）原样放回去
+/// 09-25 SORA「特殊频段里有机率看不到商人的消息」：消息格子是 LightScroller 循环复用的，压扁 / 藏掉的格子会被拿去显示普通消息，
+/// 不恢复的话还是 0 高、子物体还关着，那条消息就不见了。所以记下藏之前的高度，格子下一次显示前（前缀，原生 Show 之前）放回去
 [HarmonyPatch(typeof(MessageFork), nameof(MessageFork.Show))]
 public static class ChatInviteBubble
 {
@@ -1162,9 +1060,9 @@ public static class ChatInviteBubble
         public bool Active;
     }
 
-    /// 09-25 第二版（SORA 14 / 15.png：一格里两种消息视图并排，后一个被挤到右边）：以前这里把藏之前记下的各视图开关原样放回——
-    /// 可原生复用格子时先 Close（四个视图全关）再 Show（只开要用的那个），这里在 Close 之后又把上次邀请信用过的视图打开了，
-    /// 一格里就有两个视图、横排布局组把后一个挤到右边。现在只还原高度，视图开关交给原生；Postfix 里再保证只开这条消息那一种
+    /// 09-25（SORA 14 / 15.png：一格里两种消息视图并排，后一个被挤到右边）：只还原高度，视图开关交给原生——
+    /// 原生复用格子时先 Close（四个视图全关）再 Show（只开要用的那个），这里要是把藏之前记下的各视图开关原样放回，就在 Close 之后又把上次邀请信用过的视图打开了，
+    /// 一格里就有两个视图、横排布局组把后一个挤到右边。Postfix 里再保证只开这条消息那一种
     static void Prefix(MessageFork __instance)
     {
         try
@@ -1204,20 +1102,24 @@ public static class ChatInviteBubble
         catch (Exception e) { Plugin.WarnOnce("invite/letter-bubble", "[invite] Failed to hide the invite letter bubble: " + e.Message); }
     }
 
+    /// <summary>这条消息在格子里用的是哪个视图（和原生 MessageFork.Show 的分支一致）：自己的 / 对方的 / 系统提示（带参数的系统消息、且不在 SYSTEM 对话里）/ 附件消息（商人、SYSTEM 对话、不带参数的系统消息）。
+    /// OnlyOwnView 和 ChatMessageStyle.Apply 共用这一份</summary>
+    internal static MessageView ViewFor(MessageFork fork, MessageData data) => data.MessageType switch
+    {
+        EMessageViewType.YourMessage => fork._yourChatMessage,
+        EMessageViewType.OpponentMessage => fork._opponentChatMessage,
+        EMessageViewType.SystemMessage => data.DialogueType != EMessageType.SystemMessage && data.Message?.Params != null ? fork._systemMessage : fork._attachmentMessage,
+        EMessageViewType.TraderMessage => fork._attachmentMessage,
+        _ => null,
+    };
+
     /// 一格只开这条消息那一种视图（原生 Show 只负责打开要用的那个，不关别的）
     static void OnlyOwnView(MessageFork fork, MessageData data)
     {
         if (fork == null || data == null) return;
         try
         {
-            MessageView own = data.MessageType switch
-            {
-                EMessageViewType.YourMessage => fork._yourChatMessage,
-                EMessageViewType.OpponentMessage => fork._opponentChatMessage,
-                EMessageViewType.SystemMessage => data.DialogueType != EMessageType.SystemMessage && data.Message?.Params != null ? fork._systemMessage : fork._attachmentMessage,
-                EMessageViewType.TraderMessage => fork._attachmentMessage,
-                _ => null,
-            };
+            var own = ViewFor(fork, data);
             if (own == null) return;
             foreach (MessageView v in new MessageView[] { fork._yourChatMessage, fork._opponentChatMessage, fork._systemMessage, fork._attachmentMessage })
                 if (v != null && v != own && v.gameObject.activeSelf) v.gameObject.SetActive(false);
@@ -1237,18 +1139,17 @@ public static class ChatMessageStyle
 {
     const float BubbleLeft = 10f;   // 格子本身在容器里 x=5，右栏左框到容器 0.5：10 + 5 + ~0.5 ≈ 15
     const float BubbleMax = 669f;
-    const float SeparatorHeight = 41.5f;   // 上一个气泡底到下一个气泡顶 43.5，减掉原生格子间 2
     const float SeparatorWidth = 720f;
     static readonly Color BubbleColor = new Color32(0x19, 0x1B, 0x1B, 0xFF);
     static readonly Color TextColor = new Color32(0xA0, 0xAA, 0xB4, 0xFF);
-    static readonly Color TimeColor = new Color32(0x59, 0x5E, 0x61, 0xFF);   // 1.1MCP 导出的原值（以前按截图量的 #585D60）
+    static readonly Color TimeColor = new Color32(0x59, 0x5E, 0x61, 0xFF);   // 1.1MCP 导出的原值
     static readonly Color LineColor = new Color32(0x20, 0x21, 0x23, 0xFF);
     static readonly Color DateColor = new Color32(0x59, 0x5E, 0x61, 0xFF);
 
     // 09-25 按 1.1MCP 导出的 SYSTEM 对话（captures\ui-ChatPart-0925-231715.txt）核了一遍气泡的排版，1.1 的附件消息：
     //   气泡内边距 左 15 / 右 15 / 上 12 / 下 12，正文和时间同一行（间隔 5，时间最少占 35、右对齐），正文到附件条 10；
     //   带附件时气泡宽 = 附件条 620 + 30 = 650，正文长了才撑宽，最宽 = 行宽 720 - 右留 50 = 670（我们 669）。
-    // 0.16 的时间不进排版（我们钉在右下），所以正文右边留 15 + 5 + 35 = 55，正文能占的宽度就和 1.1 一样（以前右留 65、上 11，是按截图量的）
+    // 0.16 的时间不进排版（我们钉在右下），所以正文右边留 15 + 5 + 35 = 55，正文能占的宽度就和 1.1 一样
     const int PadLeft = 15, PadRight = 55, PadTop = 12, PadBottom = 12;
     const float AttachBubble = 650f;
 
@@ -1256,16 +1157,10 @@ public static class ChatMessageStyle
     {
         try
         {
-            MessageView view = data.MessageType switch
-            {
-                EMessageViewType.OpponentMessage => fork._opponentChatMessage,
-                EMessageViewType.TraderMessage => fork._attachmentMessage,
-                // SYSTEM 对话（09-25 SORA 29.png：还是原生的名字行、头像、缺角气泡）：原生这时也用附件消息视图，1.1 里和商人消息同一套样式。
-                // 带参数的系统提示走的是另一个视图（_systemMessage），1.1 那种没导出过，不动
-                EMessageViewType.SystemMessage when data.DialogueType == EMessageType.SystemMessage || data.Message?.Params == null => fork._attachmentMessage,
-                _ => null,
-            };
-            if (view == null) return;
+            // 只动对方 / 商人 / 附件视图：自己发的消息不改；SYSTEM 对话（09-25 SORA 29.png：还是原生的名字行、头像、缺角气泡）原生也用附件消息视图，
+            // 1.1 里和商人消息同一套样式；带参数的系统提示走的是另一个视图（_systemMessage），1.1 那种没导出过，不动
+            var view = ChatInviteBubble.ViewFor(fork, data);
+            if (view == null || view == fork._yourChatMessage || view == fork._systemMessage) return;
             var inner = view.transform.Find("Inner") as RectTransform;
             if (inner == null) return;
             if (view.GetComponent<VerticalLayoutGroup>() is VerticalLayoutGroup vg && vg.padding.left != (int)BubbleLeft)
@@ -1312,11 +1207,7 @@ public static class ChatMessageStyle
         block.pivot = Vector2.zero;
         block.anchoredPosition = new Vector2(BarLeft, BarBottom);
         block.sizeDelta = new Vector2(BarWidth, BarHeight);
-        if (view._messageBackground != null)
-        {
-            var bg = view._messageBackground.rectTransform;
-            bg.anchorMin = Vector2.zero; bg.anchorMax = Vector2.one; bg.offsetMin = bg.offsetMax = Vector2.zero;
-        }
+        if (view._messageBackground != null) view._messageBackground.rectTransform.Stretch();
         // 任务类消息的图标：两边引用的贴图同名（tab_icon_tasks_selected），1.1 换了画——28×28、没有 0.16 那圈浅色光晕（09-26 SORA 32.png 对 1.png；
         // 图是 ZoneExtract sprite 从 1.1 sharedassets44 解出来的）。换掉视图上的引用，原生按消息类型上图时就用 1.1 的；这一次 Show 已经上过旧图，顺手换掉
         var quest11 = VisitArt.Load("chat11_quest_icon.png");
@@ -1393,8 +1284,8 @@ public static class ChatMessageStyle
         }
     }
 
-    /// 换日分隔线：挂成消息视图布局里的第一个孩子（排在气泡上面），这条消息和上一条（邀请信不算）不是同一天才亮
-    /// 09-25 第三版：分隔线完全不进布局（前两版放进消息视图的布局里，带分隔线的那一格先是被撑宽挤到左框、再是整格右移 125 单位）——
+    /// 换日分隔线：这条消息和上一条（邀请信不算）不是同一天才亮
+    /// 09-25：分隔线完全不进布局（放进消息视图的布局里的话，带分隔线的那一格会被撑宽挤到左框，或者整格右移 125 单位）——
     /// 要分隔线时把这一格的上边距加高 42，分隔线忽略布局、钉在空出来的那块上
     const int SeparatorPad = 42;
 
@@ -1428,36 +1319,15 @@ public static class ChatMessageStyle
     static Transform BuildSeparator(MessageView view)
     {
         var font = view._timestampLabel != null ? view._timestampLabel.font : null;
-        var go = new GameObject("VisitDateSeparator", typeof(RectTransform), typeof(LayoutElement));
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(view.transform, false);
         // 不进布局：钉在消息视图顶部、从气泡左沿开始（上边距让出的 42 单位就是它的位置），线和日期按 720 画
-        go.GetComponent<LayoutElement>().ignoreLayout = true;
-        rt.anchorMin = rt.anchorMax = new Vector2(0f, 1f); rt.pivot = new Vector2(0f, 1f);
-        rt.anchoredPosition = new Vector2(BubbleLeft, 0f); rt.sizeDelta = new Vector2(SeparatorWidth, SeparatorPad);
-        var line = new GameObject("Line", typeof(RectTransform), typeof(Image));
-        var lrt = (RectTransform)line.transform;
-        lrt.SetParent(rt, false);
-        lrt.anchorMin = lrt.anchorMax = new Vector2(0f, 0.5f); lrt.pivot = new Vector2(0f, 0.5f);
-        lrt.anchoredPosition = Vector2.zero; lrt.sizeDelta = new Vector2(SeparatorWidth, 1.5f);
-        var limg = line.GetComponent<Image>(); limg.color = LineColor; limg.raycastTarget = false;
+        var rt = Chat11.Rect(view.transform, "VisitDateSeparator", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(BubbleLeft, 0f), new Vector2(SeparatorWidth, SeparatorPad), ignoreLayout: true);
+        Chat11.Img(rt, "Line", null, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), Vector2.zero, new Vector2(SeparatorWidth, 1.5f), preserveAspect: false, color: LineColor);
         // 日期底下垫一块黑，把线在正中断开（1.1 断口 110 像素 = 82.5 单位）
-        var box = new GameObject("Date", typeof(RectTransform), typeof(Image));
-        var brt = (RectTransform)box.transform;
-        brt.SetParent(rt, false);
-        brt.anchorMin = brt.anchorMax = new Vector2(0f, 0.5f); brt.pivot = new Vector2(0.5f, 0.5f);
-        brt.anchoredPosition = new Vector2(SeparatorWidth / 2f, 0f); brt.sizeDelta = new Vector2(82.5f, 14f);
-        var bimg = box.GetComponent<Image>(); bimg.color = Color.black; bimg.raycastTarget = false;
-        var tgo = new GameObject("Text", typeof(RectTransform));
-        var trt = (RectTransform)tgo.transform;
-        trt.SetParent(brt, false);
-        trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one; trt.offsetMin = trt.offsetMax = Vector2.zero;
-        var t = tgo.AddComponent<TextMeshProUGUI>();
+        var brt = Chat11.Img(rt, "Date", null, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(SeparatorWidth / 2f, 0f), new Vector2(82.5f, 14f), preserveAspect: false, color: Color.black).rectTransform;
+        var trt = Chat11.Span(brt, "Text", Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+        var t = trt.gameObject.AddComponent<TextMeshProUGUI>();
         if (font != null) t.font = font;
         t.fontSize = 12f; t.color = DateColor; t.alignment = TextAlignmentOptions.Center; t.enableWordWrapping = false; t.raycastTarget = false;
         return rt;
     }
 }
-
-// 09-25 SORA 选 A：以前的 ChatInviteSendBlock 在商人对话里把发送栏涂成纯黑、藏掉「无法发送」那行。发送栏平时整块藏着（InviteHeader.ApplySpecialLayout），
-// 只在有附件可领时露出来，这时只剩一大块黑底加「全部领取」按钮。补丁已删：有附件时发送栏保持原生样子（灰底 + 全部领取）

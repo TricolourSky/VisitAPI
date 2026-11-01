@@ -37,8 +37,7 @@ namespace VisitAPI.ChapterUI
                 TmpFix.Set(v._text, text);
                 FillLinks(v._itemsView, links);
                 if (v._unreadWarning != null) v._unreadWarning.alpha = ReadState.IsRead(id) ? 0 : 1;
-                var noteId = id;
-                ReadState.OnHover(v.gameObject, () => { ReadState.MarkRead(new[] { noteId }); RefreshUnread(); });
+                HoverRead(v.gameObject, id);
                 if (seen.Add(id)) { fresh = true; if (v._mainCanvasGroup != null) StartCoroutine(FadeIn(v._mainCanvasGroup)); }
                 else if (v._mainCanvasGroup != null) v._mainCanvasGroup.alpha = 1f;
             }

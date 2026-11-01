@@ -50,20 +50,7 @@ public static class ItemStart
         return inv.GetPlayerItems(EPlayerItems.AllExceptHideoutStashes).Any(i => i != null && tpls.Contains(i.StringTemplateId));
     }
 
-    /// 进图开局时换成战局里本机玩家的背包（战局里任务状态事件不一定在捡东西之前来，ChapterChain 那边挂不上）；访问世界不算
-    [HarmonyPatch(typeof(GameWorld), nameof(GameWorld.OnGameStarted))]
-    public static class RaidStart
-    {
-        static void Postfix(GameWorld __instance)
-        {
-            try
-            {
-                if (Narrating.IsVisitWorld(__instance) || Narrating.Now) return;
-                Watch(GamePlayerOwner.MyPlayer?.QuestController);
-            }
-            catch (Exception e) { Plugin.Log.LogWarning("[chain] Watching the raid inventory for quest-start items failed (raid unaffected): " + e.Message); }
-        }
-    }
+    // 进图开局换成战局里本机玩家的背包：挂在 RaidStart（10-24 合并）
 
     /// <summary>10-06 SORA：「这个应该是进入到日记物品，不应该出现在玩家背包内」——开章线索在 1.1 里是可读物品，捡起来进日记、不占背包。
     /// 0.16 没有日记，包里把它们改成任务物品（QuestItem = true，捡起来进任务物品栏）。可原生 GameWorld.ManageQuestLoot 只给「有进行中任务的找物品目标要它」的人刷任务物品，
@@ -131,8 +118,7 @@ public static class ItemStart
                 if (st == null) return false;   // 任务不在档里（比如还没移植的「他们已经来了」）= 不满足，和 1.1 一样
                 var s = st.Value;
                 // 1.1 只认 Fail；0.16 大厅会把服务端的失败记成 MarkedAsFailed / FailRestartable（同 ChapterChain.StatusMatches）
-                var failed = s == EQuestStatus.Fail || s == EQuestStatus.MarkedAsFailed || s == EQuestStatus.FailRestartable;
-                if (!((q.Started && s == EQuestStatus.Started) || (q.Completed && s == EQuestStatus.Success) || (q.Failed && failed))) return false;
+                if (!((q.Started && s == EQuestStatus.Started) || (q.Completed && s == EQuestStatus.Success) || (q.Failed && ChapterUI.ChapterStates.FailLike(s)))) return false;
             }
             return true;
         }

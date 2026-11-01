@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using Comfort.Common;
 using EFT;
 using EFT.Quests;
-using HarmonyLib;
 using UnityEngine;
 
 namespace VisitAPI.Native;
@@ -39,14 +38,14 @@ public static class LocalFail
 
     public static void Check(QuestController qc, Quest quest)
     {
-        if (!Failed(quest.QuestStatus)) return;
+        if (!ChapterUI.ChapterStates.FailLike(quest.QuestStatus)) return;
         // 战局里的失败由撤离结算上报，不插手。09-26 F1：战局控制器 QuestControllerClientLocalGame 也是 QuestControllerClientBackend，
-        // 以前「is not Backend」挡不住它，战局中会发 QuestFail；现在只认大厅那份
-        if (!QuestOps.IsLobby(qc) || qc is not QuestControllerClientBackend backend) return;
+        // 「is not Backend」挡不住它，战局中会发 QuestFail；只认大厅那份
+        if (!QuestOps.IsLobby(qc)) return;
         if (!QuestFlags.IsStory(quest.Id) || _sent.Contains(quest.Id) || _pending.Any(p => p.quest.Id == quest.Id)) return;
         if (!ServerStillRunning(quest.Id)) return;
         if (!quest.GetConditions<ConditionGlobalVariableValue>(EQuestStatus.Fail).Any(c => Done(quest, c))) return;
-        _pending.Add((backend, quest));
+        _pending.Add((QuestOps.Lobby, quest));
         if (_pumping) return;
         _pumping = true;
         Plugin.Instance.StartCoroutine(Pump());
@@ -74,29 +73,17 @@ public static class LocalFail
         if (!string.IsNullOrEmpty(questId)) _server[questId] = status;
     }
 
-    static bool Failed(EQuestStatus st) => st == EQuestStatus.Fail || st == EQuestStatus.FailRestartable || st == EQuestStatus.MarkedAsFailed;
+    static bool ServerStillRunning(string id) => _server.TryGetValue(id, out var server) && ChapterUI.ChapterStates.Running(server);
 
-    static bool ServerStillRunning(string id) =>
-        _server.TryGetValue(id, out var server) && (server == EQuestStatus.Started || server == EQuestStatus.AvailableForFinish);
-
-    static IClientSession Session()
-    {
-        try { return Singleton<ClientApplication<IEftSession>>.Instance?.GetClientBackEndSession(); }
-        catch { return null; }
-    }
-
-    /// 档案更新器（ProfileUpdatesHandler）是否已在会话里登记：登记前收到的 profileChanges.quests 会被 ApplyProfileChanges 直接丢掉
+    /// 档案更新器（ProfileUpdatesHandler）是否已在会话里登记：登记前收到的 profileChanges.quests 会被 ApplyProfileChanges 直接丢掉。
+    /// 会话不是 ClientBackendSession（字段在它身上）或没有档案 id 就不等
     static bool UpdaterReady(IClientSession session, string profileId)
     {
-        try
-        {
-            var field = AccessTools.Field(session.GetType(), "_profileUpdaters");
-            if (field == null || string.IsNullOrEmpty(profileId)) return true;
-            return field.GetValue(session) is IDictionary dict && dict.Contains(profileId);
-        }
-        catch { return true; }
+        if (session is not ClientBackendSession backend || string.IsNullOrEmpty(profileId)) return true;
+        return backend._profileUpdaters?.ContainsKey(profileId) == true;
     }
 
+    /// 队列空了就退出，下次 Check 再起
     static IEnumerator Pump()
     {
         var wait = new WaitForSecondsRealtime(1f);
@@ -104,7 +91,7 @@ public static class LocalFail
         while (true)
         {
             yield return wait;
-            if (_pending.Count == 0) continue;
+            if (_pending.Count == 0) { _pumping = false; yield break; }
             var (backend, quest) = _pending[0];
             if (!QuestOps.IsLobby(backend))
             {
@@ -113,7 +100,7 @@ public static class LocalFail
                 waited = 0f;
                 continue;
             }
-            var session = Session() ?? backend.GInterface222_0;
+            var session = VisitBackend.Session ?? backend.GInterface222_0;
             if (session == null) continue;
             if (!UpdaterReady(session, backend.Profile?.Id))
             {
@@ -123,7 +110,7 @@ public static class LocalFail
             }
             _pending.RemoveAt(0);
             waited = 0f;
-            if (_sent.Contains(quest.Id) || !Failed(quest.QuestStatus) || !ServerStillRunning(quest.Id)) continue;
+            if (_sent.Contains(quest.Id) || !ChapterUI.ChapterStates.FailLike(quest.QuestStatus) || !ServerStillRunning(quest.Id)) continue;
             _sent.Add(quest.Id);
             IResult done = null;
             var gotCallback = false;
@@ -173,10 +160,7 @@ public static class LocalFail
         var have = new HashSet<string>(backend.Quests.Select(q => q.Id), StringComparer.Ordinal);
         var fresh = task.Result.Where(t => t != null && !string.IsNullOrEmpty(t.Id) && !have.Contains(t.Id)).ToList();
         if (fresh.Count == 0) yield break;
-        try
-        {
-            backend.Quests.AddTemplates(fresh);
-        }
+        try { backend.Quests.AddTemplates(fresh); }
         catch (Exception e) { Plugin.Log.LogWarning("[chain] failed to add re-fetched quests to the quest book: " + e.Message); }
     }
 

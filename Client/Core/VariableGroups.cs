@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using Comfort.Common;
 using EFT;
 using HarmonyLib;
 using Newtonsoft.Json.Linq;
@@ -38,15 +37,9 @@ public static class VariableGroups
         catch (System.Exception e) { Plugin.Log.LogWarning("[vargroups] parse failed: " + e.Message); return false; }
     }
 
-    static ProfileVariablesStorage Storage()
-    {
-        try { return Singleton<ClientApplication<IEftSession>>.Instance?.GetClientBackEndSession()?.Profile?.ProfileVariables; }
-        catch { return null; }
-    }
-
     public static void RecomputeAll()
     {
-        var s = Storage(); if (s == null) return;
+        var s = VisitBackend.Variables; if (s == null) return;
         List<KeyValuePair<MongoID, List<MongoID>>> all; lock (_groups) all = _groups.ToList();
         foreach (var kv in all) Apply(s, kv.Key, kv.Value);
     }
@@ -57,8 +50,7 @@ public static class VariableGroups
         {
             var sum = members.Sum(m => s.GetVariableValue(m));
             if (s.GetVariableValue(group) == sum) return;
-            s.SetVariableValue(group, sum);
-            Vars.Sync(group, sum);
+            Vars.Set(s, group, sum);
         }
         catch (System.Exception e) { Plugin.Log.LogWarning("[vargroups] group sum failed: " + e.Message); }
     }
@@ -68,9 +60,14 @@ public static class VariableGroups
     {
         static void Postfix(ProfileVariablesStorage __instance, MongoID variableId)
         {
-            List<MongoID> groups;
-            lock (_groups) { if (!_byMember.TryGetValue(variableId, out groups)) return; groups = groups.ToList(); }
-            foreach (var g in groups) if (_groups.TryGetValue(g, out var members)) Apply(__instance, g, members);
+            // 成员变量属于哪些组、各组有哪些成员，都在锁里取好再算
+            List<(MongoID group, List<MongoID> members)> hit;
+            lock (_groups)
+            {
+                if (!_byMember.TryGetValue(variableId, out var groups)) return;
+                hit = groups.Where(_groups.ContainsKey).Select(g => (g, _groups[g])).ToList();
+            }
+            foreach (var (g, members) in hit) Apply(__instance, g, members);
         }
     }
 }

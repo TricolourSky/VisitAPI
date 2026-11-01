@@ -1,11 +1,8 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading;
-using System.Threading.Tasks;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Helpers.Profile;
@@ -37,7 +34,7 @@ public class QuestReadRouter(JsonUtil jsonUtil, ProfileHelper profiles, SaveServ
                 var ids = ((QuestReadRequest)info).Ids;
                 var profile = profiles.GetFullProfile(sessionId);
                 if (profile != null && ids != null && ids.Count > 0)
-                    await Locked(sessionId, ct, async () =>
+                    await ProfileLocks.RunAsync(sessionId, ct, async () =>
                     {
                         var state = Load(profile);
                         var changed = false;
@@ -60,7 +57,7 @@ public class QuestReadRouter(JsonUtil jsonUtil, ProfileHelper profiles, SaveServ
                 var req = (ObjectivesRequest)info;
                 var profile = profiles.GetFullProfile(sessionId);
                 if (profile != null && req != null)
-                    await Locked(sessionId, ct, async () =>
+                    await ProfileLocks.RunAsync(sessionId, ct, async () =>
                     {
                         var state = Load(profile);
                         var changed = false;
@@ -87,7 +84,7 @@ public class QuestReadRouter(JsonUtil jsonUtil, ProfileHelper profiles, SaveServ
             typeof(ObjectivesRequest))
     ])
 {
-    static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new();
+    const string Key = "visitapi";
 
     class State
     {
@@ -97,39 +94,18 @@ public class QuestReadRouter(JsonUtil jsonUtil, ProfileHelper profiles, SaveServ
         public Dictionary<string, int> Counts = new(StringComparer.Ordinal);
     }
 
-    static async Task Locked(string sessionId, CancellationToken ct, Func<Task> body)
-    {
-        var gate = Locks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(ct);
-        try { await body(); }
-        finally { gate.Release(); }
-    }
-
+    /// 档案里的 visitapi 永远是 JsonElement：从磁盘读进来是，本次运行里 Store 写的也是（10-17 审查 E21）
     static State Load(SptProfile profile)
     {
         var s = new State();
-        var ext = profile.ExtensionData;
-        if (ext == null || !ext.TryGetValue("visitapi", out var v)) return s;
-        if (v is JsonElement je && je.ValueKind == JsonValueKind.Object)
+        if (Ext.Get(profile.ExtensionData, Key, JsonValueKind.Object) is not { } je) return s;
+        if (je.TryGetProperty("read", out var r)) Strings(r, s.Read);
+        if (je.TryGetProperty("objectives", out var o) && o.ValueKind == JsonValueKind.Object)
         {
-            if (je.TryGetProperty("read", out var r)) Strings(r, s.Read);
-            if (je.TryGetProperty("objectives", out var o) && o.ValueKind == JsonValueKind.Object)
-            {
-                if (o.TryGetProperty("done", out var d)) Strings(d, s.Done);
-                if (o.TryGetProperty("skipped", out var k)) Strings(k, s.Skipped);
-                if (o.TryGetProperty("counts", out var c) && c.ValueKind == JsonValueKind.Object)
-                    foreach (var p in c.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt32(out var n)) s.Counts[p.Name] = n;
-            }
-        }
-        else if (v is Dictionary<string, object> dict)
-        {
-            if (dict.TryGetValue("read", out var r) && r is List<string> rl) foreach (var x in rl) s.Read.Add(x);
-            if (dict.TryGetValue("objectives", out var o) && o is Dictionary<string, object> od)
-            {
-                if (od.TryGetValue("done", out var d) && d is List<string> dl) foreach (var x in dl) s.Done.Add(x);
-                if (od.TryGetValue("skipped", out var k) && k is List<string> kl) foreach (var x in kl) s.Skipped.Add(x);
-                if (od.TryGetValue("counts", out var c) && c is Dictionary<string, int> cd) foreach (var (id, n) in cd) s.Counts[id] = n;
-            }
+            if (o.TryGetProperty("done", out var d)) Strings(d, s.Done);
+            if (o.TryGetProperty("skipped", out var k)) Strings(k, s.Skipped);
+            if (o.TryGetProperty("counts", out var c) && c.ValueKind == JsonValueKind.Object)
+                foreach (var p in c.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt32(out var n)) s.Counts[p.Name] = n;
         }
         return s;
     }
@@ -140,10 +116,11 @@ public class QuestReadRouter(JsonUtil jsonUtil, ProfileHelper profiles, SaveServ
         foreach (var e in arr.EnumerateArray()) if (e.ValueKind == JsonValueKind.String) into.Add(e.GetString());
     }
 
+    /// 存成和直接存 Dictionary 一样的 JSON 对象（存盘时 SPT 把 JsonElement 原样写出）
     static void Store(SptProfile profile, State s)
     {
         profile.ExtensionData ??= new Dictionary<string, object>();
-        profile.ExtensionData["visitapi"] = new Dictionary<string, object>
+        profile.ExtensionData[Key] = JsonSerializer.SerializeToElement(new Dictionary<string, object>
         {
             ["read"] = s.Read.OrderBy(x => x, StringComparer.Ordinal).ToList(),
             ["objectives"] = new Dictionary<string, object>
@@ -152,6 +129,6 @@ public class QuestReadRouter(JsonUtil jsonUtil, ProfileHelper profiles, SaveServ
                 ["skipped"] = s.Skipped.OrderBy(x => x, StringComparer.Ordinal).ToList(),
                 ["counts"] = new Dictionary<string, int>(s.Counts, StringComparer.Ordinal)
             }
-        };
+        });
     }
 }

@@ -55,7 +55,7 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
         {
             var label = p.Name + "/" + Path.GetFileName(file);
             JsonDocument doc;
-            try { doc = JsonDocument.Parse(File.ReadAllBytes(file), new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }); }
+            try { doc = PackJson.Parse(file); }
             catch (Exception e) { log.Error($"[VisitAPI] items {label}: could not be read, skipping the whole file: {e.Message}"); continue; }
             using (doc)
                 foreach (var entry in doc.RootElement.EnumerateObject())
@@ -78,7 +78,7 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
 
     bool Register(string id, JsonElement entry, string fileName)
     {
-        if (!entry.TryGetProperty("template", out var tplNode) || tplNode.ValueKind != JsonValueKind.Object)
+        if (Ext.Obj(entry, "template") is not { } tplNode)
         { log.Error($"[VisitAPI] items {fileName} {id}: no template"); return false; }
         var template = json.Deserialize<TemplateItem>(tplNode.GetRawText());
         if (template == null) { log.Error($"[VisitAPI] items {fileName} {id}: template deserialization failed"); return false; }
@@ -87,17 +87,13 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
             foreach (var lang in loc.EnumerateObject())
                 locales[lang.Name] = new LocaleDetails
                 {
-                    Name = Text(lang.Value, "Name"),
-                    ShortName = Text(lang.Value, "ShortName"),
-                    Description = Text(lang.Value, "Description"),
+                    Name = Ext.Str(lang.Value, "Name"),
+                    ShortName = Ext.Str(lang.Value, "ShortName"),
+                    Description = Ext.Str(lang.Value, "Description"),
                 };
-        string handbookParent = null;
-        double? price = null;
-        if (entry.TryGetProperty("handbook", out var hb) && hb.ValueKind == JsonValueKind.Object)
-        {
-            handbookParent = Text(hb, "parentId");
-            if (hb.TryGetProperty("price", out var p) && p.ValueKind == JsonValueKind.Number) price = p.GetDouble();
-        }
+        var handbook = Ext.Obj(entry, "handbook");
+        var handbookParent = Ext.Str(handbook, "parentId");
+        var price = Ext.Num(handbook, "price");
         var result = items.CreateItem(new NewItemDetails
         {
             NewItem = template,
@@ -116,11 +112,6 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
         return true;
     }
 
-    static string Text(JsonElement o, string key) =>
-        o.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-
-    static bool Bool(JsonElement o, string key) => o.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.True;
-
     /// <summary>10-06：1.1 的「个人」可读物品（模板 _props.Personal = true）谁能看到。1.1 GameWorld.ManageQuestLoot 的规矩（1.1.0 反汇编核过）：
     /// 阵营允许（AllowBear / AllowUsec / AllowSavage）、等级够（RequiredLevel）、CompletableConditions 里的物品都找到过、QuestConditions 里的任务都处于指定状态。
     /// 0.16 没有这套，这些字段原样留在包里的物品模板上；登记时记下来，QuestReadyRouter 给开章物品（visitapi.startOnItems）随 flags 带下去，客户端 ItemStart.Visible 照着判断。
@@ -129,21 +120,20 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
 
     static void RecordPersonal(string id, JsonElement entry)
     {
-        if (!entry.TryGetProperty("template", out var t) || t.ValueKind != JsonValueKind.Object) return;
-        if (!t.TryGetProperty("_props", out var p) || p.ValueKind != JsonValueKind.Object || !Bool(p, "Personal")) return;
+        if (Ext.Obj(Ext.Obj(entry, "template"), "_props") is not { } p || !Ext.Flag(p, "Personal")) return;
         var rule = new PersonalRule
         {
-            Bear = Bool(p, "AllowBear"), Usec = Bool(p, "AllowUsec"), Savage = Bool(p, "AllowSavage"),
+            Bear = Ext.Flag(p, "AllowBear"), Usec = Ext.Flag(p, "AllowUsec"), Savage = Ext.Flag(p, "AllowSavage"),
             Level = p.TryGetProperty("RequiredLevel", out var lv) && lv.ValueKind == JsonValueKind.Number ? lv.GetInt32() : 0,
         };
         if (p.TryGetProperty("QuestConditions", out var qc) && qc.ValueKind == JsonValueKind.Array)
             foreach (var c in qc.EnumerateArray())
-                if (c.ValueKind == JsonValueKind.Object && Text(c, "QuestId") is { Length: > 0 } quest)
-                    rule.Quests.Add(new PersonalRule.QuestReq { Id = quest, Started = Bool(c, "Started"), Completed = Bool(c, "Completed"), Failed = Bool(c, "Failed") });
+                if (c.ValueKind == JsonValueKind.Object && Ext.Str(c, "QuestId") is { Length: > 0 } quest)
+                    rule.Quests.Add(new PersonalRule.QuestReq { Id = quest, Started = Ext.Flag(c, "Started"), Completed = Ext.Flag(c, "Completed"), Failed = Ext.Flag(c, "Failed") });
         if (p.TryGetProperty("CompletableConditions", out var cc) && cc.ValueKind == JsonValueKind.Array)
             foreach (var c in cc.EnumerateArray())
-                if (c.ValueKind == JsonValueKind.Object && Text(c, "CompletableItem") is { Length: > 0 } tpl)
-                    rule.Items.Add(new PersonalRule.ItemReq { Tpl = tpl, Completed = Bool(c, "IsCompleted") });
+                if (c.ValueKind == JsonValueKind.Object && Ext.Str(c, "CompletableItem") is { Length: > 0 } tpl)
+                    rule.Items.Add(new PersonalRule.ItemReq { Tpl = tpl, Completed = Ext.Flag(c, "IsCompleted") });
         PersonalRules[id] = rule;
     }
 
@@ -152,9 +142,7 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
 
     static void RecordQuestItem(string id, JsonElement entry)
     {
-        if (entry.TryGetProperty("template", out var t) && t.ValueKind == JsonValueKind.Object
-            && t.TryGetProperty("_props", out var p) && p.ValueKind == JsonValueKind.Object && Bool(p, "QuestItem"))
-            QuestItemWanted.Add(id);
+        if (Ext.Flag(Ext.Obj(Ext.Obj(entry, "template"), "_props"), "QuestItem")) QuestItemWanted.Add(id);
     }
 
     void LoadLoot(PackInfo p)
@@ -169,13 +157,17 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
             foreach (var (map, points) in byMap)
             {
                 if (points == null || points.Count == 0) continue;
+                // SPT 生成战利品时对强制刷新点无条件读 Template.Id / Template.Items：缺了整张图的战利品生成空引用、进不了图。读文件时就剔掉、点名（10-29）
+                var bad = points.RemoveAll(p => p?.Template == null || string.IsNullOrEmpty(p.Template.Id) || p.Template.Items == null || !p.Template.Items.Any());
+                if (bad > 0) log.Error($"[VisitAPI] loot {label}: {bad} spawn point(s) on '{map}' have no template / template.Id / template.Items and were dropped (SPT would fail to generate loot for the whole map)");
+                if (points.Count == 0) continue;
                 var location = locations.GetLocation(map);
                 if (location?.LooseLoot == null) { log.Error($"[VisitAPI] loot {label}: map '{map}' not found on this server, {points.Count} spawn point(s) have nowhere to go"); continue; }
                 var raw = json.Serialize(points);
                 location.LooseLoot.AddTransformer(loot =>
                 {
                     if (loot == null) return loot;
-                    var fresh = json.Deserialize<List<Spawnpoint>>(raw) ?? new List<Spawnpoint>();
+                    var fresh = OneOf(json.Deserialize<List<Spawnpoint>>(raw) ?? new List<Spawnpoint>());
                     var forced = (loot.SpawnpointsForced ?? Enumerable.Empty<Spawnpoint>()).ToList();
                     var have = forced.Select(p => p.Template?.Id).Where(x => x != null).ToHashSet(StringComparer.Ordinal);
                     forced.AddRange(fresh.Where(p => p.Template?.Id == null || !have.Contains(p.Template.Id)));
@@ -186,6 +178,45 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
         }
     }
 
+    /// <summary>10-15（SORA 章节二：ARRS U 盘在疗养院设施门口 / 刷卡门二选一刷）：几个刷新点写了同一个 `visitapi.oneOf` 组名，每次生成战局战利品只留其中一个，
+    /// 按各自 probability 加权抽（没写按 1）。SPT 4.1 的强制刷新点（SpawnpointsForced，GetForcedDynamicLoot）是全部照放、不看 probability，光靠概率写不出「二选一」；
+    /// LazyLoad.Value 每次访问都重跑变换器（反编译核过，不缓存），所以每局都重新抽。组名只在服务端这份数据上，下发给客户端的是 Template，不带它</summary>
+    static List<Spawnpoint> OneOf(List<Spawnpoint> points)
+    {
+        var groups = new Dictionary<string, List<Spawnpoint>>(StringComparer.Ordinal);
+        foreach (var p in points)
+        {
+            var g = OneOfGroup(p);
+            if (g == null) continue;
+            if (!groups.TryGetValue(g, out var list)) groups[g] = list = new List<Spawnpoint>();
+            list.Add(p);
+        }
+        if (groups.Count == 0) return points;
+        var drop = new HashSet<Spawnpoint>(ReferenceEqualityComparer.Instance);
+        foreach (var list in groups.Values)
+        {
+            if (list.Count < 2) continue;
+            var keep = Draw(list);
+            foreach (var p in list) if (!ReferenceEquals(p, keep)) drop.Add(p);
+        }
+        return points.Where(p => !drop.Contains(p)).ToList();
+    }
+
+    static string OneOfGroup(Spawnpoint p) => Ext.Str(Ext.Visit(p?.ExtensionData), "oneOf") is { Length: > 0 } name ? name : null;
+
+    static Spawnpoint Draw(List<Spawnpoint> list)
+    {
+        var r = Random.Shared.NextDouble() * list.Sum(Weight);
+        foreach (var p in list)
+        {
+            r -= Weight(p);
+            if (r <= 0) return p;
+        }
+        return list[list.Count - 1];
+    }
+
+    static double Weight(Spawnpoint p) => p.Probability is > 0 ? p.Probability.Value : 1.0;
+
     async Task<int> LoadBundles(PackInfo p, CancellationToken ct)
     {
         var manifestFile = PackLayout.BundlesManifest(p);
@@ -194,7 +225,7 @@ public class ItemLoader(CustomItemService items, TemplateTable templates, Locati
         try { manifest = await json.DeserializeFromFileAsync<BundleManifest>(manifestFile, ct); }
         catch (Exception e) { log.Error($"[VisitAPI] Could not read bundles.json of {p.Name}: {e.Message}"); return 0; }
         if (manifest?.Manifest == null) return 0;
-        // SPT 按 ModPath/bundles/key 找文件，所以模型文件住在包自己的 bundles\ 下、ModPath 就是包文件夹（老布局 = 模组根目录，和以前一样）
+        // SPT 按 ModPath/bundles/key 找文件，所以模型文件住在包自己的 bundles\ 下、ModPath 就是包文件夹
         var modPath = ContentPacks.Rel(p);
         var added = 0;
         foreach (var entry in manifest.Manifest)

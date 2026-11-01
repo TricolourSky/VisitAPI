@@ -11,26 +11,25 @@ public static class PostChain
     static GameObject _host;
     static float _logAt;
 
-    public static bool Register(Behaviour effect, string name, Action<RenderTexture, RenderTexture> draw)
+    public static void Register(Behaviour effect, string name, Action<RenderTexture, RenderTexture> draw)
     {
-        if (effect == null) return false;
+        if (effect == null) return;
         effect.enabled = false;
         var field = Traverse.Create(effect).Field("_ssaaPropagator");
         if (!field.FieldExists())
         {
             Plugin.Log.LogWarning($"[narrate] {name}: no _ssaaPropagator field (this build differs from the one investigated), not installing it");
-            return false;
+            return;
         }
         var propagator = effect.GetComponent<SSAAPropagator>();
         if (propagator == null)
         {
             Plugin.Log.LogWarning($"[narrate] No SSAAPropagator on the visit camera, {name} has nowhere to draw, not installing it");
-            return false;
+            return;
         }
         field.SetValue(propagator);
         if (_host != effect.gameObject) { Effects.Clear(); _host = effect.gameObject; }
         Effects.Add((effect, draw, name));
-        return true;
     }
 
     public static void Clear()

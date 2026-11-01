@@ -25,9 +25,8 @@ namespace VisitAPI.Server;
 /// 修两层：
 /// ① 结算补发：照 SPT 给灯塔商人的官方补法（LightkeeperQuestWorkaround，注释原话「run them through the servers CompleteQuest process」），
 ///    战局里新变成功的本模组任务补跑一遍 CompleteQuest（解锁商人 / 物品邮件 / 经验声望）。
-///    10-01 晚更正：原先写的「服务端此前一分没发过，不存在重复」只对服务端独有的奖励成立——原生的局内交任务（ItemManipulator.FinishConditional）
-///    会当场把物品塞进背包、给本地档案加经验声望，这里再发一遍就成了双份（SORA 实测：伐木场 10 万卢布 + 比特币各两份）。
-///    现在由客户端 RaidRewardHold 在局内那一步什么都不发（任务清单靠 /visitapi/quest/flags 的 pack 标记对齐），奖励只走这里。
+///    原生的局内交任务（ItemManipulator.FinishConditional）会当场把物品塞进背包、给本地档案加经验声望，这里再发一遍就成了双份
+///    （10-01 SORA 实测：伐木场 10 万卢布 + 比特币各两份），所以客户端 RaidRewardHold 在局内那一步什么都不发（任务清单靠 /visitapi/quest/flags 的 pack 标记对齐），奖励只走这里。
 ///    比官方版多盖一种边角：同一局里接了又交的任务——赛前档案里根本没有这条，SPT 自家的 preRaid 过滤会把它漏掉。
 /// ② 开服自愈：历史坏档（任务已成功、解锁商人的奖励却没发）直接把商人解开；已经卡住的玩家不用删档。幂等，跑几遍结果一样。</summary>
 [Injectable(typePriority: OnLoadOrder.PostLoad + 20)]
@@ -40,13 +39,7 @@ public class StoryRaidRewards(SaveServer saves, TemplateTable templates, QuestHe
     {
         _quests = questHelper;
         _log = log;
-        var patch = new SettleRaidQuestsPatch();
-        try
-        {
-            patch.Enable();
-            if (!patch.IsActive) log.Error("[VisitAPI] raid-end quest reward settlement did NOT arm (IsActive=false after Enable)");
-        }
-        catch (Exception e) { log.Error("[VisitAPI] raid-end quest reward settlement failed to arm: " + e); }
+        Patches.Arm(new SettleRaidQuestsPatch(), log, "raid-end quest reward settlement");
         RepairProfiles();
         return Task.CompletedTask;
     }
@@ -109,7 +102,6 @@ public class StoryRaidRewards(SaveServer saves, TemplateTable templates, QuestHe
                             QuestId = post.QId,
                             RemoveExcessItems = false
                         }, sessionId);
-                        _log?.Info($"[VisitAPI] Quest {post.QId} was finished inside the raid; ran the server reward pass at raid end so nothing is lost");
                     }
                     catch (Exception e) { _log?.Error($"[VisitAPI] raid-end reward pass for quest {post.QId} failed (its status is unaffected): {e.Message}"); }
                 }

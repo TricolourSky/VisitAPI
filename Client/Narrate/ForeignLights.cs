@@ -8,8 +8,8 @@ public static class ForeignLights
 {
     static readonly List<Light> _muted = new();
 
-    /// 只关开着的灯，记下来由 Restore 重新打开。09-24 审查低项：以前开头先清列表，连续 Mute 两次时第一批灯已经关了、
-    /// 第二次不会再记到，就再也恢复不了；现在只往列表里追加
+    /// 只关开着的灯，记下来由 Restore 重新打开。09-24 审查低项：只往列表里追加、开头不清列表——连续 Mute 两次时第一批灯已经关了、
+    /// 第二次不会再记到，清掉就再也恢复不了
     public static void Mute()
     {
         foreach (var l in Object.FindObjectsOfType<Light>())

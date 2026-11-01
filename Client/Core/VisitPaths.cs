@@ -23,7 +23,7 @@ public static class VisitPaths
     {
         if (Directory.Exists(now)) return now;
         if (!Directory.Exists(legacy)) return now;
-        Plugin.Log.LogWarning($"[paths] still using the legacy folder {legacy}; please rename it to {what}\\ (the next version will no longer recognize the old name)");
+        Plugin.Log.LogWarning($"[paths] still using the legacy folder {legacy}; please rename it to {what}\\ (the old name is still read for now, new installs use {what}\\)");
         return legacy;
     }
 }

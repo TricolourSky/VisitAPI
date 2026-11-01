@@ -1,5 +1,7 @@
-using System.Collections.Generic;
+using System;
+using System.Linq;
 using EFT;
+using EFT.Hideout;
 using EFT.Quests;
 using UnityEngine;
 using VisitAPI.Dialog;
@@ -18,6 +20,7 @@ public class VisitTrigger : MonoBehaviour
     public bool Auto => Data.Auto || Data.Enter >= 0f;
 
     GamePlayerOwner _owner;
+    Action _fire;   // Fire 的委托只建一次：每帧传方法组会每帧 new 一个 Action（10-29）
     int _ownerScanAt;
     int _menuSeenFrame = -1;
     float _cooldown;
@@ -26,14 +29,20 @@ public class VisitTrigger : MonoBehaviour
     bool _onceChecked;
     float _armed;
     int _misses;
-    float _nearLog;
     bool _onceAtClose;
     bool _burned;
     bool _sawDialogOpen;
     float _onceDeadline;
     float _closedAt = -1f;
+    // 10-24：地点解析成的藏身处区域、当前语言的提示语都只算一次
+    bool _areaParsed;
+    EAreaType? _area;
+    string _prompt, _promptLang;
 
-    string OnceKey => Data.Raw ?? $"{Data.Kind}|{Data.Place}|{Data.X},{Data.Y},{Data.Z}|{Data.Node}";
+    internal string Key => KeyOf(Data);
+    internal static string KeyOf(DialogTrigger d) => d.Raw ?? $"{d.Kind}|{d.Place}|{d.X},{d.Y},{d.Z}|{d.Node}";
+    /// 10-15：聊天「回复」把玩家传到线前以后直接按下（InviteHideout），不等距离 / 朝向检查；once / 门 / 节点照 Fire 原样
+    internal void FireNow() => Fire();
 
     static QuestController Quests => QuestOps.Resolve();
 
@@ -42,7 +51,7 @@ public class VisitTrigger : MonoBehaviour
         if (Data.Once && !_onceChecked && GamePlayerOwner.MyPlayer != null)
         {
             _onceChecked = true;
-            if (OnceService.Used(GamePlayerOwner.MyPlayer.Profile, OnceService.TriggerId(TraderId, OnceKey)))
+            if (OnceService.Used(GamePlayerOwner.MyPlayer.Profile, OnceService.TriggerId(TraderId, Key)))
             {
                 if (!OpensDialog) { Destroy(gameObject); return; }
                 _burned = true;
@@ -56,10 +65,9 @@ public class VisitTrigger : MonoBehaviour
         }
         if (Auto)
         {
-            // 10-01：自动线等战局正式开始才动作，enter 的秒数也从这一刻起算。以前从 MyPlayer 就位（还在加载 / 倒计时）起表，
+            // 10-01：自动线等战局正式开始才动作，enter 的秒数也从这一刻起算。从 MyPlayer 就位（还在加载 / 倒计时）起表的话，
             // 到点时战局控制器还不算活（QuestOps.IsLive），接 / 交被挡掉而 _fired 已置位，这一局再也不触发（SORA 立交桥：加载 50 秒 > enter 45）
             if (!RaidStarted()) return;
-            if (!_fired && Data.Enter < 0f) NearLog();
             if (!_fired && GamePlayerOwner.MyPlayer != null && Time.unscaledTime >= _cooldown && ShouldShow())
             {
                 _fired = true;
@@ -69,16 +77,8 @@ public class VisitTrigger : MonoBehaviour
         }
         if (_owner == null && !FindOwner()) return;
         if (Time.unscaledTime < _cooldown) return;
-        if (ShouldShow()) _shown = TriggerMenu.Show(_owner, Prompt(), Fire, Merge, ref _menuSeenFrame);
+        if (ShouldShow()) _shown = TriggerMenu.Show(_owner, Prompt(), _fire ??= Fire, Merge, ref _menuSeenFrame);
         else if (_shown) { TriggerMenu.Hide(_owner, Prompt()); _shown = false; }
-    }
-
-    void NearLog()
-    {
-        if (Camera.main == null || Time.unscaledTime < _nearLog) return;
-        var d = Vector3.Distance(Camera.main.transform.position, new Vector3(Data.X, Data.Y, Data.Z));
-        if (d > Data.Dist * 5f) return;
-        _nearLog = Time.unscaledTime + 2f;
     }
 
     bool FindOwner()
@@ -93,6 +93,8 @@ public class VisitTrigger : MonoBehaviour
     bool ShouldShow()
     {
         if (Data.Enter >= 0f) return EnterDue() && GatePasses() && BurnedAllows();
+        var inArea = InHideoutArea();
+        if (inArea.HasValue) return inArea.Value && GatePasses() && BurnedAllows();
         var main = Camera.main;
         if (main == null) return false;
         var point = new Vector3(Data.X, Data.Y, Data.Z);
@@ -102,9 +104,37 @@ public class VisitTrigger : MonoBehaviour
         return GatePasses() && BurnedAllows();
     }
 
+    /// 10-19 SORA：「坐标直接内嵌进入安保和休息区的菜单里就行了，不需要自定义坐标，和情报中心一样」——
+    /// 藏身处的线（不是 free 的）地点写的是区域名（Security / RestSpace / IntelligenceCenter…）时按区域判：
+    /// 屏幕上的原生菜单是这块区域的，就并进去；坐标不看，只剩聊天「回复」把人传过去时用。
+    /// 地点不是区域名照旧按坐标判。返回 null = 这条线不按区域判
+    bool? InHideoutArea()
+    {
+        if (!Merge) return null;
+        if (!_areaParsed) { _areaParsed = true; _area = Enum.TryParse(Data.Place, true, out EAreaType want) ? want : (EAreaType?)null; }
+        if (_area == null) return null;
+        if (_owner is not HideoutPlayerOwner hideout) return false;
+        return MenuArea(hideout)?.Data?.Template?.Type == _area.Value;
+    }
+
+    /// <summary>屏幕上的原生菜单属于哪块区域（不是区域菜单就给 null）。先后照 HideoutPlayerOwner.InteractionsChangedHandler：
+    /// 准星对着的物件 → 放物品的区 → 撤离点 → 人站进的那块区域；它判空用的是引用比较，这里也是。
+    /// 10-25 SORA：「玩家站的和情报中心太近就看不见了」——藏身处场景（level161）里每块区域有两个代表它的碰撞体：
+    /// 桌子前面那片互动范围（*_area_trigger，走进去设 HideoutArea）和桌子本身（*_raycast_collider，准星一米多以内对上就是 InteractableObject），
+    /// 两个都是 HideoutInteractionTrigger（IHideoutAreaWrapper），出的是同一份区域菜单。只认前一种的话，准星一对上桌子就不并了。
+    /// 准星对着别的区域（情报中心旁边紧挨着比特币矿机）或别的物件时，菜单已经是别人的，不并</summary>
+    static HideoutArea MenuArea(HideoutPlayerOwner hideout)
+    {
+        var player = hideout.Player;
+        if (player is null) return null;
+        var looked = player.InteractableObject;
+        if (looked is not null) return (looked as IHideoutAreaWrapper)?.Area;
+        if (player.PlaceItemZone is not null || player.ExfiltrationPoint is not null) return null;
+        return hideout.HideoutArea;
+    }
+
     /// 藏身处的线不看：那里没有开局倒计时，任务走大厅那份控制器
-    bool RaidStarted() => Data.Kind != "raid"
-        || (Comfort.Common.Singleton<AbstractGame>.Instantiated && Comfort.Common.Singleton<AbstractGame>.Instance.Status == GameStatus.Started);
+    bool RaidStarted() => Data.Kind != "raid" || Raid.Started;
 
     bool EnterDue()
     {
@@ -123,6 +153,7 @@ public class VisitTrigger : MonoBehaviour
         return Vector3.Angle(forward, flat) <= Mathf.Clamp(Mathf.Atan2(Data.Radius, Mathf.Max(flat.magnitude, 0.5f)) * Mathf.Rad2Deg, 8f, 40f);
     }
 
+    /// 触发点的门：写了 if 就必须写 statuses，没写等于永远不出现（SORA 10-17：「这个得写，不然玩家可以跳过某个阶段直接互动」）——和区域 / 刷兵那套 QuestOps.StatusIn 不同
     bool GatePasses()
     {
         if (Data.IfQuestId == null) return true;
@@ -130,8 +161,18 @@ public class VisitTrigger : MonoBehaviour
         return quest != null && Data.IfStatuses.Contains((int)quest.QuestStatus);
     }
 
-    /// <summary>提示语按玩家语言取（.dlg 里 trigger: 行下面的译文行，DialogLangs）；没写就是「对话」。OnceKey 仍按原行记，切语言不会多触发一次。</summary>
-    string Prompt() { var p = DialogLangs.Pick(Data.Tr, Loc.Code, Data.Prompt); return string.IsNullOrEmpty(p) ? Loc.Pick("对话", "Talk") : p; }
+    /// <summary>提示语按玩家语言取（.dlg 里 trigger: 行下面的译文行，Loc.Tr：没有这门语言退英文再退原文）；没写就是「对话」。Key 仍按原行记，切语言不会多触发一次。</summary>
+    string Prompt()
+    {
+        var lang = Loc.Code;
+        if (_prompt == null || _promptLang != lang)
+        {
+            _promptLang = lang;
+            var p = Loc.Tr(Data.Tr, Data.Prompt);
+            _prompt = string.IsNullOrEmpty(p) ? Loc.Pick("对话", "Talk") : p;
+        }
+        return _prompt;
+    }
 
     void Fire()
     {
@@ -151,11 +192,11 @@ public class VisitTrigger : MonoBehaviour
         {
             try
             {
-                var player = Comfort.Common.Singleton<GameWorld>.Instantiated ? Comfort.Common.Singleton<GameWorld>.Instance.MainPlayer : null;
+                var player = Raid.MainPlayer;
                 if (player != null) ZoneToComplete.TriggerEnter(player);
                 else Plugin.Log.LogWarning("[trigger] no main player; quest zone not triggered");
             }
-            catch (System.Exception e) { Plugin.Log.LogWarning("[trigger] manual quest zone trigger failed: " + e.Message); }
+            catch (Exception e) { Plugin.Log.LogWarning("[trigger] manual quest zone trigger failed: " + e.Message); }
         }
         if (Data.AcceptId != null) { handled &= AcceptQuest(); acted = true; }
         if (Data.FinishId != null) { handled &= SetStatus(Data.FinishId, EQuestStatus.Success); acted = true; }
@@ -220,35 +261,16 @@ public class VisitTrigger : MonoBehaviour
 
     bool OpensDialog => Voice == null && Data.AcceptId == null && Data.FinishId == null && Data.FailId == null;
 
+    /// 这条线开的对话里，从入口走得到的选项里还有没有「此刻点下去就能推进任务」的（接 / 交 / 上交 / 改状态）：有就是对话没谈完，once 不记。
+    /// 10-24：遍历走 VisitReach.Walk（和金色电话那套同一份），顺带也认抉择窗「否」的去处和跨剧本跳转
     bool DialogLeftGateUnresolved()
     {
-        if (!OpensDialog) return false;
-        if (Data.IfQuestId != null && !GatePasses()) return false;
-        if (Quests?.Quests == null) return false;
+        if (!OpensDialog || !GatePasses() || Quests?.Quests == null) return false;
         var tree = DialogFiles.Loader.Load(TraderId);
         if (tree == null) return false;
-        var queue = new Queue<string>();
-        void Enqueue(string t)
-        {
-            if (string.IsNullOrEmpty(t)) return;
-            if (t == "@start") { Enqueue(tree.Start); foreach (var w in tree.WhenRules) Enqueue(w.Node); return; }
-            if (t[0] == '@') return;
-            queue.Enqueue(t);
-        }
-        if (Data.Node != null) Enqueue(Data.Node);
-        else { Enqueue(tree.First); Enqueue("@start"); }
-        var seen = new HashSet<string>();
-        while (queue.Count > 0)
-        {
-            var name = queue.Dequeue();
-            if (!seen.Add(name) || !tree.Nodes.TryGetValue(name, out var node)) continue;
-            Enqueue(node.JumpTo);
-            foreach (var o in node.Options)
-            {
-                if (CanAdvance(o)) return true;
-                Enqueue(o.Target);
-            }
-        }
+        var entries = Data.Node != null ? new[] { Data.Node } : new[] { tree.First, "@start" };
+        foreach (var (_, node) in VisitReach.Walk(tree, entries, VisitReach.ById(DialogFiles.All())))
+            if (node.Options.Any(CanAdvance)) return true;
         return false;
     }
 
@@ -267,7 +289,7 @@ public class VisitTrigger : MonoBehaviour
         var h = Q(o.HandoverId);
         if (h != null && h.QuestStatus == EQuestStatus.Started && QuestGates.PendingItems(h) != null) return true;
         var ss = Q(o.SetStatusId);
-        if (ss != null && System.Enum.IsDefined(typeof(EQuestStatus), o.SetStatusValue) && (int)ss.QuestStatus != o.SetStatusValue) return true;
+        if (ss != null && Enum.IsDefined(typeof(EQuestStatus), o.SetStatusValue) && (int)ss.QuestStatus != o.SetStatusValue) return true;
         return false;
     }
 
@@ -275,7 +297,7 @@ public class VisitTrigger : MonoBehaviour
     {
         var player = GamePlayerOwner.MyPlayer;
         if (player == null) return;
-        OnceService.Mark(player.Profile, OnceService.TriggerId(TraderId, OnceKey), "trigger");
+        OnceService.Mark(player.Profile, OnceService.TriggerId(TraderId, Key));
         Destroy(gameObject);
     }
 
@@ -284,10 +306,7 @@ public class VisitTrigger : MonoBehaviour
         var quests = Quests;
         Quest quest = quests?.Quests?.GetConditional(Data.AcceptId);
         if (quest == null) return Miss(Data.AcceptId);
-        if (quest.QuestStatus != EQuestStatus.AvailableForStart)
-        {
-            return true;
-        }
+        if (quest.QuestStatus != EQuestStatus.AvailableForStart) return true;
         QuestOps.Accept(quests, quest, "trigger");
         return true;
     }
@@ -297,10 +316,7 @@ public class VisitTrigger : MonoBehaviour
         var quests = Quests;
         Quest quest = quests?.Quests?.GetConditional(questId);
         if (quest == null) return Miss(questId);
-        if (quest.QuestStatus == want || quest.QuestStatus == EQuestStatus.Success || quest.QuestStatus == EQuestStatus.Fail || quest.QuestStatus == EQuestStatus.MarkedAsFailed)
-        {
-            return true;
-        }
+        if (quest.QuestStatus == want || quest.QuestStatus is EQuestStatus.Success or EQuestStatus.Fail or EQuestStatus.MarkedAsFailed) return true;
         if (quest.QuestStatus == EQuestStatus.AvailableForStart) quests.SetConditionalStatus(quest, EQuestStatus.Started);
         if (want == EQuestStatus.Success)
         {

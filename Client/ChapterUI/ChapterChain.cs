@@ -1,5 +1,4 @@
 using System.Linq;
-using Comfort.Common;
 using EFT;
 using EFT.Quests;
 using HarmonyLib;
@@ -28,7 +27,7 @@ public static class ChapterChain
     static void Check(QuestController qc, Quest quest, bool live)
     {
         // 09-24 审查 H2：访问商人时引擎的 NarrateGame.Create 另建一个任务控制器并 Run，它对每条任务调 ManageConditional，
-        // 以前会把全局 Controller 换成这个访问结束就丢的副本（邀请信、金色电话、地图锁之后都读它）。这里整个跳过
+        // 会把全局 Controller 换成这个访问结束就丢的副本（邀请信、金色电话、地图锁之后都读它）。这里整个跳过
         if (VisitGameGuard.IsVisitController(qc)) return;
         try { CheckCore(qc, quest, live); }
         catch (System.Exception e) { Plugin.Log.LogError("[chain] Auto-chain check failed (the quest event itself is unaffected): " + e); }
@@ -37,7 +36,7 @@ public static class ChapterChain
     static void CheckCore(QuestController qc, Quest quest, bool live)
     {
         if (quest?.Template == null || qc?.Quests == null) return;
-        if (qc is QuestControllerClientLocalGame && Singleton<GameWorld>.Instantiated && Raid.IsHideout(Singleton<GameWorld>.Instance.LocationId))
+        if (QuestOps.IsHideoutCopy(qc))
         {
             var backend = QuestOps.Resolve();
             if (backend == null || backend is QuestControllerClientLocalGame || backend.Quests == null) return;
@@ -114,13 +113,11 @@ public static class ChapterChain
         else QuestOps.Accept(qc, quest, "chain");
     }
 
-    static bool NoFinishConditions(Quest quest) =>
-        quest.Template?.Conditions == null || !quest.Template.Conditions.TryGetValue(EQuestStatus.AvailableForFinish, out var list) || list == null || !list.Any();
+    static bool NoFinishConditions(Quest quest) => !quest.Conds(EQuestStatus.AvailableForFinish).Any();
 
     static bool PrereqsMet(QuestController qc, Quest quest)
     {
-        if (quest.Template?.Conditions == null || !quest.Template.Conditions.TryGetValue(EQuestStatus.AvailableForStart, out var list) || list == null) return true;
-        foreach (var c in list)
+        foreach (var c in quest.Conds(EQuestStatus.AvailableForStart))
         {
             if (c is not ConditionQuest cq || string.IsNullOrEmpty(cq.target)) continue;
             var target = qc.Quests.GetConditional(cq.target);
@@ -136,7 +133,7 @@ public static class ChapterChain
 
     /// 09-24：要求「失败」的前置，本地的 MarkedAsFailed / FailRestartable（服务端说失败、或可重开的失败）也算失败——引擎在大厅里把服务端的 Fail 记成 MarkedAsFailed
     static bool StatusMatches(EQuestStatus[] wanted, EQuestStatus st) =>
-        wanted.Contains(st) || (wanted.Contains(EQuestStatus.Fail) && (st == EQuestStatus.MarkedAsFailed || st == EQuestStatus.FailRestartable));
+        wanted.Contains(st) || (wanted.Contains(EQuestStatus.Fail) && ChapterUI.ChapterStates.FailLike(st));
 
     static bool ChapterOpen(QuestController qc, string questId)
     {
@@ -162,7 +159,7 @@ public static class ChapterChain
     /// 等章节列表里紧挨着的前一条结束了才开（1.1 实机：陨落星辰「找到飞机」完成后 Prapor 的 678f6bd1 才出现）。列表第一条随章节开门。
     /// 同日审查 S1 改成只看紧挨着的前一条，并在三种情况放行，否则门票主线会卡死：
     ///   ① 前一条本机没有定义（门票缺的 44 条，服务端 flags 的 missingSubs 点名）——数据不全就不拦，不去猜更前面哪条
-    ///     （以前是跳过再往前找，结果「开启加固手提箱」68e2d8d5 找到了 Lightkeeper 支线 68f4d98b，而那条的前置在主线 68dac755 完成时失败，永远等不到）；
+    ///     （跳过再往前找的话，「开启加固手提箱」68e2d8d5 会找到 Lightkeeper 支线 68f4d98b，而那条的前置在主线 68dac755 完成时失败，永远等不到）；
     ///   ② 前一条是分支终点（章节的 isFinisher，门票的 #15 / #47 / #62 / #69 / #84）——这是新分支的第一条，不等上一个分支的结局；
     ///   ③ 前一条已经结束，成功或失败都算，失败的不会再拦住后面。
     /// 前一条有定义但还没出现在任务书里、或还在进行中，就等。
@@ -171,8 +168,7 @@ public static class ChapterChain
         var chapterId = QuestFlags.ChapterOf(questId);
         if (chapterId == null || chapterId == questId || QuestFlags.IsStarterOf(chapterId, questId)) return true;
         var quest = qc.Quests.GetConditional(questId);
-        if (quest?.Template?.Conditions != null && quest.Template.Conditions.TryGetValue(EQuestStatus.AvailableForStart, out var gates) && gates != null
-            && gates.OfType<ConditionQuest>().Any(c => !string.IsNullOrEmpty(c.target))) return true;   // 有任务前置的按前置走
+        if (quest.StartGates().Any()) return true;   // 有任务前置的按前置走
         var subs = QuestFlags.SubsOf(chapterId);
         var i = subs.IndexOf(questId);
         if (i <= 0) return true;

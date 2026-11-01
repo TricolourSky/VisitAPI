@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading;
@@ -27,11 +26,7 @@ public class UiLocales(LocaleTable locales, ISptLogger<UiLocales> log) : IOnLoad
             if (entries != null && entries.Count > 0) packs[parts[^2]] = entries;
         }
         if (!packs.TryGetValue("en", out var fallback)) { log.Warning("[VisitAPI] ui locale: embedded ui/en.json missing"); return Task.CompletedTask; }
-        foreach (var (lang, lazy) in locales.Global)
-        {
-            var entries = packs.TryGetValue(lang, out var own) ? own : fallback;
-            lazy.AddTransformer(dict => { if (dict != null) foreach (var (k, v) in entries) dict.TryAdd(k, v); return dict; });
-        }
+        LocaleText.AddAll(locales, packs, fallback);
         return Task.CompletedTask;
     }
 }

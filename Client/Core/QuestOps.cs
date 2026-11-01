@@ -30,8 +30,22 @@ public static class QuestOps
         if (qc == null) return false;
         if (IsLobby(qc)) return true;
         if (qc is not QuestControllerClientLocalGame) return false;
-        return Singleton<AbstractGame>.Instantiated && Singleton<AbstractGame>.Instance.Status == GameStatus.Started
-            && ReferenceEquals(GamePlayerOwner.MyPlayer?.QuestController, qc);
+        return Raid.Started && ReferenceEquals(GamePlayerOwner.MyPlayer?.QuestController, qc);
+    }
+
+    /// 藏身处里玩家身上那份 LocalGame 控制器：对它的事件要转到大厅那份去处理
+    public static bool IsHideoutCopy(QuestController qc) => qc is QuestControllerClientLocalGame && Raid.InHideout;
+
+    /// 界面各处拿「当前任务控制器」的回退链：链记下的 → 任务页给的 → 现算
+    public static QuestController Current => ChapterChain.Controller ?? ChapterTab.Quests ?? Resolve();
+
+    /// <summary>区域 / 刷兵 / 字幕的任务门：没写任务 = 不设门；任务不在任务书里 = 不放行；statuses 为空 = 任意状态都行
+    ///（交互型触发点的门不走这里——它要求必须写 statuses，SORA 10-17 定）</summary>
+    public static bool StatusIn(string questId, List<int> statuses)
+    {
+        if (string.IsNullOrEmpty(questId)) return true;
+        var quest = Resolve()?.Quests?.GetConditional(questId);
+        return quest != null && (statuses == null || statuses.Count == 0 || statuses.Contains((int)quest.QuestStatus));
     }
 
     internal static void OnLobby(QuestControllerClientBackend qc)
@@ -44,14 +58,11 @@ public static class QuestOps
 
     internal static void OnDisposed(QuestController qc)
     {
-        if (IsLobby(qc))
-        {
-            Lobby = null;
-        }
+        if (IsLobby(qc)) Lobby = null;
         if (ReferenceEquals(qc, ChapterChain.Controller)) ChapterChain.Controller = null;
     }
 
-    /// 09-26：战局外优先用大厅那份（访问时原生对话也用主菜单的控制器；以前拿 MyPlayer，访问中是访问副本，大厅里可能是上一局留下的玩家）
+    /// 09-26：战局外优先用大厅那份（访问时原生对话也用主菜单的控制器；MyPlayer 那份访问中是访问副本，大厅里可能是上一局留下的玩家）
     public static QuestController Resolve()
     {
         QuestController hideout = Singleton<HideoutRepresentation>.Instance?._questController;
@@ -72,45 +83,44 @@ public static class QuestOps
 
     enum Op { Accept, Finish, AcceptThenFinish }
 
-    /// <summary>对话 setstatus: 和触发器改任务状态。1.3.4 B3：以前一律只改本地（TryExecuteTransition 在基类恒返回 false，
+    /// <summary>对话 setstatus: 和触发器改任务状态。1.3.4 B3：只改本地的话（TryExecuteTransition 在基类恒返回 false，
     /// 走的是 SetConditionalStatus = 本地 TransitionStatus + NotifyRewards），服务端不知道，重进游戏状态就回退了。
-    /// 现在战局外（大厅 / 藏身处 / 访问，用的是 QuestControllerClientBackend）照原生的路走：
+    /// 所以战局外（大厅 / 藏身处 / 访问，用的是 QuestControllerClientBackend）照原生的路走：
     ///   完成 → 原生 FinishQuest（还没接的先 AcceptQuest 再交）；
     ///   进行中（从可接）→ 原生 AcceptQuest；
     ///   失败 → 本地置失败 + 原生 FailConditional（发 QuestFail），和 LocalFail 共用「已发」记录，同一条只发一次；
-    /// 其余状态（原生没有对应的请求）仍只改本地。战局里失败 / 完成由撤离结算上报，照旧只改本地。
-    /// 09-26 F1：战局控制器 QuestControllerClientLocalGame 本身继承自 QuestControllerClientBackend，以前靠 !Raid.Now 挡，战局收尾时 AbstractGame 已释放就挡不住；
-    /// 现在只有大厅那份走网络，其余活的控制器只改本地，不活的（撤离中、结算页、访问副本）不动。</summary>
-    public static bool SetStatus(QuestController qc, Quest quest, EQuestStatus want, string tag)
+    /// 其余状态（原生没有对应的请求）仍只改本地。战局里失败 / 完成由撤离结算上报，也只改本地。
+    /// 09-26 F1：战局控制器 QuestControllerClientLocalGame 本身继承自 QuestControllerClientBackend，靠 !Raid.Now 挡不住（战局收尾时 AbstractGame 已释放）；
+    /// 只有大厅那份走网络，其余活的控制器只改本地，不活的（撤离中、结算页、访问副本）不动。</summary>
+    public static void SetStatus(QuestController qc, Quest quest, EQuestStatus want, string tag)
     {
-        if (_busy.Contains(quest.Id)) { Plugin.Log.LogWarning($"[quest] {tag} wants to set {quest.Id} to {want}, but a transaction for it is in flight; skipped"); return false; }
-        if (!IsLive(qc)) { Plugin.Log.LogWarning($"[quest] {tag} wants to set {quest.Id} to {want}, but its quest controller is not live (raid ending, result screen or a visit copy); skipped"); return false; }
-        if (qc is QuestControllerClientBackend backend && IsLobby(qc))
+        if (_busy.Contains(quest.Id)) { Plugin.Log.LogWarning($"[quest] {tag} wants to set {quest.Id} to {want}, but a transaction for it is in flight; skipped"); return; }
+        if (!IsLive(qc)) { Plugin.Log.LogWarning($"[quest] {tag} wants to set {quest.Id} to {want}, but its quest controller is not live (raid ending, result screen or a visit copy); skipped"); return; }
+        if (IsLobby(qc))
         {
             var now = quest.QuestStatus;
             switch (want)
             {
                 case EQuestStatus.Success when now == EQuestStatus.Success:
-                    return true;
+                    return;
                 case EQuestStatus.Success when now == EQuestStatus.AvailableForStart:
                     Run(qc, quest, Op.AcceptThenFinish, tag);
-                    return true;
-                case EQuestStatus.Success when now == EQuestStatus.Started || now == EQuestStatus.AvailableForFinish:
+                    return;
+                case EQuestStatus.Success when ChapterUI.ChapterStates.Running(now):
                     if (now == EQuestStatus.Started) qc.SetConditionalStatus(quest, EQuestStatus.AvailableForFinish);
                     Run(qc, quest, Op.Finish, tag);
-                    return true;
+                    return;
                 case EQuestStatus.Started when now == EQuestStatus.AvailableForStart:
                     Run(qc, quest, Op.Accept, tag);
-                    return true;
+                    return;
                 case EQuestStatus.Fail:
                 case EQuestStatus.FailRestartable:
                 case EQuestStatus.MarkedAsFailed:
-                    Fail(backend, quest, want, tag);
-                    return true;
+                    Fail(Lobby, quest, want, tag);
+                    return;
             }
         }
         if (!qc.TryExecuteTransition(quest, want)) qc.SetConditionalStatus(quest, want);
-        return true;
     }
 
     static void Fail(QuestControllerClientBackend qc, Quest quest, EQuestStatus want, string tag)
@@ -132,8 +142,8 @@ public static class QuestOps
     }
 
     /// 10-06 意外证人实测（「只有在撤离战局之后这个任务目标才会出来」）：一条任务在自己「接」的那一下就满足了完成条件（空步骤、身上已有要找的物品），
-    /// 嵌套的状态事件里链要求「交」，撞上在途标记以前直接丢、也不留痕；战局里之后再没有事件来推，一直卡到回大厅整本重扫才交掉。
-    /// 现在在途时来的「交」先记下，等这一笔做完接着交（「接」重复了就是真重复，照旧丢）
+    /// 嵌套的状态事件里链要求「交」，撞上在途标记直接丢的话也不留痕，战局里之后再没有事件来推，一直卡到回大厅整本重扫才交掉。
+    /// 所以在途时来的「交」先记下，等这一笔做完接着交（「接」重复了就是真重复，直接丢）
     static readonly Dictionary<string, (QuestController qc, Quest quest, Op op, string tag)> _queued = new();
 
     static void Run(QuestController qc, Quest quest, Op op, string tag)
@@ -146,7 +156,7 @@ public static class QuestOps
         Plugin.Instance.StartCoroutine(Later(qc, quest, op, tag));
     }
 
-    /// 09-24 审查低项：每一步最多等 60 秒，并用 finally 放开在途标记。以前引擎的任务永远不完成（或协程被打断）时标记不清，这条任务本局再也接不了
+    /// 09-24 审查低项：每一步最多等 60 秒，并用 finally 放开在途标记，不然引擎的任务永远不完成（或协程被打断）时标记不清，这条任务本局再也接不了
     static IEnumerator Later(QuestController qc, Quest quest, Op op, string tag)
     {
         try

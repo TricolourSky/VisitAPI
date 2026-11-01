@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using HarmonyLib;
 using UnityEngine;
 using UnityStandardAssets.ImageEffects;
 
@@ -61,10 +60,7 @@ public static class Camera11
     static void Roster(Camera camera)
     {
         foreach (var b in camera.GetComponents<Behaviour>())
-        {
-            if (b == null || !ShouldDisable(b.GetType().Name, b)) continue;
-            b.enabled = false;
-        }
+            if (b != null && ShouldDisable(b.GetType().Name, b)) b.enabled = false;
     }
 
     static bool ShouldDisable(string name, Behaviour b)
@@ -95,7 +91,7 @@ public static class Camera11
     {
         var target = camera.GetComponent<TOD_Scattering>() ?? camera.gameObject.AddComponent<TOD_Scattering>();
         var from = prefab != null ? prefab.GetComponent<TOD_Scattering>() : null;
-        if (from != null) Reflect.Copy(from, target, typeof(TOD_Scattering), out _);
+        if (from != null) Reflect.Copy(from, target, typeof(TOD_Scattering));
         else
         {
             Fill(target, "TOD_Scattering", TodScattering11);
@@ -119,7 +115,7 @@ public static class Camera11
         PostChain.Register(target, "DesaturateEffect", target.OnRenderImage);
     }
 
-    // 09-24 审查低项：这两张贴图以前每次访问都新建一份（带 mipmap）、从不销毁；相机销毁时组件不会带走它们。现在整局各留一份
+    // 09-24 审查低项：这两张贴图整局各留一份，相机销毁时组件不会带走它们
     static Texture2D _bayer, _ramp;
 
     static Texture2D Cached(ref Texture2D slot, string file, TextureWrapMode wrap, FilterMode filter, bool linear = false)
@@ -133,8 +129,7 @@ public static class Camera11
     static void Volumetric(Camera camera)
     {
         var renderer = camera.GetComponent<VolumetricLightRenderer>();
-        var lights = UnityEngine.Object.FindObjectsByType<VolumetricLight>(FindObjectsSortMode.None).Length;
-        if (renderer == null || lights == 0) return;
+        if (renderer == null || UnityEngine.Object.FindObjectsByType<VolumetricLight>(FindObjectsSortMode.None).Length == 0) return;
         Fill(renderer, "VolumetricLightRenderer", Volumetric11);
     }
 

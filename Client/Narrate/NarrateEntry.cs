@@ -19,7 +19,17 @@ public static class NarrateEntry
     const string CommonScene = "Vendors_Scripts";
     static bool _mapped;
     static string _common = CommonScene;
-    internal static readonly FieldInfo MenuOpField = AccessTools.Field(typeof(TarkovApplication), "_menuOperation");
+    // _menuOperation 是 private，没在公开化范围里，走 Harmony 反射取
+    static readonly FieldInfo MenuOpField = AccessTools.Field(typeof(TarkovApplication), "_menuOperation");
+
+    /// 主菜单的那套操作对象（对话控制器、任务 / 背包控制器都挂在它上面）；应用没建好或还没进主菜单就 false
+    internal static bool TryMenuOp(out TarkovApplication app, out MainMenuShowOperation op)
+    {
+        op = null;
+        if (!TarkovApplication.Exist(out app)) return false;
+        op = MenuOpField?.GetValue(app) as MainMenuShowOperation;
+        return op != null;
+    }
 
     static readonly Dictionary<string, Profile.ETraderType> KnownTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -33,11 +43,8 @@ public static class NarrateEntry
         ["5c0647fdd443bc2504c2d371"] = (Profile.ETraderType)12,
     };
 
-    static bool TypeOf(string traderId, out Profile.ETraderType type)
-    {
-        if (KnownTypes.TryGetValue(traderId, out type)) return true;
-        return Profile.TraderInfo.TraderIdToType.TryGetValue(traderId, out type);
-    }
+    static bool TypeOf(string traderId, out Profile.ETraderType type) =>
+        KnownTypes.TryGetValue(traderId, out type) || Profile.TraderInfo.TraderIdToType.TryGetValue(traderId, out type);
 
     public static bool CanVisit(string traderId)
     {
@@ -48,17 +55,16 @@ public static class NarrateEntry
         return cfg != null && cfg.TradersSettings.TryGetValue(traderId, out var s) && s != null && s.MainDialog.HasValue;
     }
 
-    static bool RegisterScene(string traderId, Profile.ETraderType type)
+    static bool RegisterScene(AssetBundle bundle, Profile.ETraderType type)
     {
         if (TarkovApplication.NarrateController.Scenes.IsValid(type, out _)) return true;
-        var bundle = SceneLoader.EnsureNarrateBundles(traderId);
         var sceneName = SceneLoader.RoomScene(bundle);
         if (sceneName == null) return false;
         TarkovApplication.NarrateController.Scenes.narrateScenes[type] = new NarrateSceneInfo { sceneName = sceneName };
         return true;
     }
 
-    // 09-24 审查低项：从点「访问」到引擎建好 NarrateGame 之间（加载场景、建世界要好几秒）GameExist 还是 false，以前这段时间里能再点一次，
+    // 09-24 审查低项：从点「访问」到引擎建好 NarrateGame 之间（加载场景、建世界要好几秒）GameExist 还是 false，这段时间里再点一次就会
     // 两个 Show 同时跑。Show 结束就清掉；万一协程没走到 finally，5 分钟后也不再拦
     static bool _starting;
     static float _startingAt;
@@ -75,7 +81,7 @@ public static class NarrateEntry
         if (Profile.TraderInfo.TraderIdToType.TryGetValue(traderId, out var engineType) && engineType != type)
             Plugin.Log.LogWarning($"[narrate] Engine table maps {traderId} to {engineType}, using {type} from the 1.1 trader table (SPT moddedTraders override)");
         var bundle = SceneLoader.EnsureNarrateBundles(traderId);
-        if (bundle == null || !RegisterScene(traderId, type))
+        if (bundle == null || !RegisterScene(bundle, type))
         {
             Plugin.Log.LogWarning("[narrate] scene bundles missing for " + traderId);
             Plugin.Instance.StartCoroutine(Fallback(traderId));
@@ -83,7 +89,7 @@ public static class NarrateEntry
         }
         SetCommonScene(SceneLoader.TraderScriptsScene(bundle) ?? CommonScene);
         WhitelistPatch.RegisteredTraders.Add(traderId);
-        TabRouter.WatchNarrate(app, traderId);
+        TabRouter.WatchNarrate(traderId);
         AmbientGuard.Clear();
         NarrateLoading.Arm(traderId);
         _starting = true;
@@ -92,7 +98,7 @@ public static class NarrateEntry
     }
 
     // 09-25 SORA 实机（聊天里两封邀请，用掉一封后另一位商人点了没反应）：上一场访问的房间要等商人告别动画（最多 8 秒）才卸载，
-    // 这期间点的访问以前直接丢掉。现在记下最后一次点的商人，卸载完自动开始；等太久（20 秒）就放弃
+    // 这期间点的访问记下最后一次点的商人，卸载完自动开始；等太久（20 秒）就放弃
     static string _queued;
 
     static void Queue(string traderId)
@@ -131,15 +137,20 @@ public static class NarrateEntry
     }
 
     /// <summary>1.3.4 B1：访问建到一半失败时（原生错误框已被 NarrateShowError 拦下），回到主菜单后给一行提示，
-    /// 再用原生 ShowTraderDialogScreen 打开这个商人的 2D 对话，剧情照样能往下走。</summary>
+    /// 再用原生 ShowTraderDialogScreen 打开这个商人的 2D 对话，剧情照样能往下走。
+    /// 和 InviteDialog.Open 不是一回事，别合：这里用的是主菜单常驻的 op.DialogController + 原生 ShowTraderDialogScreen（让原生流程自己收尾），
+    /// 聊天「回复」那边是新建一个 ClientDialogController 开屏；两种用法都是有意的（10-24 审查 D13 定）。</summary>
+    /// 10-29：从藏身处发起的访问失败时主菜单不在显示（关掉的屏是 inactive 的，FindObjectOfType 找不到），MenuWatch 要到 90 帧后才把它强制弹回来——
+    /// 以前这里只等 30 帧就开对话，随后弹回来的主菜单（Root 屏先关当前屏）把刚开的对话关了。真等到主菜单出现再开，等不到就不开
     static IEnumerator Fallback(string traderId)
     {
-        yield return UiWait.Until(() => Object.FindObjectOfType<MenuScreen>() != null, 30);
+        yield return UiWait.Until(() => Object.FindObjectOfType<MenuScreen>() != null, 200);
+        if (Object.FindObjectOfType<MenuScreen>() == null) { Plugin.Log.LogWarning("[narrate] fallback dialog: the main menu did not come back within 200 frames, not opening the regular dialog"); yield break; }
         yield return null;
         try
         {
             NotificationManager.DisplayMessageNotification(Loc.Pick("商人房间没能打开，改用普通对话。", "Could not open the trader's room, using the regular dialog instead."));
-            if (!TarkovApplication.Exist(out var app) || !(MenuOpField?.GetValue(app) is MainMenuShowOperation op) || op.DialogController == null)
+            if (!TryMenuOp(out var app, out var op) || op.DialogController == null)
             { Plugin.Log.LogWarning("[narrate] fallback dialog: main menu not ready"); yield break; }
             if (app.NarrateControllerAccess != null && app.NarrateControllerAccess.GameExist) { Plugin.Log.LogWarning("[narrate] fallback dialog: a visit is running again, skipped"); yield break; }
             if (DialogScreenTracker.Open) { Plugin.Log.LogWarning("[narrate] fallback dialog: a dialog screen is already open"); yield break; }
@@ -151,8 +162,11 @@ public static class NarrateEntry
         catch (System.Exception e) { Plugin.Log.LogError("[narrate] fallback dialog failed: " + e); }
     }
 
-    /// 09-24 审查：Show 之后的每一步都先确认还是同一场访问（同一个 NarrateGame）。以前等对话屏最多 180 秒，
-    /// 期间这场访问结束、又开了新的一场，旧协程会去 Abort 新的访问，或者对新访问再 Mute 一次灯（第一批灯就恢复不了）
+    /// <summary>09-24 审查：Show 之后的每一步都先确认还是同一场访问（同一个 NarrateGame）。等对话屏最多 180 帧，
+    /// 期间这场访问结束、又开了新的一场的话，旧协程会去 Abort 新的访问，或者对新访问再 Mute 一次灯。
+    /// 10-24：比较用 ReferenceEquals——Unity 重载的 `!=` 把「已销毁的 game」和「变成 null 的 nc._game」判成相等，访问中途被收掉时协程认不出来</summary>
+    static bool SameVisit(TarkovApplication.NarrateController nc, NarrateGame game) => ReferenceEquals(nc._game, game);
+
     static IEnumerator Run(TarkovApplication app, Profile.ETraderType type, string traderId)
     {
         var nc = app.NarrateControllerAccess;
@@ -206,12 +220,12 @@ public static class NarrateEntry
             Stage(scene, common);
             for (var k = 0; k < 30; k++)
             {
-                if (nc._game != game) yield break;
+                if (!SameVisit(nc, game)) yield break;
                 SceneLighting.Uncover(visiting: true);
                 yield return null;
             }
-            yield return UiWait.Until(() => DialogScreenTracker.Open || nc._game != game, 180);
-            if (nc._game != game) yield break;
+            yield return UiWait.Until(() => DialogScreenTracker.Open || !SameVisit(nc, game), 180);
+            if (!SameVisit(nc, game)) yield break;
             if (!DialogScreenTracker.Open)
             {
                 Plugin.Log.LogWarning("[narrate] dialog screen never opened - aborting visit");
@@ -240,21 +254,16 @@ public static class NarrateEntry
             Step("ambient audio", () => AudioRouting.EnsureAmbient(s));
             Step("relight", () => SceneRelight.Promote(s));
         }
-        Step("glass", () => GlassProbe.Report(scene));
+        Step("glass", () => GlassProbe.Apply(scene));
     }
 
-    static void Step(string name, System.Action act)
-    {
-        try { act(); }
-        catch (System.Exception e) { Plugin.Log.LogError($"[narrate] stage '{name}' failed (continuing): {e}"); }
-    }
+    static void Step(string name, System.Action act) => VisitSteps.Run("[narrate] stage '{0}' failed (continuing): {1}", name, act);
 
     /// 这个场景是不是访问加载的（公共脚本场景或某个商人房间）——访问收尾只动这些场景里的东西，藏身处自己的不碰
     internal static bool IsVisitScene(Scene scene)
     {
         if (!scene.IsValid() || string.IsNullOrEmpty(scene.name)) return false;
         var name = scene.name;
-        if (string.Equals(name, _common, System.StringComparison.OrdinalIgnoreCase)) return true;
         var presets = TarkovApplication.NarrateController.Scenes;
         foreach (var c in presets.commonScenes)
             if (c != null && string.Equals(c.sceneName, name, System.StringComparison.OrdinalIgnoreCase)) return true;
@@ -271,21 +280,20 @@ public static class NarrateEntry
         _common = name;
     }
 
-    /// failedShow：引擎 Show 刚失败或没建成游戏（Run 里用）。调试键中止时不传，按有没有半截的访问世界 / 访问场景来判断
-    public static void Abort(TarkovApplication app = null, bool failedShow = false)
+    /// failedShow：引擎 Show 刚失败或没建成游戏。不传时访问游戏要是已经不在了（等对话屏那次，等待期间访问被别处收掉），
+    /// 按有没有半截的访问世界 / 访问场景来判断
+    static void Abort(TarkovApplication app, bool failedShow = false)
     {
-        if (app == null && !TarkovApplication.Exist(out app)) { Plugin.Log.LogWarning("[narrate] abort: no application"); LocalCleanup(); return; }
         var nc = app.NarrateControllerAccess;
-        if (nc == null) { Plugin.Log.LogWarning("[narrate] abort: no narrate controller"); LocalCleanup(); return; }
         if (!nc.GameExist)
         {
             if (failedShow || nc._gameWorld != null || AnyVisitSceneLoaded())
             {
                 Plugin.Log.LogWarning("[narrate] abort: visit was not built (Show failed midway) - cleaning up the half-built visit world / scenes and returning to main menu");
                 NarrateHideGuard.CleanupFailedShow(nc);
-                LocalCleanup();
             }
-            else { Plugin.Log.LogWarning("[narrate] abort: no active visit - restoring local state only"); LocalCleanup(); }
+            else Plugin.Log.LogWarning("[narrate] abort: no active visit - restoring local state only");
+            LocalCleanup();
             return;
         }
         nc.Hide();
@@ -319,8 +327,7 @@ public static class NarrateEntry
     {
         SceneCamera.Hide();
         SceneLighting.Release();
-        if (TarkovApplication.Exist(out var app) && MenuOpField?.GetValue(app) is MainMenuShowOperation op)
-            Plugin.Instance.StartCoroutine(MenuWatch(op));
+        if (TryMenuOp(out _, out var op)) Plugin.Instance.StartCoroutine(MenuWatch(op));
     }
 
     static IEnumerator MenuWatch(MainMenuShowOperation op)
@@ -337,8 +344,8 @@ public static class NarrateEntry
         _mapped = true;
         var fwd = (Dictionary<MongoID, Profile.ETraderType>)Profile.TraderInfo.TraderIdToType;
         var rev = (Dictionary<Profile.ETraderType, MongoID>)Profile.TraderInfo.TraderTypeToId;
-        Map(fwd, rev, "5a7c2eca46aef81a7ca2145d", Profile.ETraderType.Mechanic);
-        Map(fwd, rev, "5c0647fdd443bc2504c2d371", (Profile.ETraderType)12);
+        // 按 1.1 的商人表整张补，Map 只补缺的——引擎表里本来就有的那几位（Prapor 等）原样不动
+        foreach (var kv in KnownTypes) Map(fwd, rev, kv.Key, kv.Value);
     }
 
     static void Map(Dictionary<MongoID, Profile.ETraderType> fwd, Dictionary<Profile.ETraderType, MongoID> rev, MongoID id, Profile.ETraderType type)

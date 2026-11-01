@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
@@ -18,21 +17,15 @@ using SPTarkov.Server.Core.Models.Eft.Common.Tables;
 using SPTarkov.Server.Core.Models.Enums;
 using SPTarkov.Server.Core.Models.Spt.Bots;
 using SPTarkov.Server.Core.Models.Spt.Tables;
-using VisitAPI.Packs;
-using Path = System.IO.Path;
 
 namespace VisitAPI.Server;
 
-/// <summary>10-06 意外证人：剧情要「找到并消灭 Reshala」「他肯定随身带着钥匙」。1.1（SPT5 数据）里这把储藏处钥匙只在 Reshala 口袋池里占 16 / 2400，
-/// 几乎掉不出来；SORA 定「Reshala 身上带」。内容包 botloot\*.json 按机器人类型写：
-///   "ensure": [物品 id…]           —— 必带：机器人生成完（SPT 4.1.6 BotLootGenerator.GenerateLoot 之后）身上没有就补一件；
-///   "specialLoot" / "specialItems" —— 改专属物品池 / 件数（SpecialLoot 池 + generation.specialItems 权重，按 SPT 原生规则抽）。
-/// 第一版只用了专属物品池，SORA 实测「Reshala 身上没看见」：他没胸挂没背包，武器备用弹匣先塞满口袋时钥匙放不进去（试生成 5 个只有 3 个带）。
-/// 「必带」先照原生的放法试（口袋 / 胸挂 / 背包有空就放）；放不下就把口袋里的一件（优先备用弹匣）原地换成它——同格同位置，
-/// SPT 的容器占位缓存（BotInventoryContainerService）不用动。
-/// 同日 SORA 又定「reshala身上的钥匙改为和正式版一样概率刷新」：包里改用 "pockets"（往口袋物品池加权重，原生照抽），不再写 ensure。
-/// SPT5 的 Reshala 口袋池 33 件共 2400，钥匙 16（每抽一件 1/150，按口袋件数权重算一个 Reshala 约 1%）；SPT 4.1 的池子 209 件共 143300，
-/// 同比例换算成 962，概率与正式版一致。格式：{ "&lt;bot 类型，小写&gt;": { "pockets" / "backpack" / "vest": {物品: 权重}, "ensure": [...], "specialLoot": {...}, "specialItems": {...} } }</summary>
+/// <summary>内容包 botloot\*.json 按机器人类型改它身上的物品：{ "&lt;bot 类型，小写&gt;": { "pockets" / "backpack" / "vest": {物品: 权重}, "ensure": [物品 id…] } }
+///   pockets / backpack / vest：权重加进原生物品池，原生照抽。10-06 意外证人 SORA 定「reshala身上的钥匙改为和正式版一样概率刷新」：
+///   SPT5 的 Reshala 口袋池 33 件共 2400、钥匙 16（一个 Reshala 约 1%）；SPT 4.1 的池子 209 件共 143300，同比例换算成 962，概率与正式版一致。
+///   ensure：必带。机器人生成完（SPT 4.1.6 BotLootGenerator.GenerateLoot 之后）身上没有就补一件：先照原生的放法试（口袋 / 胸挂 / 背包有空就放），
+///   放不下（Reshala 没胸挂没背包，备用弹匣常先塞满口袋）就把口袋里的一件（优先备用弹匣）原地换成它——同格同位置，SPT 的容器占位缓存（BotInventoryContainerService）不用动。
+///   10-17 SORA：ensure 留着，以后剧情要用。</summary>
 [Injectable(typePriority: OnLoadOrder.PostLoad + 1)]
 public class BotLootLoader(BotTable bots, BotGeneratorHelper botGeneratorHelper, ItemHelper itemHelper, ISptLogger<BotLootLoader> log) : IOnLoad
 {
@@ -44,67 +37,41 @@ public class BotLootLoader(BotTable bots, BotGeneratorHelper botGeneratorHelper,
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
         _botHelper = botGeneratorHelper; _items = itemHelper; _log = log;
-        foreach (var p in ContentPacks.All(log))
-            foreach (var file in PackLayout.DataFiles(p, "botloot"))
-            {
-                var label = p.Name + "/" + Path.GetFileName(file);
-                try
-                {
-                    using var doc = JsonDocument.Parse(File.ReadAllBytes(file), new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
-                    foreach (var role in doc.RootElement.EnumerateObject())
-                    {
-                        if (role.Value.ValueKind != JsonValueKind.Object) continue;
-                        var key = role.Name.ToLowerInvariant();
-                        if (!bots.Types.TryGetValue(key, out var type) || type?.BotInventory?.Items == null || type.BotGeneration?.Items == null)
-                        { log.Error($"[VisitAPI] botloot {label}: bot type '{role.Name}' not found on this server, skipped"); continue; }
-                        if (role.Value.TryGetProperty("ensure", out var ensure) && ensure.ValueKind == JsonValueKind.Array)
-                            foreach (var tpl in ensure.EnumerateArray())
-                                if (tpl.ValueKind == JsonValueKind.String && tpl.GetString()?.Length == 24)
-                                    (Ensure.TryGetValue(key, out var list) ? list : Ensure[key] = new List<MongoId>()).Add(new MongoId(tpl.GetString()));
-                        // 口袋 / 背包 / 胸挂的物品池：照原生权重抽（10-06 SORA「reshala身上的钥匙改为和正式版一样概率刷新」）
-                        foreach (var (field, get) in new (string, Func<ItemPools, Dictionary<MongoId, double>>)[]
-                                 {
-                                     ("pockets", ip => ip.Pockets ??= new Dictionary<MongoId, double>()),
-                                     ("backpack", ip => ip.Backpack ??= new Dictionary<MongoId, double>()),
-                                     ("vest", ip => ip.TacticalVest ??= new Dictionary<MongoId, double>()),
-                                 })
-                            if (role.Value.TryGetProperty(field, out var weights) && weights.ValueKind == JsonValueKind.Object)
-                            {
-                                var dict = get(type.BotInventory.Items);
-                                foreach (var item in weights.EnumerateObject())
-                                    if (item.Name.Length == 24 && item.Value.ValueKind == JsonValueKind.Number)
-                                        dict[new MongoId(item.Name)] = item.Value.GetDouble();
-                            }
-                        if (role.Value.TryGetProperty("specialLoot", out var pool) && pool.ValueKind == JsonValueKind.Object)
-                        {
-                            type.BotInventory.Items.SpecialLoot ??= new Dictionary<MongoId, double>();
-                            foreach (var item in pool.EnumerateObject())
-                                if (item.Name.Length == 24 && item.Value.ValueKind == JsonValueKind.Number)
-                                    type.BotInventory.Items.SpecialLoot[new MongoId(item.Name)] = item.Value.GetDouble();
-                        }
-                        if (role.Value.TryGetProperty("specialItems", out var counts) && counts.ValueKind == JsonValueKind.Object && type.BotGeneration.Items.SpecialItems != null)
-                        {
-                            var weights = new Dictionary<double, double>();
-                            foreach (var c in counts.EnumerateObject())
-                                if (double.TryParse(c.Name, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) && c.Value.ValueKind == JsonValueKind.Number)
-                                    weights[n] = c.Value.GetDouble();
-                            if (weights.Count > 0) type.BotGeneration.Items.SpecialItems.Weights = weights;
-                        }
-                    }
-                }
-                catch (Exception e) { log.Error($"[VisitAPI] botloot {label}: could not be read, skipped: {e.Message}"); }
-            }
-        if (Ensure.Count > 0)
+        PackJson.Read(ContentPacks.All(log), "botloot", (label, root) =>
         {
-            var patch = new EnsureLootPatch();
-            try
+            foreach (var role in root.EnumerateObject())
             {
-                patch.Enable();
-                if (!patch.IsActive) log.Error("[VisitAPI] botloot 'ensure' did NOT arm (IsActive=false after Enable); those bots only carry the item when it happens to fit");
+                if (role.Value.ValueKind != JsonValueKind.Object) continue;
+                var key = role.Name.ToLowerInvariant();
+                if (!bots.Types.TryGetValue(key, out var type) || type?.BotInventory?.Items == null || type.BotGeneration?.Items == null)
+                { log.Error($"[VisitAPI] botloot {label}: bot type '{role.Name}' not found on this server, skipped"); continue; }
+                ApplyRole(key, type, role.Value);
             }
-            catch (Exception e) { log.Error("[VisitAPI] botloot 'ensure' failed to arm (those bots only carry the item when it happens to fit): " + e); }
-        }
+        }, (label, e) => log.Error($"[VisitAPI] botloot {label}: could not be read, skipped: {e.Message}"));
+        if (Ensure.Count > 0) Patches.Arm(new EnsureLootPatch(), log, "botloot 'ensure'", "those bots only carry the item when it happens to fit");
         return Task.CompletedTask;
+    }
+
+    /// 一个兵种（key 是小写的类型名）：ensure 记下来等补丁补；pockets / backpack / vest 的权重直接写进它的物品池
+    static void ApplyRole(string key, BotType type, JsonElement role)
+    {
+        if (role.TryGetProperty("ensure", out var ensure) && ensure.ValueKind == JsonValueKind.Array)
+            foreach (var tpl in ensure.EnumerateArray())
+                if (tpl.ValueKind == JsonValueKind.String && tpl.GetString()?.Length == 24)
+                    (Ensure.TryGetValue(key, out var list) ? list : Ensure[key] = new List<MongoId>()).Add(new MongoId(tpl.GetString()));
+        foreach (var (field, get) in new (string, Func<ItemPools, Dictionary<MongoId, double>>)[]
+                 {
+                     ("pockets", ip => ip.Pockets ??= new Dictionary<MongoId, double>()),
+                     ("backpack", ip => ip.Backpack ??= new Dictionary<MongoId, double>()),
+                     ("vest", ip => ip.TacticalVest ??= new Dictionary<MongoId, double>()),
+                 })
+            if (role.TryGetProperty(field, out var weights) && weights.ValueKind == JsonValueKind.Object)
+            {
+                var dict = get(type.BotInventory.Items);
+                foreach (var item in weights.EnumerateObject())
+                    if (item.Name.Length == 24 && item.Value.ValueKind == JsonValueKind.Number)
+                        dict[new MongoId(item.Name)] = item.Value.GetDouble();
+            }
     }
 
     public class EnsureLootPatch : AbstractPatch

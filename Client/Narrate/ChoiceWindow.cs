@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using EFT;
 using EFT.UI;
 using TMPro;
 using UnityEngine;
@@ -62,13 +62,13 @@ public static class ChoiceWindow
             Glow(win, "GlowUP", GlowTopH * s, false);
             Glow(win, "GlowBottom", GlowBottomH * s, true);
 
-            Text(win, "HeaderText", Word("DialogConfirmationWindow/Header", "关键抉择", "IMPORTANT CHOICE"), font, 30f * s, TitleColor, TitleY * s, 40f * s);
-            Text(win, "DescriptionText", Word("DialogConfirmationWindow/Description", "关键节点，无法折返", "POINT OF NO RETURN"), font, 16f * s, DescColor, DescY * s, 26f * s);
+            Text(win, "HeaderText", Loc.Text("DialogConfirmationWindow/Header", "关键抉择", "IMPORTANT CHOICE"), font, 30f * s, TitleColor, TitleY * s, 40f * s);
+            Text(win, "DescriptionText", Loc.Text("DialogConfirmationWindow/Description", "关键节点，无法折返", "POINT OF NO RETURN"), font, 16f * s, DescColor, DescY * s, 26f * s);
 
             var band = Strip(win, "Band", Color.clear, HeaderH * s, BandH * s);
             Images.TryGetValue(key, out var art);
-            var leftMask = Slot(band, "Left", art.left, 0f, 0.5f);
-            var rightMask = Slot(band, "Right", art.right, 0.5f, 1f);
+            var leftMask = Slot(band, "Left", Art(key, art.left, "yes"), 0f, 0.5f);
+            var rightMask = Slot(band, "Right", Art(key, art.right, "no"), 0.5f, 1f);
             Overlay(band, "Noise", "choice_noise.png", 1f);
 
             Strip(win, "BorderUp", Line, (HeaderH + BandH) * s, LineH * s);
@@ -76,7 +76,7 @@ public static class ChoiceWindow
             var question = Strip(win, "Question", Color.clear, qTop * s, QuestionH * s);
             Overlay(question, "Tile", "choice_hatch.png", HatchAlpha, tiled: true, flipY: true);
             Overlay(question, "InnerShadow", "choice_qshadow.png", 1f);
-            Text(win, "ChoiseText", Word(key, key, key), font, 16f * s, TitleColor, (qTop + QuestionH / 2f) * s, 30f * s);
+            Text(win, "ChoiseText", Loc.Text(key, key, key), font, 16f * s, TitleColor, (qTop + QuestionH / 2f) * s, 30f * s);
             Strip(win, "BorderBottom", Line, (qTop + QuestionH) * s, LineH * s);
 
             var btnY = qTop + QuestionH + LineH + ButtonsH / 2f;
@@ -89,8 +89,8 @@ public static class ChoiceWindow
                 Close();
                 try { act?.Invoke(); } catch (Exception e) { Plugin.Log.LogWarning("[choice] Choice callback failed: " + e.Message); }
             }
-            Button(win, Word("Yes", "是", "Yes"), size, font, -BtnGap / 2f * s, btnY * s, s, () => Pick(yes), leftMask);
-            Button(win, Word("No", "否", "No"), size, font, BtnGap / 2f * s, btnY * s, s, () => Pick(no), rightMask);
+            Button(win, Loc.Text("Yes", "是", "Yes"), size, font, -BtnGap / 2f * s, btnY * s, s, () => Pick(yes), leftMask);
+            Button(win, Loc.Text("No", "否", "No"), size, font, BtnGap / 2f * s, btnY * s, s, () => Pick(no), rightMask);
 
             Frame9(win, s);
 
@@ -124,12 +124,7 @@ public static class ChoiceWindow
         return rt;
     }
 
-    static void Stretch(RectTransform rt)
-    {
-        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
-        rt.pivot = new Vector2(0.5f, 0.5f);
-        rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
-    }
+    static void Stretch(RectTransform rt) => rt.Stretch().pivot = new Vector2(0.5f, 0.5f);
 
     static void Center(RectTransform rt, float w, float h)
     {
@@ -148,10 +143,10 @@ public static class ChoiceWindow
         return rt;
     }
 
-    static RectTransform Overlay(Transform parent, string name, string file, float alpha, bool tiled = false, bool flipY = false)
+    static void Overlay(Transform parent, string name, string file, float alpha, bool tiled = false, bool flipY = false)
     {
         var sprite = VisitArt.Load(file);
-        if (sprite == null) return null;
+        if (sprite == null) return;
         var rt = Box(parent, name, new Color(1f, 1f, 1f, alpha));
         var img = rt.GetComponent<Image>();
         img.sprite = sprite;
@@ -159,7 +154,6 @@ public static class ChoiceWindow
         if (tiled) img.type = Image.Type.Tiled;
         Stretch(rt);
         if (flipY) rt.localScale = new Vector3(1f, -1f, 1f);
-        return rt;
     }
 
     static void Glow(RectTransform win, string name, float height, bool bottom)
@@ -193,13 +187,31 @@ public static class ChoiceWindow
         rt.offsetMax = new Vector2(5f * s, 5f * s);
     }
 
-    static RectTransform Slot(RectTransform band, string name, string file, float x0, float x1)
+    static readonly Dictionary<string, Sprite> _files = new();
+
+    /// 10-15：1.1 那两条键的图内嵌在 DLL 里；.dlg `confirm: 键名` 的图从 BepInEx\config\VisitAPI\choices\键名_yes.png / _no.png 读
+    /// （700×410，左「是」右「否」）。缺图只剩暗色遮罩，记一条警告
+    static Sprite Art(string key, string embedded, string side)
+    {
+        if (embedded != null) return VisitArt.Load(embedded);
+        var file = Path.Combine(DialogFiles.Loader.BaseDir, "choices", key + "_" + side + ".png");
+        if (_files.TryGetValue(file, out var hit)) return hit;
+        Sprite sprite = null;
+        try
+        {
+            if (File.Exists(file)) sprite = VisitArt.Decode(File.ReadAllBytes(file));
+            else Plugin.Log.LogWarning("[choice] art missing: " + file);
+        }
+        catch (Exception e) { Plugin.Log.LogWarning("[choice] failed to load " + file + ": " + e.Message); }
+        return _files[file] = sprite;
+    }
+
+    static RectTransform Slot(RectTransform band, string name, Sprite sprite, float x0, float x1)
     {
         var slot = Box(band, name, new Color(0f, 0f, 0f, 0f));
         slot.anchorMin = new Vector2(x0, 0f); slot.anchorMax = new Vector2(x1, 1f);
         slot.pivot = new Vector2(0.5f, 0.5f);
         slot.offsetMin = Vector2.zero; slot.offsetMax = Vector2.zero;
-        var sprite = file != null ? VisitArt.Load(file) : null;
         if (sprite != null)
         {
             var img = slot.GetComponent<Image>();
@@ -245,8 +257,8 @@ public static class ChoiceWindow
         RectTransform rt = null;
         try
         {
-            // 09-26：以前随手取场景里第一个 DefaultUIButton 当模板，抓到过聊天窗克隆的回复按钮、跳过它之后又抓到别的带电话图标的原生按钮。
-            // 现在固定用原生聊天窗的「收取全部」按钮（图标本来就是空的，聊天窗克隆的也是它），找不到才退回第一个不是我们克隆的
+            // 09-26：随手取场景里第一个 DefaultUIButton 当模板，抓到过聊天窗克隆的回复按钮、跳过它之后又抓到别的带电话图标的原生按钮。
+            // 所以固定用原生聊天窗的「收取全部」按钮（图标本来就是空的，聊天窗克隆的也是它），找不到才退回第一个不是我们克隆的
             var candidates = UnityEngine.Object.FindObjectsOfType<DefaultUIButton>(true)
                 .Where(b => b != null && b._headerLabel != null && b.GetComponent<RectTransform>() != null
                             && b.GetComponent<VisitClonedButton>() == null && !b.name.StartsWith("Btn_", StringComparison.Ordinal)).ToList();
@@ -272,14 +284,12 @@ public static class ChoiceWindow
                 rt = (RectTransform)go.transform;
             }
         }
-        catch (Exception e) { Plugin.Log.LogWarning("[choice] Failed to clone native button, using plain text button: " + e.Message); rt = null; }
+        catch (Exception e) { Plugin.Log.LogWarning("[choice] Failed to clone native button, using plain text button: " + e.Message); }
 
         if (rt == null)
         {
             rt = Box(win, "Btn_" + text, new Color(1f, 1f, 1f, 0.04f));
-            var label = Text(rt, "Text", text, font, size, TitleColor, 0f, BtnH * s);
-            label.anchorMin = Vector2.zero; label.anchorMax = Vector2.one;
-            label.offsetMin = Vector2.zero; label.offsetMax = Vector2.zero;
+            Stretch(Text(rt, "Text", text, font, size, TitleColor, 0f, BtnH * s));
         }
         rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
         rt.sizeDelta = new Vector2(BtnW * s, BtnH * s);
@@ -318,15 +328,9 @@ public static class ChoiceWindow
 
     static TMP_Text FontSource(Transform root)
     {
-        var t = root.GetComponentsInChildren<TextMeshProUGUI>(true).FirstOrDefault(x => x != null && x.font != null);
+        var t = UiBundle.FirstFont(root);
         if (t == null) Plugin.Log.LogWarning("[choice] No existing text found on dialogue screen, confirmation window uses default font");
         return t;
-    }
-
-    static string Word(string key, string ch, string en)
-    {
-        try { var t = key.Localized(); if (!string.IsNullOrWhiteSpace(t) && t != key) return t; } catch { }
-        return Loc.Pick(ch, en);
     }
 
     class Poller : MonoBehaviour
@@ -334,7 +338,6 @@ public static class ChoiceWindow
         public Canvas Canvas;
         readonly List<(RectTransform rect, Action click, Action enter, Action exit)> _buttons = new();
         int _hover = -1;
-        bool _first = true;
 
         public void Add(RectTransform rect, Action click, Action enter, Action exit) => _buttons.Add((rect, click, enter, exit));
 
@@ -346,20 +349,13 @@ public static class ChoiceWindow
             var hit = -1;
             for (var i = 0; i < _buttons.Count; i++)
                 if (_buttons[i].rect != null && RectTransformUtility.RectangleContainsScreenPoint(_buttons[i].rect, pos, cam)) { hit = i; break; }
-            if (_first)
-            {
-                _first = false;
-            }
             if (hit != _hover)
             {
                 if (_hover >= 0) Safe(_buttons[_hover].exit);
                 if (hit >= 0) Safe(_buttons[hit].enter);
                 _hover = hit;
             }
-            if (hit >= 0 && Input.GetMouseButtonDown(0))
-            {
-                Safe(_buttons[hit].click);
-            }
+            if (hit >= 0 && Input.GetMouseButtonDown(0)) Safe(_buttons[hit].click);
         }
 
         static void Safe(Action a)
@@ -387,21 +383,11 @@ public static class ChoiceWindow
         public Action Enter, Exit, Click, Down, Up;
         bool _inside;
 
-        public void OnPointerEnter(PointerEventData e)
-        {
-            _inside = true;
-            Safe(Enter);
-        }
-
+        public void OnPointerEnter(PointerEventData e) { _inside = true; Safe(Enter); }
         public void OnPointerExit(PointerEventData e) { _inside = false; Safe(Exit); }
         public void OnPointerDown(PointerEventData e) => Safe(Down);
-        public void OnPointerUp(PointerEventData e) { Safe(Up); if (_inside) Fire("pointer up"); }
-        public void OnPointerClick(PointerEventData e) => Fire("click");
-
-        void Fire(string how)
-        {
-            Safe(Click);
-        }
+        public void OnPointerUp(PointerEventData e) { Safe(Up); if (_inside) Safe(Click); }
+        public void OnPointerClick(PointerEventData e) => Safe(Click);
 
         static void Safe(Action a)
         {

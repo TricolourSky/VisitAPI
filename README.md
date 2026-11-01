@@ -4,7 +4,7 @@
 
 An open-source framework that brings EFT 1.x-style trader **Visit** dialogues to SPT — write plain-text `.dlg` scripts to give any trader (including custom traders) a 3D room conversation, story chapters, standing rewards, quest zones and in-raid dialogue triggers. Content ships as drop-in **packs**; the EFT 1.1 main story with the trader rooms is one such pack.
 
-> Target: **SPT 4.1.x** (4.1.0 or newer 4.1 release, EFT 0.16.9) · Client: BepInEx 5.4.23 plugin (net472) · Server: SPT mod (net10.0) · Fika-compatible · Current version **1.3.6**
+> Target: **SPT 4.1.x** (4.1.0 or newer 4.1 release, EFT 0.16.9) · Client: BepInEx 5.4.23 plugin (net472) · Server: SPT mod (net10.0) · Fika-compatible · Current version **1.3.7**
 
 ![A custom trader's Visit dialogue](docs/Dialogue.png)
 
@@ -12,12 +12,13 @@ An open-source framework that brings EFT 1.x-style trader **Visit** dialogues to
 
 - **Visit button** — a retail-style "Visit" tab on the trader screen that opens a 3D room conversation
 - **Trader rooms** — the 1.1 rooms of seven vanilla traders (Prapor, Therapist, Fence, Skier, Mechanic, Ragman, Jaeger) with lip-sync, animations, ambient audio and the retail loading screen; they come with the EFT11 add-on (see Install)
-- **.dlg scripts** — nodes, options, condition gates (level / standing / quest state / `ifitems`), branch memory (`set:` / `ifvar:`), one-shot options (`once` / `always` / `first`), image / video / 3D-scene backgrounds, voice + BGM, standing rewards (`standing:`), quest transitions (`accept:` / `complete:` / `handover:` / `setstatus:`)
+- **.dlg scripts** — nodes, options, condition gates (level / standing / quest state / `ifitems`), branch memory (`set:` / `ifvar:`), one-shot options (`once` / `always` / `first`), image / video / 3D-scene backgrounds, voice + BGM, standing rewards (`standing:`), quest transitions (`accept:` / `complete:` / `handover:` / `setstatus:`), the 1.1 point-of-no-return confirmation window (`confirm: key [-> node]`: the question is a locale key, pictures go to `config\VisitAPI\choices\key_yes.png` / `_no.png`), cross-script jumps (`-> traderId:node`: switch to a node of another trader's script without closing, name and portrait follow)
 - **Several languages in one script** — put `en: translation` on the line right under any displayed line; the game shows the translation for its language and falls back to the original. All 17 SPT language codes work
 - **Native narrate pipeline** — vanilla traders run on EFT's built-in visit system with retail dialogue playback (lip-sync, subtitles and branching variables are native), including the 1.1 key-decision confirmation window
 - **Quest system** — quest JSON in packs with fully native network transactions (accept / handover / complete), quest images, quest items with 3D models and their raid spawn points; rewards of a quest finished inside a raid arrive by mail when the raid ends
 - **Quest zones** — `zones\*.json` in a pack places visit and item-placement zones at map coordinates; they are created as the game's own triggers when a raid starts, optionally with in-raid subtitles, voice and an interaction prompt, and can be limited to hours of the day (`hours`)
 - **Story spawn points** — `spawns\*.json` in a pack spawns a group of bots near map coordinates while a quest is in a chosen state and keeps them at their post; these can be limited to hours of the day too
+- **AI teammates** — a story can unlock up to four teammates; the player invites them from the main-menu group panel and they spawn next to them at the start of the next PMC raid, follow in formation, take the voice-wheel commands (follow me / hold position / regroup / go go go), heal and reload on their own, and never shoot human players. The bot type, difficulty, call signs and the name used in notices come from the pack's `pack.json` (see Content packs); by default they are the game's own Rogues and no other mod is needed. With SAIN installed, SAIN does their fighting on its most aggressive personality; without it the bot type's own game AI fights
 - **In-raid & hideout triggers** — `trigger:` lines place dialogue points at map coordinates (distance + view cone + quest gating), or fire a number of seconds after the raid starts with `enter <seconds>`; `once` makes a trigger fire only once per profile
 - **Timed trader contact** — a story quest whose prerequisite carries `availableAfter` waits for the timer, then the 1.1 gold phone badge lights up on the trader's card and next to your name; talk to the trader to take the quest. The same gold phone points you to the trader for quests that are accepted or handed in through dialogue only
 - **Chat invites** — as in 1.1, a trader writes to you in chat when a story quest becomes available; the letter's Visit button takes you to the trader's room, and Reply opens the conversation on the spot, with voice and subtitles, for contacts that have no room (the radio, the laptop)
@@ -41,13 +42,13 @@ An open-source framework that brings EFT 1.x-style trader **Visit** dialogues to
 2. Put your `.dlg` scripts into `<SPT>\BepInEx\config\VisitAPI\<traderId>.dlg`; backgrounds and audio go into `backgrounds\` and `audio\` next to them.
 3. Quests, texts, zones and images of your own go into a pack: `<SPT>\SPT_Runtime\user\mods\VisitAPI-Server\packs\<any name>\` (the editor creates one for you).
 
-**Upgrading from 1.3.5:** extract the new framework zip over the game folder. The EFT11 add-on 1.2.0 adds Blue Fire and Accidental Witness and needs framework 1.3.6; extract it over the old add-on.
+**Upgrading from 1.3.6:** extract the new framework zip over the game folder; existing scripts and packs need no changes. Everything 1.3.7 adds is optional: two `.dlg` directives (the `confirm:` point-of-no-return window and `-> traderId:node` cross-script jumps), a few new quest / pack fields (`visitapi.lockTraders`, loot `oneOf` groups, `stay` zones with event spawns, AI teammates in `pack.json`), hideout trigger lines that merge into their area's own menu, a chat-invite Reply that jumps into the hideout, pack traders hidden until unlocked, and 1.2-style banner colours. The EFT11 add-on 1.2.0 is unchanged.
 
 **Upgrading from 1.3.4:** extract the new framework zip over the game folder; the EFT11 add-on stays as it is. Two things behave differently: the seconds of `enter <seconds>` now count from the moment the raid starts (they used to start counting during loading, so numbers that were padded for that can be lowered), and a quest finished inside a raid no longer puts its rewards into your backpack on the spot — they are mailed when the raid ends.
 
 **Upgrading from 1.3.3:** extract the new framework zip over the game folder, then the EFT11 add-on 1.1.0 over the old add-on (1.1.0 adds The Labyrinth and needs framework 1.3.4 or newer). The settings page was trimmed down (see Configuration).
 
-**Upgrading from 1.3.2 or older:** extract the new framework zip over the game folder, then move `VisitAPI-Server\db\`, `images\` and `bundles\` into `VisitAPI-Server\packs\<any name>\` (see the layout below), and rename `BepInEx\plugins\VisitAPI\bundles\` to `ui\` and `scenes\bundles\vendors\` to `rooms\`. The old places are still read in 1.3.x, with a warning in the log. If you had the experimental 1.1 story data in `db\`, delete it and install the EFT11 add-on instead.
+**Upgrading from 1.3.2 or older:** extract the new framework zip over the game folder, then move `VisitAPI-Server\db\`, `images\` and `bundles\` into `VisitAPI-Server\packs\<any name>\` (see the layout below), and rename `BepInEx\plugins\VisitAPI\bundles\` to `ui\` and `scenes\bundles\vendors\` to `rooms\`. Since 1.3.7 the old server-side `db\`, `images\` and `bundles\` next to the DLL are no longer read (the log warns while `db\` is still there); the old client folder names are still read in 1.3.x. If you had the experimental 1.1 story data in `db\`, delete it and install the EFT11 add-on instead.
 
 ## Content packs
 
@@ -55,7 +56,7 @@ One pack = one folder under `SPT_Runtime\user\mods\VisitAPI-Server\packs\`:
 
 ```
 packs\<pack>\
-  pack.json          name, version, requires (e.g. "~1.3.4"), author, description {ch, en}
+  pack.json          name, version, requires (e.g. "~1.3.4"), author, description {ch, en}, optional escort (AI teammates, below)
   LICENSE            optional, for published packs
   quests\*.json      SPT quest files (chapters are quests with a few switches, see below)
   locales\<lang>.json  quest texts, journal entries, objective hints, names of the pack's traders
@@ -64,7 +65,7 @@ packs\<pack>\
   voice\<trader id>\ voice lines (.ogg / .wav / .mp3) for dialogues of traders without a room; file name = the voice id the dialogue uses
   zones\*.json       quest zones (map, position, size, optional subtitles and hours {from, to})
   spawns\*.json      story spawn points (map, at {x,y,z} + radius, role, min / max, difficulty, quest + statuses, optional hours and minX / maxX / minZ / maxZ bounds)
-  items\*.json       quest item templates; loot\*.json their raid spawn points
+  items\*.json       quest item templates; loot\*.json their raid spawn points (a spawn point may carry "visitapi": {"oneOf": "<group>"}: of each group only one point spawns per raid, weighted by probability)
   bundles\ + bundles.json   Unity bundles for those items
   variables\groups.json     1.1 variable groups (a group's value is the sum of its members)
   images\banners\    quest banners (quest `image`, served as /files/quest/icon/<name>)
@@ -72,6 +73,21 @@ packs\<pack>\
 ```
 
 Packs load in name order. Two packs carrying the same quest, zone, item, image or text key are reported in the server log and the first one wins. `requires` is checked against the framework version (`~1.3.4` = any 1.3.x from 1.3.4 up); a mismatch is logged but the pack still loads. The client-side files of a pack live in `BepInEx\plugins\VisitAPI\rooms\` (trader rooms) — the framework's own UI bundles are in `ui\` next to it.
+
+**AI teammates** are set up in `pack.json`. Every field is optional, and if several packs have an `escort` block the first one in name order wins:
+
+```jsonc
+"escort": {
+  "role": "exUsec",                              // bot type (WildSpawnType); a type added by a mod works too
+  "difficulty": "normal",                        // easy / normal / hard / impossible
+  "names": ["Ghost", "Raven"],                   // fixed call signs; without it they come from the bot type's name list
+  "nameTypes": ["exusec"],                       // which name lists to draw from (file names in SPT's bots\types)
+  "excludeNames": ["Abyss"],                     // names to leave out, e.g. story characters
+  "label": { "ch": "队友", "en": "Teammates" }   // how the "in position" and command notices name them
+}
+```
+
+A dialogue unlocks them with `set: escort_max=N` (1–4; they then show up in the friend list and can be invited) or orders them directly with `set: escort=N`. For testing, the console commands `visit_setvar escort_max 4` and `visit_setvar escort 2` do the same. A pack that uses a bot type from another mod needs that mod and whatever it requires.
 
 ## Build from source
 
@@ -117,9 +133,9 @@ A chapter is an ordinary quest JSON with a few switches; its "complete quest" ob
 ```
 
 - The chapter starts when any sub-quest starts and is turned in automatically once all sub-quests are done (mail and rewards go through the native pipeline); a sub-quest marked as an ending finishes the chapter, and there can be several
-- `notes`: a journal entry unlocks at Started / Success / Fail; an objective can also carry `questNoteId` (unlocks the moment that objective is ticked). Journal text lives in the locale under the note id
-- Sub-quest switches under `visitapi`: `autoStart` (accepted once the chapter has started and its own prerequisites are met; a sub-quest without a quest prerequisite also waits until the entry before it in the chapter's list has ended), `autoFinish` (turned in as soon as its objectives are met), `startAfter` (a quest id or a list of them: the quest is accepted once any one of them is completed), `anyOf` (`true`, or a list of objective ids: any one of them completes the quest), `items` (related item template ids; `craft:` / `offer:` prefixes mark the type), `noteLinks` (related items per journal entry), `unlockTraderOnReady` (the trader unlocks when the quest becomes ready), `setVariables` (`{ "Started" / "Success" / "Fail": { "<variable id>": value } }`: profile variables set when the quest reaches that status, like the 1.1 GlobalVariable rewards)
-- Chat invite: give a quest 1.1's `mailSettings` (`isEnabled`, `fromTraderId`, `entryPoint`, `dialogueId`, `dialogueTraderId`) and the locale text `<quest id> whileAvailableMessageText`; when the quest becomes available that trader sends the letter, once per profile. `entryPoint` `InLobby` gives it a Visit button (the trader's room), `ViaRadio` / `ViaNotebook` a Reply button (the dialogue opens on the spot)
+- `notes`: a journal entry unlocks at Started / Success / Fail; an objective can also carry `questNoteId` (unlocks the moment that objective is ticked). Journal text lives in the locale under the note id. An optional sub-objective (one with `parentId`) can carry `doneWithParent: true`: it is ticked as done the moment its parent completes, instead of 1.1's "skipped"
+- Sub-quest switches under `visitapi`: `autoStart` (accepted once the chapter has started and its own prerequisites are met; a sub-quest without a quest prerequisite also waits until the entry before it in the chapter's list has ended), `autoFinish` (turned in as soon as its objectives are met), `startAfter` (a quest id or a list of them: the quest is accepted once any one of them is completed), `anyOf` (`true`, or a list of objective ids: any one of them completes the quest), `items` (related item template ids; `craft:` / `offer:` prefixes mark the type), `noteLinks` (related items per journal entry), `unlockTraderOnReady` (the trader unlocks when the quest becomes ready), `lockTraders` (a list of trader ids locked again when the quest is completed, the reverse of `unlockTraderOnReady`), `setVariables` (`{ "Started" / "Success" / "Fail": { "<variable id>": value } }`: profile variables set when the quest reaches that status, like the 1.1 GlobalVariable rewards)
+- Chat invite: give a quest 1.1's `mailSettings` (`isEnabled`, `fromTraderId`, `entryPoint`, `dialogueId`, `dialogueTraderId`) and the locale text `<quest id> whileAvailableMessageText`; when the quest becomes available that trader sends the letter, once per profile. `entryPoint` `InLobby` gives it a Visit button (the trader's room), `ViaRadio` / `ViaNotebook` a Reply button (the dialogue opens on the spot). If the dialogue trader has a `.dlg` with a hideout trigger line gated on this quest (`trigger: hideout … if <quest id>=AvailableForStart`), Reply instead enters the hideout, puts you in front of that trigger point and fires it
 - `unlockDialogue`: a list of trader ids whose Visit button opens only after this quest is completed; `unlockLocations`: maps unlocked by this quest (new profiles only)
 - `order`: sort position of your own chapter on the STORY page, smaller first (the official 1.1 chapters are fixed at 1–9; without `order` the `CustomChapterOrder` setting applies, default 100); `dialogOnly`: accepting and handing in go through dialogue only; the task list shows no button and the gold phone on that trader points the way. In such a quest a "talk to someone" objective ticks only once the conversation hands the quest in
 - `mailRewardsOnly` on a chapter: letters of that chapter and its sub-quests are sent only when they carry rewards

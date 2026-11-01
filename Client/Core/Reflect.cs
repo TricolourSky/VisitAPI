@@ -21,17 +21,10 @@ public static class Reflect
         return true;
     }
 
-    public static int Copy(Component from, Component to, Type type, out int kept)
+    public static void Copy(Component from, Component to, Type type)
     {
-        int copied = 0;
-        kept = 0;
         foreach (var f in type.GetFields(Any))
-        {
-            if (!Serialized(f) || KeepOurs(f.FieldType)) { kept++; continue; }
-            f.SetValue(to, f.GetValue(from));
-            copied++;
-        }
-        return copied;
+            if (Serialized(f) && !KeepOurs(f.FieldType)) f.SetValue(to, f.GetValue(from));
     }
 
     static bool Assign(object target, FieldInfo f, object value)

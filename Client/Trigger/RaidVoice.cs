@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using UnityEngine;
-using UnityEngine.Networking;
 
 namespace VisitAPI.Native;
 
@@ -30,10 +29,9 @@ public static class RaidVoice
                 {
                     var path = Dump(file);
                     if (path == null) { Plugin.Log.LogWarning("[voice] embedded audio not found: " + file); yield break; }
-                    using var req = UnityWebRequestMultimedia.GetAudioClip("file:///" + path.Replace('\\', '/'), file.EndsWith(".wav", System.StringComparison.OrdinalIgnoreCase) ? AudioType.WAV : AudioType.OGGVORBIS);
-                    yield return req.SendWebRequest();
-                    if (req.result != UnityWebRequest.Result.Success) { Plugin.Log.LogWarning($"[voice] audio load failed {file}: {req.error}"); yield break; }
-                    clip = DownloadHandlerAudioClip.GetContent(req);
+                    string error = null;
+                    yield return AudioFiles.Decode(path, c => clip = c, e => error = e);
+                    if (error != null) { Plugin.Log.LogWarning($"[voice] audio load failed {file}: {error}"); yield break; }
                     if (clip == null) { Plugin.Log.LogWarning("[voice] could not decode an AudioClip from audio: " + file); yield break; }
                     clip.name = file;
                     _clips[file] = clip;

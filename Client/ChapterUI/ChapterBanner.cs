@@ -54,7 +54,7 @@ namespace VisitAPI.ChapterUI
         {
             static bool Prefix(Notification notification)
             {
-                if (!(notification is ChapterBanner b)) return true;
+                if (notification is not ChapterBanner b) return true;
                 if (b.Silent) return false;
                 if (b.Clip == null) return true;
                 if (Singleton<GUISounds>.Instantiated) Singleton<GUISounds>.Instance.PlaySound(b.Clip);

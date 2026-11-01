@@ -83,10 +83,6 @@ public static class SubtitleReplay
     [HarmonyPatch(typeof(SubtitlesView), nameof(SubtitlesView.method_1))]
     public static class IgnoreStaleEnd
     {
-        static bool Prefix(SubtitlesEndEvent endEvent)
-        {
-            if (endEvent == null || !IsStaleEnd(endEvent.SubtitlesSource)) return true;
-            return false;
-        }
+        static bool Prefix(SubtitlesEndEvent endEvent) => endEvent == null || !IsStaleEnd(endEvent.SubtitlesSource);
     }
 }

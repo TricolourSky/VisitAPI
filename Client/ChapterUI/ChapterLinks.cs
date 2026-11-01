@@ -16,7 +16,8 @@ namespace VisitAPI.ChapterUI
     public partial class MainQuestTabView
     {
         static readonly Dictionary<string, Item> _linkItems = new();
-        readonly Dictionary<GameObject, string> _linkMarkers = new();
+        /// 每个关联物品栏（容器）当前摆着的未读记号：整栏重填就整条换掉（10-24）
+        readonly Dictionary<RectTransform, List<(GameObject marker, string key)>> _linkMarkers = new();
 
         void FillLinks(MainQuestLinkedItemsListView v, IEnumerable<(ChapterModel.ELink type, string tpl, string raw)> items)
         {
@@ -27,6 +28,8 @@ namespace VisitAPI.ChapterUI
             if (template == null) return;
             var pool = ViewPool.For(v._itemsContainer, template);
             pool.ReleaseAll();
+            var markers = new List<(GameObject marker, string key)>();
+            _linkMarkers[v._itemsContainer] = markers;
             foreach (var (type, tpl, raw) in list)
             {
                 var item = LinkItem(tpl); if (item == null) continue;
@@ -46,12 +49,20 @@ namespace VisitAPI.ChapterUI
                     (view.GetComponent<HoverTooltipArea>() ?? view.AddComponent<HoverTooltipArea>()).Init(ItemUiContext.Instance.Tooltip, item.LocalizedName(), true);
                 TypeBadge(link, type);
                 var marker = link != null ? link._unreadMarker : null; var key = "item:" + raw;
-                if (marker != null) { marker.SetActive(!ReadState.IsRead(key)); _linkMarkers[marker] = key; }
-                ReadState.OnHover(view, () => { ReadState.MarkRead(new[] { key }); RefreshUnread(); });
+                if (marker != null) { marker.SetActive(!ReadState.IsRead(key)); markers.Add((marker, key)); }
+                HoverRead(view, key);
                 var btn = view.GetComponent<Button>() ?? view.AddComponent<Button>();
                 btn.onClick.RemoveAllListeners();
                 btn.onClick.AddListener(() => Inspect(item));
             }
+        }
+
+        /// 关联物品的未读记号跟着已读表走
+        void RefreshLinkUnread()
+        {
+            foreach (var markers in _linkMarkers.Values)
+                foreach (var (marker, key) in markers)
+                    if (marker != null) marker.SetActive(!ReadState.IsRead(key));
         }
 
         static void TypeBadge(MainQuestLinkedItemView link, ChapterModel.ELink type)
@@ -98,17 +109,17 @@ namespace VisitAPI.ChapterUI
             frame.transform.SetAsFirstSibling(); back.transform.SetSiblingIndex(1); tint.transform.SetSiblingIndex(2);
         }
 
+        /// 格子里的一层铺满的底图（池化复用：已经有同名的就只改颜色）
         static Image Layer(RectTransform parent, string name, int inset, Color color)
         {
             var old = parent.Find(name);
             var img = old != null ? old.GetComponent<Image>() : null;
             if (img == null)
             {
-                var rt = (RectTransform)new GameObject(name, typeof(RectTransform), typeof(Image)).transform;
-                rt.SetParent(parent, false);
+                img = UiFactory.NewImage(parent, name);
+                var rt = (RectTransform)img.transform;
                 rt.Stretch();
                 rt.offsetMin = new Vector2(inset, inset); rt.offsetMax = new Vector2(-inset, -inset);
-                img = rt.GetComponent<Image>(); img.raycastTarget = false;
             }
             img.color = color;
             return img;
@@ -118,11 +129,12 @@ namespace VisitAPI.ChapterUI
         {
             var old = parent.Find("ItemIcon");
             if (old != null) { old.SetAsLastSibling(); return old.GetComponent<Image>(); }
-            var rt = (RectTransform)new GameObject("ItemIcon", typeof(RectTransform), typeof(Image)).transform;
-            rt.SetParent(parent, false);
+            var img = UiFactory.NewImage(parent, "ItemIcon");
+            var rt = (RectTransform)img.transform;
             rt.Stretch();
             rt.offsetMin = new Vector2(4f, 4f); rt.offsetMax = new Vector2(-4f, -4f);
-            var img = rt.GetComponent<Image>(); img.preserveAspect = true; img.raycastTarget = false; return img;
+            img.preserveAspect = true;
+            return img;
         }
     }
 }

@@ -36,9 +36,21 @@ public static class Narrating
     }
 }
 
+/// 战局 / 藏身处状态的几个判断
 public static class Raid
 {
     public static bool Now => Singleton<AbstractGame>.Instantiated && Singleton<AbstractGame>.Instance.InRaid;
 
+    /// 战局正式开始了（倒计时结束、Status = Started）；加载、倒计时、撤离中都不算
+    public static bool Started => Singleton<AbstractGame>.Instantiated && Singleton<AbstractGame>.Instance.Status == GameStatus.Started;
+
+    /// 当前世界里的本机玩家；没有世界就 null
+    public static Player MainPlayer => Singleton<GameWorld>.Instantiated ? Singleton<GameWorld>.Instance.MainPlayer : null;
+
+    public static bool Alive(Player p) => p != null && p.HealthController != null && p.HealthController.IsAlive;
+
     public static bool IsHideout(string locationId) => (locationId ?? "").IndexOf("hideout", StringComparison.OrdinalIgnoreCase) >= 0;
+
+    /// 当前世界是藏身处
+    public static bool InHideout => Singleton<GameWorld>.Instantiated && IsHideout(Singleton<GameWorld>.Instance.LocationId);
 }

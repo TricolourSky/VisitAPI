@@ -11,9 +11,6 @@ public static class SceneShaders
     static readonly HashSet<string> _missed = new(StringComparer.Ordinal);
     static readonly Dictionary<Type, FieldInfo[]> _shaderFields = new();
 
-    // 09-25：原来的设置项 Narrate.ShaderSource（默认 game）去掉了，固定用游戏自带的同名着色器
-    const bool GameShaders = true;
-
     public static void Snapshot()
     {
         if (_shaders != null) return;
@@ -28,7 +25,7 @@ public static class SceneShaders
             foreach (var mat in rend.sharedMaterials)
             {
                 if (mat == null || mat.shader == null) continue;
-                if (mat.shader.isSupported && !GameShaders) continue;
+                // 09-25 起固定用游戏自带的同名着色器：包里的能用也换掉
                 if (mat.shader.isSupported)
                 {
                     if (_shaders.TryGetValue(mat.shader.name, out var own) && own != null && own != mat.shader) Swap(mat, own);
@@ -80,7 +77,7 @@ public static class SceneShaders
 
     internal static void FixDecal(Material mat)
     {
-        if (mat == null || mat.shader == null || _shaders == null || !GameShaders) return;
+        if (mat == null || mat.shader == null || _shaders == null) return;
         if (_shaders.TryGetValue(mat.shader.name, out var own) && own != null && own != mat.shader) mat.shader = own;
     }
 

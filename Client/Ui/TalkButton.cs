@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Linq;
 using Comfort.Common;
 using EFT.Quests;
 using EFT.UI;
@@ -30,7 +29,7 @@ public static class TalkButton
         _screen = __instance;
         var traderId = __instance.Trader?.Id;
         var tree = DialogFiles.Tree(traderId);
-        var canNarrate = tree == null && traderId != null && NarrateEntry.CanVisit(traderId) && DialogueOpen(traderId, __instance.QuestController);
+        var canNarrate = tree == null && CanNarrate(traderId, __instance.QuestController);
         var show = !TabRouter.Active && (canNarrate || (tree != null && TabPasses(tree, __instance)));
         if (_button == null && show) _button = TalkButtonUi.Build(__instance, Open);
         if (_button == null) return;
@@ -49,11 +48,9 @@ public static class TalkButton
         catch (System.Exception e) { Plugin.Log.LogWarning("[talk] Visit button recolor failed: " + e.Message); }
     }
 
-    static bool DialogueOpen(string traderId, QuestController qc)
-    {
-        var state = QuestFlags.DialogueUnlocked(traderId, qc);
-        return state != false;
-    }
+    /// 能不能点「访问」进 3D 房间：有房间包、商人对话没被剧情锁着（锁没锁和 TraderBadge 共用 DialogueOpen）
+    static bool CanNarrate(string traderId, QuestController qc) =>
+        traderId != null && NarrateEntry.CanVisit(traderId) && TraderBadge.DialogueOpen(traderId, qc);
 
     static bool TabPasses(DialogTree tree, TraderScreensGroup tsg)
     {
@@ -81,7 +78,7 @@ public static class TalkButton
             Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.ButtonClick);
             var id = _screen.Trader.Id;
             var tree = DialogFiles.Tree(id);
-            if (tree == null && NarrateEntry.CanVisit(id) && DialogueOpen(id, _screen.QuestController))
+            if (tree == null && CanNarrate(id, _screen.QuestController))
             {
                 NarrateEntry.Visit(id);
                 Plugin.Instance.StartCoroutine(Rearm());
@@ -118,20 +115,18 @@ public static class TalkButtonUi
     {
         Sprite normal = VisitArt.Load("visit_tab.png"), hover = VisitArt.Load("visit_tab_hover.png"), icon = VisitArt.Load("visit_icon.png");
         if (normal == null || hover == null) return null;
-        var go = new GameObject("VisitTalkButton", typeof(RectTransform), typeof(Image), typeof(Button));
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(screen._closeButton.transform.parent, false);
-        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 1f);
-        rt.pivot = new Vector2(0.5f, 0f);
-        rt.sizeDelta = new Vector2(150f, 26f);
+        // 位置由 Place 按商人卡容器的顶边现算，这里只定锚点（顶边中点）、轴心（底边中点）和尺寸
+        var rt = Chat11.Rect(screen._closeButton.transform.parent, "VisitTalkButton", new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 0f), Vector2.zero, new Vector2(150f, 26f), false, typeof(Image), typeof(Button));
+        var go = rt.gameObject;
         go.GetComponent<Image>().sprite = normal;
         var btn = go.GetComponent<Button>();
         btn.transition = Selectable.Transition.SpriteSwap;
         btn.spriteState = new SpriteState { highlightedSprite = hover, pressedSprite = hover, disabledSprite = normal };
         btn.onClick.AddListener(onClick);
-        if (icon != null) { var im = Child(rt, "Icon", new Vector2(-24f, 0f), new Vector2(17f, 16f)).AddComponent<Image>(); im.sprite = icon; im.raycastTarget = false; }
-        var label = Child(rt, "Label", new Vector2(7f, -1f), new Vector2(104f, 26f)).AddComponent<TextMeshProUGUI>();
-        label.font = screen.GetComponentsInChildren<TMP_Text>(true).Select(t => t.font).FirstOrDefault(f => f != null);
+        var mid = new Vector2(0.5f, 0.5f);
+        if (icon != null) Chat11.Img(rt, "Icon", icon, mid, mid, mid, new Vector2(-24f, 0f), new Vector2(17f, 16f), preserveAspect: false);
+        var label = Chat11.Rect(rt, "Label", mid, mid, mid, new Vector2(7f, -1f), new Vector2(104f, 26f)).gameObject.AddComponent<TextMeshProUGUI>();
+        label.font = Chat11.FirstFont(screen);
         label.text = Loc.Pick("访问", "VISIT");
         label.fontSize = 16f;
         label.alignment = TextAlignmentOptions.Center;
@@ -192,15 +187,5 @@ public static class TalkButtonUi
         if (icon != null) icon.color = ink;
         var label = button.transform.Find("Label")?.GetComponent<TextMeshProUGUI>();
         if (label != null) label.color = ink;
-    }
-
-    static GameObject Child(RectTransform parent, string name, Vector2 pos, Vector2 size)
-    {
-        var rt = (RectTransform)new GameObject(name, typeof(RectTransform)).transform;
-        rt.SetParent(parent, false);
-        rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
-        rt.anchoredPosition = pos;
-        rt.sizeDelta = size;
-        return rt.gameObject;
     }
 }

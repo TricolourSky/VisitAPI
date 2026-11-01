@@ -26,8 +26,10 @@ namespace VisitAPI.ChapterUI
             foreach (var t in _view.LiveRows)
             {
                 if (t.Row == null || !t.Row.gameObject.activeSelf) continue;
-                if (ChapterStates.Snap(t.Quest, t.Cond, t.Over).Key == t.Last) continue;
-                t.Last = _view.Style(t.Row, t.Quest, t.Cond, t.Over);
+                // 10-24（旧 B23）：算好的快照直接交给 Style 重画
+                var snap = ChapterStates.Snap(t.Quest, t.Cond, t.Over);
+                if (snap.Key == t.Last) continue;
+                t.Last = _view.Style(t.Row, t.Quest, t.Cond, t.Over, snap);
             }
         }
     }

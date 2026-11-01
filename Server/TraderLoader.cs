@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
-using SPTarkov.Server.Core.Helpers.Traders;
 using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Models.Eft.Common.Tables;
 using SPTarkov.Server.Core.Models.Spt.Config;
@@ -28,8 +27,8 @@ public class TraderLoader(TradersTable traders, LocaleTable localeTable, ImageRo
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
         var owner = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in ContentPacks.All(log))
-        {
+        var packs = ContentPacks.All(log);
+        foreach (var p in packs)
             foreach (var dir in PackLayout.TraderDirs(p))
             {
                 var id = Path.GetFileName(dir);
@@ -39,8 +38,8 @@ public class TraderLoader(TradersTable traders, LocaleTable localeTable, ImageRo
                 if (traders.ContainsKey(new MongoId(id))) { owner[id] = "(already on this server)"; continue; }
                 if (Register(dir, id, label)) owner[id] = p.Name;
             }
-            AddLocales(p);
-        }
+        // 商人都登记完再灌文案：A 包的 locales 里写了 B 包商人的名字也认（10-24）
+        foreach (var p in packs) AddLocales(p);
         return Task.CompletedTask;
     }
 
@@ -85,30 +84,24 @@ public class TraderLoader(TradersTable traders, LocaleTable localeTable, ImageRo
         if (Registered.Count == 0) return;
         var prefixes = Registered.Select(id => id + " ").ToList();
         var byLang = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in PackLayout.DataFiles(p, "locales"))
+        foreach (var f in ContentPacks.Locales(p, json))
         {
-            Dictionary<string, string> table;
-            try { table = json.DeserializeFromFile<Dictionary<string, string>>(file); }
-            catch (Exception e) { log.Error($"[VisitAPI] {p.Name}/locales/{Path.GetFileName(file)} could not be read: {e.Message}"); continue; }
-            if (table == null) continue;
-            var picked = table.Where(kv => prefixes.Any(pre => kv.Key.StartsWith(pre, StringComparison.OrdinalIgnoreCase))).ToDictionary(kv => kv.Key, kv => kv.Value);
-            if (picked.Count > 0) byLang[Path.GetFileNameWithoutExtension(file)] = picked;
+            if (f.Error != null) { log.Error($"[VisitAPI] {p.Name}/locales/{Path.GetFileName(f.File)} could not be read: {f.Error}"); continue; }
+            if (f.Table == null) continue;
+            var picked = f.Table.Where(kv => prefixes.Any(pre => kv.Key.StartsWith(pre, StringComparison.OrdinalIgnoreCase))).ToDictionary(kv => kv.Key, kv => kv.Value);
+            if (picked.Count > 0) byLang[Path.GetFileNameWithoutExtension(f.File)] = picked;
         }
         if (byLang.Count == 0) return;
         byLang.TryGetValue("en", out var fallback);
-        foreach (var (lang, lazy) in localeTable.Global)
-        {
-            var entries = byLang.TryGetValue(lang, out var own) ? own : fallback;
-            if (entries == null || entries.Count == 0) continue;
-            lazy.AddTransformer(data => { if (data != null) foreach (var (k, v) in entries) data.TryAdd(k, v); return data; });
-        }
+        LocaleText.AddAll(localeTable, byLang, fallback);
     }
 }
 
 /// <summary>老档案没有新商人的条目：SPT 只在建档时给全部商人建 TradersInfo，登录时只删多余的、不补缺的，而任务列表下发时
 /// 「档案里没有这个商人」= 整条任务不发（QuestHelper 897 行，当初章节整个消失就是这个）。服务端起来、档案读完之后补齐，
-/// 记录按 SPT 建档时的样子自己构造（不调 ResetTrader——它会顺手按档案模板重设跳蚤封禁）。新建的档案不用管，建档时表里已经有这些商人。</summary>
-[Injectable(typePriority: OnLoadOrder.PostLoad)]
+/// 记录按 SPT 建档时的样子自己构造（不调 ResetTrader——它会顺手按档案模板重设跳蚤封禁）。新建的档案不用管，建档时表里已经有这些商人。
+/// 排在 StoryLocks（PostLoad + 10）之后：补条目时读的 UnlockedByDefault 得是它翻过默认值之后的，不然老档案直接看见剧情商人、新档案要做完任务才看见（10-29）</summary>
+[Injectable(typePriority: OnLoadOrder.PostLoad + 11)]
 public class TraderProfiles(SaveServer saves, TradersTable traders, ISptLogger<TraderProfiles> log) : IOnLoad
 {
     public Task OnLoadAsync(CancellationToken cancellationToken)

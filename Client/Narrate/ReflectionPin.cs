@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using Comfort.Common;
 using EFT.CameraControl;
 using EFT.Settings;
@@ -41,11 +40,9 @@ public static class ReflectionPin
             al.SetReflectionIntensity(al.ReflectionIntensity);
     }
 
-    [HarmonyPatch]
+    [HarmonyPatch(typeof(AmbientLight), nameof(AmbientLight.method_3))]
     public static class AuthoredIntensity
     {
-        static System.Reflection.MethodBase TargetMethod() => AccessTools.Method(typeof(AmbientLight), "method_3");
-
         static readonly System.Reflection.FieldInfo BlockField = AccessTools.Field(typeof(AmbientLight), "_screenAmbientBlock");
         static readonly int ReflectionIntensityId = Shader.PropertyToID("_ReflectionIntensity");
 

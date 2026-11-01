@@ -16,18 +16,18 @@ public static class SceneLoader
     static List<string> _roomFiles;
     static DateTime _roomStamp;
     static string _sceneName;
-    static bool _busy;
+    static bool _busy, _closing;
+    static (string traderId, ClientDialogController dc)? _pendingOpen;   // 上一个房间还在卸时来的 Open：卸完再开（10-29，以前静默丢掉）
+    static readonly ActiveSceneSwap _swap = new();
 
     public static bool IsOpen => _sceneName != null;
     internal static string OpenScene => _sceneName;
     public static bool Requested { get; private set; }
 
-    /// <summary>房间包目录：rooms\（老的 scenes\bundles\vendors\ 还认，见 VisitPaths）。</summary>
-    static string RoomsDir => VisitPaths.Rooms;
-
     public static void Open(string traderId, ClientDialogController dc)
     {
-        if (_busy || IsOpen) return;
+        if (IsOpen) return;
+        if (_busy) { if (_closing) { Requested = true; _pendingOpen = (traderId, dc); } return; }
         Requested = true;
         Plugin.Instance.StartCoroutine(OpenRoutine(traderId, dc));
     }
@@ -35,10 +35,11 @@ public static class SceneLoader
     public static void Close()
     {
         Requested = false;
+        _pendingOpen = null;
         if (!_busy && IsOpen) Plugin.Instance.StartCoroutine(CloseRoutine());
     }
 
-    /// 09-24 审查 M3：_busy 放进 try/finally。以前布置场景的任一步抛异常，协程中止、_busy 永远是 true，
+    /// 09-24 审查 M3：_busy 放进 try/finally。不然布置场景的任一步抛异常，协程中止、_busy 永远是 true，
     /// 之后 Open 直接返回、Close 也不卸场景，这个功能整局失效。布置的各步也单独兜住，一步失败不影响其余
     static IEnumerator OpenRoutine(string traderId, ClientDialogController dc)
     {
@@ -69,8 +70,7 @@ public static class SceneLoader
                 Step("shaders", () => SceneShaders.Fix(root));
                 root.transform.position += new Vector3(0f, 300f, 0f);
             }
-            var active = SceneManager.GetActiveScene();
-            if (active != scene) { _previousActive = active; SceneManager.SetActiveScene(scene); }
+            _swap.Enter(scene);
             _sceneName = name;   // 先记下，后面哪步失败 Close 也能把场景卸掉
             Step("audio remap", () => AudioRouting.Remap(scene));
             Step("relight", () => SceneRelight.Promote(scene));
@@ -82,17 +82,15 @@ public static class SceneLoader
         finally { _busy = false; }
     }
 
-    /// 卸载前把活动场景设回打开前的那个（灯光、天空盒等 RenderSettings 跟着活动场景走）
+    /// 卸载前把活动场景设回打开前的那个（灯光、天空盒等 RenderSettings 跟着活动场景走）——只在活动场景还是房间时才切回
     static IEnumerator CloseRoutine()
     {
-        _busy = true;
+        _busy = true; _closing = true;
         try
         {
             var scene = SceneManager.GetSceneByName(_sceneName);
             _sceneName = null;
-            if (_previousActive.IsValid() && _previousActive.isLoaded && SceneManager.GetActiveScene() == scene)
-                Step("active scene", () => SceneManager.SetActiveScene(_previousActive));
-            _previousActive = default;
+            Step("active scene", () => _swap.Restore(onlyIfStillActive: true));
             if (scene.isLoaded)
             {
                 var op = SceneManager.UnloadSceneAsync(scene);
@@ -102,30 +100,32 @@ public static class SceneLoader
         finally
         {
             Step("camera", SceneCamera.Hide);
-            _busy = false;
+            _busy = false; _closing = false;
+            if (_pendingOpen is { } next) { _pendingOpen = null; if (Requested) Open(next.traderId, next.dc); }
         }
     }
 
-    static Scene _previousActive;
-
-    static void Step(string name, Action act)
-    {
-        try { act(); }
-        catch (Exception e) { Plugin.Log.LogError($"[scene] Room scene step '{name}' failed (continuing with remaining steps): {e}"); }
-    }
+    static void Step(string name, Action act) => VisitSteps.Run("[scene] Room scene step '{0}' failed (continuing with remaining steps): {1}", name, act);
 
     internal static bool HasRoom(string traderId) => RoomFile(traderId) != null;
 
-    internal static string RoomScene(AssetBundle bundle)
+    /// 包里的房间场景：第一个不以 _Scripts 结尾的；都是脚本场景就退回第一个
+    internal static string RoomScene(AssetBundle bundle) => ScenePath(bundle, scripts: false);
+
+    /// 包里商人自己的脚本场景（以 _Scripts 结尾）；没有就 null
+    internal static string TraderScriptsScene(AssetBundle bundle) => ScenePath(bundle, scripts: true);
+
+    /// 两种场景名同一个循环，只差「以 _Scripts 结尾」取不取反
+    static string ScenePath(AssetBundle bundle, bool scripts)
     {
         var paths = bundle?.GetAllScenePaths();
         if (paths == null || paths.Length == 0) return null;
         foreach (var p in paths)
         {
             var n = Path.GetFileNameWithoutExtension(p);
-            if (!n.EndsWith("_Scripts", StringComparison.OrdinalIgnoreCase)) return n;
+            if (n.EndsWith("_Scripts", StringComparison.OrdinalIgnoreCase) == scripts) return n;
         }
-        return Path.GetFileNameWithoutExtension(paths[0]);
+        return scripts ? null : Path.GetFileNameWithoutExtension(paths[0]);
     }
 
     internal static AssetBundle EnsureNarrateBundles(string traderId)
@@ -135,21 +135,9 @@ public static class SceneLoader
         return roomFile != null ? Bundle(roomFile) : null;
     }
 
-    internal static string TraderScriptsScene(AssetBundle bundle)
-    {
-        var paths = bundle?.GetAllScenePaths();
-        if (paths == null) return null;
-        foreach (var p in paths)
-        {
-            var n = Path.GetFileNameWithoutExtension(p);
-            if (n.EndsWith("_Scripts", StringComparison.OrdinalIgnoreCase)) return n;
-        }
-        return null;
-    }
-
     static string RoomFile(string traderId)
     {
-        var dir = RoomsDir;
+        var dir = VisitPaths.Rooms;
         if (!Directory.Exists(dir)) return null;
         var stamp = Directory.GetLastWriteTimeUtc(dir);
         if (_roomFiles == null || stamp != _roomStamp)
@@ -173,9 +161,6 @@ public static class SceneLoader
         dc._animationController = new TraderAnimationController(npc, dc);
     }
 
-    internal static Transform FindCameraPoint(Scene scene) =>
-        scene.isLoaded ? CameraPoint(scene.GetRootGameObjects()) : null;
-
     /// 1.1 访问的机位：房间里原生的 StaticCameraObservationPoint（1.1 挂在 Position_Camera_&lt;商人&gt; 上，0.16 有同名同字段的类）。
     /// 组件没解析出来时退回同名物体（就是同一个物体）
     internal static Transform FindObservationPoint(Scene scene)
@@ -198,7 +183,7 @@ public static class SceneLoader
     {
         SceneShaders.Snapshot();
         if (_bundles.TryGetValue(file, out var cached) && cached != null) return cached;
-        var path = Path.Combine(RoomsDir, file);
+        var path = Path.Combine(VisitPaths.Rooms, file);
         if (!File.Exists(path)) { Plugin.Log.LogWarning("[scene] bundle missing: " + path); return null; }
         return _bundles[file] = AssetBundle.LoadFromFile(path);
     }

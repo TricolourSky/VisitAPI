@@ -26,7 +26,7 @@ public static class DynamicMapsHidden
             if (type == null) return;
             var target = type.GetMethod("IsConditionCompleted", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
             if (target == null) { Plugin.Log.LogWarning("[map] Dynamic Maps is installed but QuestUtils.IsConditionCompleted was not found (different version?); hidden objectives will still be drawn on its map"); return; }
-            new Harmony("com.sora.visitapi").Patch(target, postfix: new HarmonyMethod(typeof(DynamicMapsHidden), nameof(Postfix)));
+            Plugin.Harmony.Patch(target, postfix: new HarmonyMethod(typeof(DynamicMapsHidden), nameof(Postfix)));
         }
         catch (Exception e) { Plugin.Log.LogWarning("[map] hooking Dynamic Maps failed (its map works as before): " + e.Message); }
     }

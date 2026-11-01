@@ -1,7 +1,5 @@
 using System;
 using System.Collections;
-using System.IO;
-using EFT;
 using EFT.Hideout;
 using HarmonyLib;
 using TMPro;
@@ -13,11 +11,12 @@ namespace VisitAPI.Native;
 
 public static class NarrateLoading
 {
-    const string BundleFile = "visitapi_narrateloading.bundle";
     const string PrefabName = "NarrateLoadingScreen";
     const float Fade = 0.25f;
 
-    static AssetBundle _bundle;
+    // 读包 / 实例化 / 删子网格 / 抄字体走 UiBundle（和章节界面包同一套）
+    static readonly UiBundle Bundle = new("visitapi_narrateloading.bundle",
+        "[narrate] Loading screen bundle does not exist: {0}", "[narrate] Failed to load loading screen bundle: {0}", "[narrate] Loading screen prefab not found in bundle: {0}");
     static GameObject _screen;
     static CanvasGroup _group;
     static TMP_Text _name;
@@ -29,9 +28,7 @@ public static class NarrateLoading
 
     public static void Arm(string traderId)
     {
-        var key = traderId + " Nickname";
-        var nick = key.Localized();
-        _pending = string.IsNullOrEmpty(nick) || nick == key ? traderId : nick;
+        _pending = Loc.TraderName(traderId);
         _pendingUntil = Time.unscaledTime + 10f;
     }
 
@@ -52,12 +49,11 @@ public static class NarrateLoading
         if (_name != null) TmpFix.Set(_name, name);
         _screen.transform.SetAsLastSibling();
         _screen.SetActive(true);
-        var animators = _screen.GetComponentsInChildren<Animator>(true);
-        foreach (var animator in animators) { animator.Rebind(); animator.Update(0f); }
+        foreach (var animator in _screen.GetComponentsInChildren<Animator>(true)) { animator.Rebind(); animator.Update(0f); }
         Shown = true;
         _intercepted = true;
         _shownAt = Time.unscaledTime;
-        if (_hold != null) { Plugin.Instance.StopCoroutine(_hold); _hold = null; }
+        StopHold();
         StartFade(1f, null);
         return false;
     }
@@ -68,7 +64,7 @@ public static class NarrateLoading
         _intercepted = false;
         if (!Shown) return;
         Shown = false;
-        if (_hold != null) { Plugin.Instance.StopCoroutine(_hold); _hold = null; }
+        StopHold();
         Hide();
     }
 
@@ -81,7 +77,7 @@ public static class NarrateLoading
         if (!_intercepted) return true;
         _intercepted = false;
         Shown = false;
-        if (_hold != null) Plugin.Instance.StopCoroutine(_hold);
+        StopHold();
         var remain = MinShow - (Time.unscaledTime - _shownAt);
         if (remain > 0f) _hold = Plugin.Instance.StartCoroutine(HoldThenHide(remain));
         else Hide();
@@ -96,48 +92,38 @@ public static class NarrateLoading
         if (!Shown) Hide();
     }
 
+    static void StopHold()
+    {
+        if (_hold == null) return;
+        Plugin.Instance.StopCoroutine(_hold);
+        _hold = null;
+    }
+
     static void Hide() => StartFade(0f, () => { if (_screen != null) _screen.SetActive(false); });
 
     static bool Ensure(HideoutLoadingScreen hideout)
     {
         if (_screen != null) return true;
-        var prefab = Load()?.LoadAsset<GameObject>(PrefabName);
-        if (prefab == null) { Plugin.Log.LogWarning("[narrate] Loading screen prefab not found in bundle: " + PrefabName); return false; }
+        var prefab = Bundle.Prefab(PrefabName);
+        if (prefab == null) return false;
         var parent = hideout != null ? hideout.transform.parent : null;
         if (parent == null) { Plugin.Log.LogWarning("[narrate] Loading screen has no parent node to attach to"); return false; }
         var canvas = parent.GetComponentInParent<Canvas>();
         var host = canvas != null ? canvas.rootCanvas.transform : parent;
         _screen = Object.Instantiate(prefab, host, false);
         _screen.name = "VisitAPI_NarrateLoadingScreen";
-        if (_screen.transform is RectTransform rt)
-        {
-            rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
-            rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
-            rt.localScale = Vector3.one;
-        }
+        if (_screen.transform is RectTransform rt) rt.Stretch().localScale = Vector3.one;
         _group = _screen.GetComponent<CanvasGroup>() ?? _screen.AddComponent<CanvasGroup>();
         _group.alpha = 0f;
         foreach (var animator in _screen.GetComponentsInChildren<Animator>(true))
             animator.updateMode = AnimatorUpdateMode.UnscaledTime;
-        foreach (var sub in _screen.GetComponentsInChildren<TMP_SubMeshUI>(true)) Object.DestroyImmediate(sub.gameObject);
+        // 字体模板从加载屏所在的画布根上找现成的文字（别把我们自己这份算进去）；名字那一格显示时才 TmpFix.Set，这里不用重排（refit: false）
+        var template = UiBundle.FirstFont(parent.root, _screen.transform);
+        UiBundle.CopyFont(_screen, template, refit: false);
+        if (template == null) Plugin.Log.LogWarning("[narrate] Loading screen found no font to copy, trader name may not display");
         _name = _screen.GetComponentInChildren<TMP_Text>(true);
-        var template = FontTemplate(parent);
-        if (template != null)
-            foreach (var t in _screen.GetComponentsInChildren<TMP_Text>(true))
-            {
-                t.font = template.font;
-                t.fontSharedMaterial = template.fontSharedMaterial;
-            }
-        else Plugin.Log.LogWarning("[narrate] Loading screen found no font to copy, trader name may not display");
         _screen.SetActive(false);
         return true;
-    }
-
-    static TMP_Text FontTemplate(Transform parent)
-    {
-        foreach (var t in parent.root.GetComponentsInChildren<TMP_Text>(true))
-            if (t.font != null && (_screen == null || !t.transform.IsChildOf(_screen.transform))) return t;
-        return null;
     }
 
     static void StartFade(float to, Action done)
@@ -158,16 +144,6 @@ public static class NarrateLoading
         _group.alpha = to;
         _fade = null;
         done?.Invoke();
-    }
-
-    static AssetBundle Load()
-    {
-        if (_bundle != null) return _bundle;
-        var path = Path.Combine(VisitPaths.Ui, BundleFile);   // ui\（老的 bundles\ 还认，见 VisitPaths）
-        if (!File.Exists(path)) { Plugin.Log.LogWarning("[narrate] Loading screen bundle does not exist: " + path); return null; }
-        _bundle = AssetBundle.LoadFromFile(path);
-        if (_bundle == null) Plugin.Log.LogWarning("[narrate] Failed to load loading screen bundle: " + path);
-        return _bundle;
     }
 }
 

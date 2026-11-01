@@ -10,9 +10,10 @@ using VisitAPI.Native;
 namespace VisitAPI;
 
 [BepInPlugin("com.sora.visitapi", "VisitAPI", Version)]
+[BepInDependency("me.sol.sain", BepInDependency.DependencyFlags.SoftDependency)]           // 10-17 护卫不撤离的补丁按名字找 SAIN 的类型：SAIN 先加载，没装就不挂
 public class Plugin : BaseUnityPlugin
 {
-    public const string Version = "1.3.6";
+    public const string Version = "1.3.7";
     public static Plugin Instance;
     public static ManualLogSource Log;
     // 09-25 SORA：BepInEx 设置页只留剧情页的三个个人偏好。其余（访问画面的 7 个调参项、2 个调试热键、访问按钮偏移、界面语言、
@@ -24,6 +25,8 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> HideStory;
     public static ConfigEntry<bool> CallBadge;
     public static ConfigEntry<bool> HandoverBadge;
+    /// 10-17：整个插件共用这一个 Harmony 实例（DynamicMapsHidden 进战局后才挂补丁，也用它）
+    internal static Harmony Harmony;
 
     void Awake()
     {
@@ -35,16 +38,16 @@ public class Plugin : BaseUnityPlugin
         HideStory = Config.Bind("Chapter", "HideStoryQuestsInLists", true, "剧情任务不进普通任务列表 | Hide story quests in regular lists");
         CallBadge = Config.Bind("Badge", "CallBadge", true, "商人头上的金色电话角标；关掉连同它的检查一起停 | Gold call badge on traders; off also skips its checks");
         HandoverBadge = Config.Bind("Badge", "HandoverBadge", true, "商人头上的可上交角标；这项检查最重，商人页面卡顿可先关它 | Hand-over badge on traders; heaviest check - turn off first if the trader screen stutters");
-        Loc.Mode = "auto";
         Loc.GameCulture = () => LocalizationManager.Instance?.Culture;
         // .dlg 解析警告在插件里只进日志（DialogLoader），日志默认英文（SORA 09-25）——固定取英文那段；编辑器那边照旧按自己的语言设置
         DlgLoc.Picker = (zh, en) => en;
-        var harmony = new Harmony("com.sora.visitapi");
-        VisitPatches.ApplyAll(harmony);
+        Harmony = new Harmony("com.sora.visitapi");
+        VisitPatches.ApplyAll(Harmony);
         QuestFlags.Prefetch();
         QuestZones.Prefetch();
         StorySpawns.Prefetch();
         InviteWatcher.Start();
+        RetailDialogs.Prefetch();   // 10-24：零售对话表 12 MB 在后台先扫一遍，第一次开对话 / 访问不再当场卡一下
         VisitConsole.Register();   // 09-24：游戏控制台里的 visit_setvar / visit_getvar / visit_rescan
     }
 

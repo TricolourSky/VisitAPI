@@ -10,11 +10,11 @@ using UnityEngine.UI;
 namespace VisitAPI.Native;
 
 /// 09-26：标记我们克隆出来的原生按钮（聊天窗「访问 / 回复」）。关键抉择窗要找「原生的」DefaultUIButton 当模板，
-/// 以前随手取场景里第一个，结果取到了带电话图标的回复按钮（SORA：「按钮出问题了」），靠这个标记跳过
+/// 随手取场景里第一个会取到带电话图标的回复按钮（SORA：「按钮出问题了」），靠这个标记跳过
 public class VisitClonedButton : MonoBehaviour { }
 
 /// <summary>09-25 起聊天窗照 1.1 原样还原的共用件。素材是用 1.1MCP 从运行中的 1.1 客户端导出的原图（Client\art\chat11_*.png，
-/// 对照记录见 1.1MCP\captures\notes-0925.md / ui-ChatScreen-*.txt），尺寸、颜色、字体都取自 1.1 的界面结构导出，不再照截图量。</summary>
+/// 对照记录见 1.1MCP\captures\notes-0925.md / ui-ChatScreen-*.txt），尺寸、颜色、字体都取自 1.1 的界面结构导出。</summary>
 public static class Chat11
 {
     public static readonly Color Border = new Color32(0x58, 0x5D, 0x60, 0xFF);
@@ -40,18 +40,59 @@ public static class Chat11
     /// 一个铺满父物体的 Image（可带偏移），用来挂底图 / 边框
     public static Image Fill(RectTransform parent, string name, Sprite sprite, Color color, Vector2 offMin, Vector2 offMax, Image.Type type = Image.Type.Simple)
     {
-        var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(LayoutElement));
-        go.GetComponent<LayoutElement>().ignoreLayout = true;
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(parent, false);
-        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one; rt.offsetMin = offMin; rt.offsetMax = offMax;
-        var img = go.GetComponent<Image>();
+        var img = Span(parent, name, Vector2.zero, Vector2.one, offMin, offMax, true, typeof(Image)).GetComponent<Image>();
         img.sprite = sprite; img.type = type; img.color = color; img.raycastTarget = false;
         return img;
     }
 
     /// 1.1 的边框：border_generic 九宫格 #585D60，比本体向右上各多 1 单位（1.1 里 pos(0.5,0.5) sizeDelta(1,1)）
     public static Image Frame(RectTransform parent) => Fill(parent, "Border", BorderSprite, Border, Vector2.zero, new Vector2(1f, 1f), Image.Type.Sliced);
+
+    /// root 下第一个有字体的 TMP 文字控件的字体（新建文字时的后备字体）
+    public static TMP_FontAsset FirstFont(Component root) =>
+        root != null ? root.GetComponentsInChildren<TMP_Text>(true).Select(t => t.font).FirstOrDefault(f => f != null) : null;
+
+    /// 按名字找 1.1 用的字体，找不到就退回 root 下第一个有字体的文字控件
+    public static TMP_FontAsset Font(string contains, Component root) => Font(contains, FirstFont(root));
+
+    /// <summary>新建一个按锚点摆的子物体：anchorMin / anchorMax / pivot / anchoredPosition / sizeDelta 照参数设（先锚点、轴心，再位置、尺寸）；
+    /// 父物体有布局组时 ignoreLayout = true 挂一个 LayoutElement 让它别排；extra 是要一起加的组件（Image / Button…）。</summary>
+    public static RectTransform Rect(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 pos, Vector2 size, bool ignoreLayout = false, params Type[] extra)
+    {
+        var rt = Make(parent, name, ignoreLayout, extra);
+        rt.anchorMin = anchorMin; rt.anchorMax = anchorMax; rt.pivot = pivot;
+        rt.anchoredPosition = pos; rt.sizeDelta = size;
+        return rt;
+    }
+
+    /// 同上，但按锚点区间 + 四边偏移撑开（anchorMin / anchorMax 不同、用 offsetMin / offsetMax 定边），轴心不动
+    public static RectTransform Span(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 offMin, Vector2 offMax, bool ignoreLayout = false, params Type[] extra)
+    {
+        var rt = Make(parent, name, ignoreLayout, extra);
+        rt.anchorMin = anchorMin; rt.anchorMax = anchorMax; rt.offsetMin = offMin; rt.offsetMax = offMax;
+        return rt;
+    }
+
+    /// Rect 再带一张图：不接点击；默认保持比例、颜色不动（Image 新建就是白）
+    public static Image Img(Transform parent, string name, Sprite sprite, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 pos, Vector2 size, bool ignoreLayout = false, bool preserveAspect = true, Color? color = null)
+    {
+        var img = Rect(parent, name, anchorMin, anchorMax, pivot, pos, size, ignoreLayout, typeof(Image)).GetComponent<Image>();
+        img.sprite = sprite; img.preserveAspect = preserveAspect; img.raycastTarget = false;
+        if (color.HasValue) img.color = color.Value;
+        return img;
+    }
+
+    static RectTransform Make(Transform parent, string name, bool ignoreLayout, Type[] extra)
+    {
+        var types = new List<Type> { typeof(RectTransform) };
+        if (ignoreLayout) types.Add(typeof(LayoutElement));
+        if (extra != null) types.AddRange(extra);
+        var go = new GameObject(name, types.ToArray());
+        if (ignoreLayout) go.GetComponent<LayoutElement>().ignoreLayout = true;
+        var rt = (RectTransform)go.transform;
+        rt.SetParent(parent, false);
+        return rt;
+    }
 
     /// <summary>克隆 0.16 原生的 DefaultUIButton（聊天窗「收取全部」那个），按 1.1 聊天标题栏 ReplyByRadio / VisitAtLobby 的参数改：
     /// 内边距 20/20/8/8、最小高 30、平时背景透明、背景图 button_idle、文字 #E7E5D4 → 悬停黑、图标平时 / 悬停两张。

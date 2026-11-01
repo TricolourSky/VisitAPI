@@ -37,7 +37,7 @@ public class ULipSyncCurvesPlayer : MonoBehaviour
         if (p == null) return;
         if (!p.isPlaying) { if (_playing) Stop(); return; }
         if (!_playing || _last != p.bakedData) { Cache(p.bakedData); _playing = true; }
-        if (p.audioSource != null && _last != null && _last.duration > 0f) Apply(p.audioSource.time / _last.duration, _last.duration);
+        if (p.audioSource != null && _last != null && _last.duration > 0f) Apply(p.audioSource.time, _last.duration);
     }
     public void Play(BakedData data) { Player?.Play(data); Cache(data); _playing = true; }
     public void Stop() { if (Player?.isPlaying == true) Player.Stop(); ResetCurves(); _playing = false; }
@@ -50,7 +50,7 @@ public class ULipSyncCurvesPlayer : MonoBehaviour
     void Apply(float time, float duration)
     {
         if (duration < _minCurvesDuration) return;
-        foreach (var c in _curves) if (c.isBlendShape) _mesh?.SetBlendShapeWeight(c.blendShapeIndex, c.curve.Evaluate(time * duration)); else _animator?.SetFloat(Hash(c.paramName), c.curve.Evaluate(time * duration));
+        foreach (var c in _curves) if (c.isBlendShape) _mesh?.SetBlendShapeWeight(c.blendShapeIndex, c.curve.Evaluate(time)); else _animator?.SetFloat(Hash(c.paramName), c.curve.Evaluate(time));
     }
     void ResetCurves() { foreach (var c in _curves) if (c.isBlendShape) _mesh?.SetBlendShapeWeight(c.blendShapeIndex, c.resetValue); else _animator?.SetFloat(Hash(c.paramName), c.resetValue); }
     int Hash(string name) { if (!_hashes.TryGetValue(name, out var hash)) _hashes[name] = hash = Animator.StringToHash(name); return hash; }

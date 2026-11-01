@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
 using EFT;
 using EFT.Hideout;
@@ -14,17 +13,13 @@ namespace VisitAPI.Native;
 /// 包里这几个引用在运行时是空的（字段没对上）。两条路，按运行时实际情况走：
 ///   引用齐全：放行原生 Awake；NPC 进场那一刻（和原生 NPCObject.GoIn 同一时刻）把注视目标设成 GoIn 传进来的访问玩家相机，
 ///             原生 Update 看到目标变了就自己开始转眼珠（原生灯塔商人是靠进区域事件设这个目标，访问里没有那个事件）；
-///   引用缺失：在 Awake 之前把组件关掉，不再报错（眼睛不动，和现在一样，只是不再刷日志）。</summary>
+///   引用缺失：在 Awake 之前把组件关掉，不再报错（眼睛不动）。</summary>
 [HarmonyPatch(typeof(LightKeeperEyeTargetFollower), nameof(LightKeeperEyeTargetFollower.Awake))]
 public static class EyeFollowerGuard
 {
     static bool Prefix(LightKeeperEyeTargetFollower __instance)
     {
-        var missing = new List<string>();
-        if (__instance._leftEye == null) missing.Add("_leftEye");
-        if (__instance._rightEye == null) missing.Add("_rightEye");
-        if (__instance._headMesh == null || __instance._headMesh.sharedMesh == null) missing.Add("_headMesh");
-        if (missing.Count == 0) return true;
+        if (__instance._leftEye != null && __instance._rightEye != null && __instance._headMesh != null && __instance._headMesh.sharedMesh != null) return true;
         __instance.enabled = false;
         return false;
     }

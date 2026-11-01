@@ -1,19 +1,15 @@
-using UnityEngine;
-
 namespace VisitAPI.Native;
 
 public static class ChapterEvents
 {
-    static int _stamp;
+    public static int Stamp { get; private set; }
 
-    public static void Raise() => _stamp++;
+    public static void Raise() => Stamp++;
 
     public static bool Changed(ref int lastSeen)
     {
-        if (lastSeen == _stamp) return false;
-        lastSeen = _stamp;
+        if (lastSeen == Stamp) return false;
+        lastSeen = Stamp;
         return true;
     }
-
-    public static int Stamp => _stamp;
 }

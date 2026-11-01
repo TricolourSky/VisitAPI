@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,7 +11,6 @@ using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Models.Eft.Common.Tables;
 using SPTarkov.Server.Core.Models.Spt.Tables;
 using SPTarkov.Server.Core.Utils;
-using SPTarkov.Server.Core.Utils.Json;
 using VisitAPI.Packs;
 using Path = System.IO.Path;
 
@@ -28,10 +26,12 @@ public class DialogueLoader(TemplateTable templates, TradersTable traders, Local
         foreach (var p in ContentPacks.All(log)) pending.AddRange(Collect(p));
         if (pending.Count == 0) return Task.CompletedTask;
         var texts = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-        var known = templates.Dialogue.Elements.Select(e => e.Id.ToString()).ToHashSet();
-        Prepare(pending, known, texts);
-        Register(pending, known);
-        MergeLocales(texts);
+        var native = templates.Dialogue.Elements.Select(e => e.Id.ToString()).ToHashSet();   // 原生对话的 id：Register 用它判重
+        var known = new HashSet<string>(native);                                            // 再加上包里的：判断跳转断没断
+        var parsed = Prepare(pending, known, texts);
+        Register(pending, parsed, known, native);
+        foreach (var (localeId, table) in texts)
+            if (table.Count > 0 && locales.Global.TryGetValue(localeId, out var lazy)) LocaleText.Add(lazy, table);
         return Task.CompletedTask;
     }
 
@@ -49,35 +49,41 @@ public class DialogueLoader(TemplateTable templates, TradersTable traders, Local
         return pending;
     }
 
-    int Prepare(List<(string file, JsonObject element)> pending, HashSet<string> known, Dictionary<string, Dictionary<string, string>> texts)
+    /// 整理每个元素并试解析一次（拿 id、坏的当场报）；解析结果按 pending 的顺序留给 Register，解析不了的位置是 null
+    List<TraderDialogElement> Prepare(List<(string file, JsonObject element)> pending, HashSet<string> known, Dictionary<string, Dictionary<string, string>> texts)
     {
-        var dropped = 0;
+        var result = new List<TraderDialogElement>(pending.Count);
         foreach (var (fileName, element) in pending)
         {
             foreach (var key in new[] { "StartPoints", "localization" }) if (element[key] is not JsonObject) element[key] = new JsonObject();
             if (element["SubTraders"] is not JsonArray) element["SubTraders"] = new JsonArray();
             CollectTexts((JsonObject)element["localization"]!, texts);
             DialogueConfirmations.Scan(element);
-            dropped += DialogueSanitizer.Clean(element);
+            DialogueSanitizer.Clean(element);
             DialogueSanitizer.SplitRandomGroups(element);
             DialogueSanitizer.HalfOpenRandoms(element);
-            try { var parsed = json.Deserialize<TraderDialogElement>(element.ToJsonString())!; known.Add(parsed.Id.ToString()); }
+            TraderDialogElement parsed = null;
+            try { parsed = json.Deserialize<TraderDialogElement>(element.ToJsonString())!; known.Add(parsed.Id.ToString()); }
             catch (Exception ex) { log.Error($"[VisitAPI] bad element {element["Id"]} in {fileName}: {ex.Message}"); }
+            result.Add(parsed);
         }
-        return dropped;
+        return result;
     }
 
-    (int added, int entries, int fixedSwitches) Register(List<(string file, JsonObject element)> pending, HashSet<string> known)
+    /// 断掉的跳转改成退出；改动过的元素才重新解析，没动过的直接用 Prepare 那份（同一段 JSON，结果一样）
+    void Register(List<(string file, JsonObject element)> pending, List<TraderDialogElement> prepared, HashSet<string> known, HashSet<string> existing)
     {
-        var existing = templates.Dialogue.Elements.Select(e => e.Id.ToString()).ToHashSet();
         var owner = new Dictionary<string, string>();   // 元素 id → 包/文件：两个包都有同一个元素时点名、先来的赢；和原生同 id 的照旧静默跳过
-        int added = 0, entries = 0, fixedSwitches = 0;
-        foreach (var (fileName, element) in pending)
+        for (var i = 0; i < pending.Count; i++)
         {
-            fixedSwitches += DialogueSanitizer.FixDanglingSwitches(element, known);
-            TraderDialogElement parsed;
-            try { parsed = json.Deserialize<TraderDialogElement>(element.ToJsonString())!; }
-            catch { continue; }
+            var (fileName, element) = pending[i];
+            var parsed = prepared[i];
+            if (DialogueSanitizer.FixDanglingSwitches(element, known) > 0)
+            {
+                try { parsed = json.Deserialize<TraderDialogElement>(element.ToJsonString())!; }
+                catch { continue; }
+            }
+            if (parsed == null) continue;
             var id = parsed.Id.ToString();
             if (!existing.Add(id))
             {
@@ -86,24 +92,10 @@ public class DialogueLoader(TemplateTable templates, TradersTable traders, Local
             }
             owner[id] = fileName;
             templates.Dialogue.Elements.Add(parsed);
-            added++;
             var trader = traders.GetTrader(parsed.MainTrader)?.Base;
             var isStart = element["IsStart"] is JsonValue startNode && startNode.TryGetValue(out bool start) && start;
-            if (isStart && trader != null && trader.MainDialogue == null) { trader.MainDialogue = parsed.Id.ToString(); entries++; }
+            if (isStart && trader != null && trader.MainDialogue == null) trader.MainDialogue = id;
         }
-        return (added, entries, fixedSwitches);
-    }
-
-    int MergeLocales(Dictionary<string, Dictionary<string, string>> texts)
-    {
-        var merged = 0;
-        foreach (var (localeId, table) in texts)
-        {
-            if (table.Count == 0 || !locales.Global.TryGetValue(localeId, out var lazy)) continue;
-            lazy.AddTransformer(data => { if (data != null) foreach (var (k, v) in table) data.TryAdd(k, v); return data; });
-            merged += table.Count;
-        }
-        return merged;
     }
 
     static void CollectTexts(JsonObject localization, Dictionary<string, Dictionary<string, string>> texts)

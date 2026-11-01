@@ -6,9 +6,24 @@ using UnityEngine;
 
 namespace VisitAPI.Native;
 
-/// <summary>.dlg 的 scene: 房间机位。1.3.4 B4（09-24 M4 的修法无效）：CameraManager.SetCamera 第一步 Reset() 会 SafeDestroy 当前绑定相机的整个物体，
+/// <summary>藏身处第一人称相机的预制体：访问（NarrateCameraBypass）和 .dlg 的房间机位（SceneCamera）都拿它当底。
+/// 预制体没有就 null，调用方自己记日志。</summary>
+static class HideoutCam
+{
+    public const string PrefabName = "Cam2_fps_hideout";
+
+    public static GameObject Prefab => Resources.Load<GameObject>(PrefabName);
+
+    /// 这台相机上的 CinemachineBrain 关掉（09-16 #137：它会抢着改访问期的 FOV）
+    public static void Tame(Camera cam)
+    {
+        if (cam != null && cam.GetComponent("CinemachineBrain") is Behaviour brain) brain.enabled = false;
+    }
+}
+
+/// <summary>.dlg 的 scene: 房间机位。1.3.4 B4：CameraManager.SetCamera 第一步 Reset() 会 SafeDestroy 当前绑定相机的整个物体，
 /// 所以换上房间相机的那一帧藏身处相机就没了，「关掉时绑回原相机」永远绑不回去；而且玩家身上的 PlayerCameraController 还对着那台已销毁的相机。
-/// 现在照原生藏身处切相机的顺序（HideoutController.method_11 / method_10）：
+/// 这里照原生藏身处切相机的顺序（HideoutController.method_11 / method_10）：
 ///   打开：玩家身上有相机控制器（藏身处）就先 PlayerCameraController.Destroy，再用原生 SetCameraFromPrefab 建房间相机；
 ///   关闭：隔一帧 PlayerCameraController.Create（Construct 里按 LevelSettings 重建藏身处相机，Reset 顺手销毁房间相机）→ IsActive = true。
 /// 主菜单里没有相机控制器：关掉时只把房间相机收起，MenuScreen 的 PrepareEnvironment 接管环境。</summary>
@@ -25,19 +40,16 @@ public static class SceneCamera
         if (cm == null) { Plugin.Log.LogWarning("[scene] no CameraManager, room camera skipped"); return; }
         if (!_shown || _cam == null)
         {
-            var prefab = Resources.Load<GameObject>("Cam2_fps_hideout");
+            var prefab = HideoutCam.Prefab;
             if (prefab == null) { Plugin.Log.LogError("[scene] camera prefab 'Cam2_fps_hideout' missing"); return; }
             _levelSettings = Singleton<LevelSettings>.Instantiated ? Singleton<LevelSettings>.Instance : null;
             _player = HostPlayer();
-            if (_player != null)
-            {
-                PlayerCameraController.Destroy(_player);
-            }
+            if (_player != null) PlayerCameraController.Destroy(_player);
             cm.SetCameraFromPrefab(prefab);
             _cam = cm.Camera;
             if (_cam == null) { Plugin.Log.LogError("[scene] native SetCameraFromPrefab gave no camera"); return; }
             _cam.gameObject.name = "VisitSceneCamera";
-            if (_cam.GetComponent("CinemachineBrain") is Behaviour brain) brain.enabled = false;
+            HideoutCam.Tame(_cam);
             _shown = true;
         }
         _cam.gameObject.SetActive(true);
@@ -48,8 +60,8 @@ public static class SceneCamera
     /// 在藏身处（玩家身上挂着相机控制器）时返回那个玩家；主菜单、访问里返回 null
     static Player HostPlayer()
     {
-        if (Narrating.Now || !Singleton<GameWorld>.Instantiated) return null;
-        var player = Singleton<GameWorld>.Instance.MainPlayer;
+        if (Narrating.Now) return null;
+        var player = Raid.MainPlayer;
         return player != null && player.gameObject.GetComponent<PlayerCameraController>() != null ? player : null;
     }
 
@@ -57,7 +69,7 @@ public static class SceneCamera
     {
         if (!_shown)
         {
-            // 没有经过 Show（访问收尾走 EnsureMenu 时）：保持原来的做法
+            // 没有经过 Show（访问收尾走 EnsureMenu 时）
             if (_cam != null) _cam.gameObject.SetActive(false);
             Visibility.Camera(true);
             Visibility.Environment(true);

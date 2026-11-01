@@ -11,6 +11,7 @@ using SPTarkov.Reflection.Patching;
 using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Helpers.Profile;
 using SPTarkov.Server.Core.Models.Common;
+using SPTarkov.Server.Core.Models.Eft.Common.Tables;
 using SPTarkov.Server.Core.Models.Enums;
 using SPTarkov.Server.Core.Models.Spt.Tables;
 using SPTarkov.Server.Core.Services.Profile;
@@ -32,46 +33,41 @@ public class StoryLocks(TemplateTable templates, TradersTable traders, ProfileHe
         try
         {
             var (storyTraders, _) = Scan();
-            var flipped = new List<string>();
             foreach (var t in storyTraders)
-            {
-                var b = traders.GetTrader(new MongoId(t))?.Base;
-                if (b == null || b.UnlockedByDefault != true) continue;
-                b.UnlockedByDefault = false;
-                flipped.Add(b.Nickname ?? t);
-            }
+                if (traders.GetTrader(new MongoId(t))?.Base is { UnlockedByDefault: true } b) b.UnlockedByDefault = false;
         }
         catch (Exception e) { log.Error("[VisitAPI] story locks: could not change trader defaults: " + e); }
-        var patch = new ResetTradersPatch();
-        try
-        {
-            patch.Enable();
-            if (!patch.IsActive) log.Error("[VisitAPI] story locks did NOT arm (IsActive=false after Enable)");
-        }
-        catch (Exception e) { log.Error("[VisitAPI] story locks failed to arm: " + e); }
+        Patches.Arm(new ResetTradersPatch(), log, "story locks");
         return Task.CompletedTask;
     }
 
-    static (HashSet<string> traders, int mapQuests) Scan()
+    /// 带 visitapi 的任务里：解锁奖励点名的商人（剧情商人），和写了 unlockLocations 的任务数
+    sealed record StoryScan(HashSet<string> Traders, int MapQuests);
+
+    static StoryScan Scan()
     {
         var traders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var maps = 0;
-        foreach (var q in _templates?.Quests?.Values ?? Enumerable.Empty<SPTarkov.Server.Core.Models.Eft.Common.Tables.Quest>())
+        foreach (var q in _templates?.Quests?.Values ?? Enumerable.Empty<Quest>())
         {
-            if (!(q.ExtensionData != null && q.ExtensionData.TryGetValue("visitapi", out var v) && v is JsonElement vx && vx.ValueKind == JsonValueKind.Object)) continue;
-            foreach (var list in q.Rewards?.Values ?? Enumerable.Empty<List<SPTarkov.Server.Core.Models.Eft.Common.Tables.Reward>>())
-                foreach (var r in list ?? new List<SPTarkov.Server.Core.Models.Eft.Common.Tables.Reward>())
+            if (Ext.Visit(q.ExtensionData) is not { } vx) continue;
+            foreach (var list in q.Rewards?.Values ?? Enumerable.Empty<List<Reward>>())
+                foreach (var r in list ?? new List<Reward>())
                     if (r?.Type == RewardType.TraderUnlock && r.Target?.Length == 24) traders.Add(r.Target);
             if (vx.TryGetProperty("unlockLocations", out var ul) && ul.ValueKind == JsonValueKind.Array && ul.GetArrayLength() > 0) maps++;
         }
-        return (traders, maps);
+        return new StoryScan(traders, maps);
     }
+
+    /// 新档用的扫描结果。开服以后任务表不再变，第一次建档时扫一遍记下、以后直接用；
+    /// 不拿 OnLoadAsync 那一遍：那是 PostLoad+10，后面还有别的模组的 IOnLoad，第一次建档时任务表才肯定定了，结果和每次重扫一样
+    static StoryScan _newProfileScan;
 
     internal static void OnNewProfile(MongoId sessionId)
     {
         try
         {
-            var (traders, mapQuests) = Scan();
+            var (traders, mapQuests) = _newProfileScan ??= Scan();
             if (traders.Count == 0 && mapQuests == 0) return;
             var pmc = _profiles?.GetPmcProfile(sessionId);
             if (pmc == null) { _log?.Warning($"[VisitAPI] story locks: new profile {sessionId} has no pmc, skipped"); return; }

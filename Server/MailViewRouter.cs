@@ -4,12 +4,10 @@ using System.Text.Json.Nodes;
 using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
-using SPTarkov.Server.Core.Models.Utils;
+using SPTarkov.Server.Core.Models.Eft.Common;
 using SPTarkov.Server.Core.Utils;
 
 namespace VisitAPI.Server;
-
-public class MailViewRequest : IRequestData { }
 
 /// <summary>09-25 SORA：以前领过的附件在聊天里全不见了；1.1 里领过的附件条照样在，标「(已收取)」（SORA 的 1.1 截图 1.png）。
 /// 原因是 SPT 领完附件就把消息的 hasRewards 改成 false（DialogueHelper / InventoryHelper，rewardCollected = true），
@@ -22,7 +20,7 @@ public class MailViewRouter(JsonUtil jsonUtil, ISptLogger<MailViewRouter> log)
     : StaticRouter(jsonUtil, [
         new RouteAction("/client/mail/dialog/view",
             async (url, info, sessionId, output, ct) => Restore(output, log),
-            typeof(MailViewRequest))
+            typeof(EmptyRequestData))
     ])
 {
     static string Restore(string output, ISptLogger<MailViewRouter> log)

@@ -38,9 +38,12 @@ namespace EFT.Hair
                 var c = light.color;
                 var intensity = light.intensity;
                 var t = light.transform;
-                _directions[i] = light.type == LightType.Directional
-                    ? new Vector4(t.rotation.eulerAngles.x, t.rotation.eulerAngles.y, t.rotation.eulerAngles.z, 1f)
-                    : new Vector4(t.position.x, t.position.y, t.position.z, 0f);
+                if (light.type == LightType.Directional)
+                {
+                    var e = t.rotation.eulerAngles;
+                    _directions[i] = new Vector4(e.x, e.y, e.z, 1f);
+                }
+                else _directions[i] = new Vector4(t.position.x, t.position.y, t.position.z, 0f);
                 _colors[i] = new Vector4(c.r * intensity, c.g * intensity, c.b * intensity, light.range);
             }
             _renderer.GetPropertyBlock(_propertyBlock);

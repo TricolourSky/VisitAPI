@@ -15,11 +15,15 @@ public static class AmbientGuard
         "_runtimeStaticSources",
     };
 
+    // 七个登记表的字段和各自集合类型的 Clear / Add 只反射一次
+    static System.Reflection.FieldInfo[] _fields;
+    static readonly Dictionary<System.Type, (System.Reflection.MethodInfo clear, System.Reflection.MethodInfo add)> _ops = new();
+
     internal static void Clear()
     {
-        foreach (var name in Registries)
+        _fields ??= System.Array.ConvertAll(Registries, name => AccessTools.Field(typeof(AmbientLight), name));
+        foreach (var field in _fields)
         {
-            var field = AccessTools.Field(typeof(AmbientLight), name);
             if (!(field?.GetValue(null) is IEnumerable col)) continue;
             var alive = new List<object>();
             var dead = 0;
@@ -30,9 +34,9 @@ public static class AmbientGuard
             }
             if (dead == 0) continue;
             var t = col.GetType();
-            t.GetMethod("Clear")?.Invoke(col, null);
-            var add = t.GetMethod("Add");
-            if (add != null) foreach (var o in alive) add.Invoke(col, new[] { o });
+            if (!_ops.TryGetValue(t, out var ops)) _ops[t] = ops = (t.GetMethod("Clear"), t.GetMethod("Add"));
+            ops.clear?.Invoke(col, null);
+            if (ops.add != null) foreach (var o in alive) ops.add.Invoke(col, new[] { o });
         }
     }
 }

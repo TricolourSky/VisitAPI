@@ -1,11 +1,8 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading;
-using System.Threading.Tasks;
 using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
@@ -35,19 +32,17 @@ public class InviteRouter(JsonUtil jsonUtil, ProfileHelper profiles, SaveServer 
         new RouteAction("/visitapi/mail/invite",
             async (url, info, sessionId, output, ct) =>
             {
+                // 客户端 VisitHttp.Post 不读回包：寄没寄、为什么没寄都回空包
                 var questId = ((InviteRequest)info)?.QuestId;
                 var profile = profiles.GetFullProfile(sessionId);
-                if (profile == null || string.IsNullOrEmpty(questId) || !MongoId.IsValidMongoId(questId)) return httpResponse.GetBody(new { sent = false, reason = "bad request" });
-                if (!templates.Quests.TryGetValue(new MongoId(questId), out var quest)) return httpResponse.GetBody(new { sent = false, reason = "unknown quest" });
-                if (quest.ExtensionData == null || !quest.ExtensionData.TryGetValue("mailSettings", out var v) || v is not JsonElement e || e.ValueKind != JsonValueKind.Object
-                    || !(e.TryGetProperty("isEnabled", out var on) && on.ValueKind == JsonValueKind.True))
-                    return httpResponse.GetBody(new { sent = false, reason = "no mail settings" });
-                var from = e.TryGetProperty("fromTraderId", out var f) && f.ValueKind == JsonValueKind.String ? f.GetString() : null;
-                if (from?.Length != 24) return httpResponse.GetBody(new { sent = false, reason = "no sender" });
+                if (profile == null || string.IsNullOrEmpty(questId) || !MongoId.IsValidMongoId(questId)) return httpResponse.EmptyResponse();
+                if (!templates.Quests.TryGetValue(new MongoId(questId), out var quest)) return httpResponse.EmptyResponse();
+                if (Ext.MailSettings(quest.ExtensionData) is not { } mailSettings) return httpResponse.EmptyResponse();
+                var from = Ext.Str(mailSettings, "fromTraderId");
+                if (from?.Length != 24) return httpResponse.EmptyResponse();
                 var textKey = questId + " whileAvailableMessageText";
-                if (!HasText(locales, textKey)) { log.Warning($"[VisitAPI] Invite mail {questId}: locale table has no {textKey}, not sending"); return httpResponse.GetBody(new { sent = false, reason = "no text" }); }
-                var sent = false;
-                await Locked(sessionId, ct, async () =>
+                if (!LocaleText.Has(locales, textKey)) { log.Warning($"[VisitAPI] Invite mail {questId}: locale table has no {textKey}, not sending"); return httpResponse.EmptyResponse(); }
+                await ProfileLocks.RunAsync(sessionId, ct, async () =>
                 {
                     var done = Load(profile);
                     var had = done.Contains(questId);
@@ -58,41 +53,13 @@ public class InviteRouter(JsonUtil jsonUtil, ProfileHelper profiles, SaveServer 
                     done.Add(questId);
                     Store(profile, done);
                     await saveServer.SaveProfileAsync(sessionId, ct);
-                    sent = true;
                 });
-                return httpResponse.GetBody(new { sent });
-            },
-            typeof(InviteRequest)),
-        new RouteAction("/visitapi/mail/invite/list",
-            async (url, info, sessionId, output, ct) =>
-            {
-                var profile = profiles.GetFullProfile(sessionId);
-                return httpResponse.GetBody(profile == null ? new List<string>() : Load(profile).OrderBy(x => x, StringComparer.Ordinal).ToList());
+                return httpResponse.EmptyResponse();
             },
             typeof(InviteRequest))
     ])
 {
     const string Key = "visitapi.invites";
-    static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new();
-
-    static async Task Locked(string sessionId, CancellationToken ct, Func<Task> body)
-    {
-        var gate = Locks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(ct);
-        try { await body(); }
-        finally { gate.Release(); }
-    }
-
-    static bool HasText(LocaleTable locales, string key)
-    {
-        foreach (var lang in new[] { "en", "ch", "ru" })
-        {
-            if (!locales.Global.TryGetValue(lang, out var lazy)) continue;
-            try { var table = lazy?.Value; if (table != null && table.TryGetValue(key, out var text) && !string.IsNullOrWhiteSpace(text)) return true; }
-            catch { }
-        }
-        return false;
-    }
 
     /// SPT 寄本地化 NPC 信时把文案键记在消息的 TemplateId 上（MailSendService.SendLocalisedNpcMessageToPlayer），对话按商人 id 存在 DialogueRecords 里；
     /// 玩家删掉对话 = 整条 DialogueRecords[商人] 被移除
@@ -103,20 +70,19 @@ public class InviteRouter(JsonUtil jsonUtil, ProfileHelper profiles, SaveServer 
         return dialog.Messages.Any(m => m != null && string.Equals(m.TemplateId, textKey, StringComparison.Ordinal));
     }
 
+    /// 档案里的 visitapi.invites 永远是 JsonElement：从磁盘读进来是，本次运行里 Store 写的也是（10-17 审查 E21）
     static HashSet<string> Load(SptProfile profile)
     {
         var s = new HashSet<string>(StringComparer.Ordinal);
-        var ext = profile.ExtensionData;
-        if (ext == null || !ext.TryGetValue(Key, out var v)) return s;
-        if (v is JsonElement je && je.ValueKind == JsonValueKind.Array) { foreach (var x in je.EnumerateArray()) if (x.ValueKind == JsonValueKind.String) s.Add(x.GetString()); }
-        else if (v is IEnumerable<string> list) foreach (var x in list) s.Add(x);
-        else if (v is IEnumerable<object> objs) foreach (var x in objs) if (x is string str) s.Add(str);
+        if (Ext.Get(profile.ExtensionData, Key, JsonValueKind.Array) is { } je)
+            foreach (var x in je.EnumerateArray()) if (x.ValueKind == JsonValueKind.String) s.Add(x.GetString());
         return s;
     }
 
+    /// 存成和直接存 List 一样的 JSON 数组（存盘时 SPT 把 JsonElement 原样写出）
     static void Store(SptProfile profile, HashSet<string> s)
     {
         profile.ExtensionData ??= new Dictionary<string, object>();
-        profile.ExtensionData[Key] = s.OrderBy(x => x, StringComparer.Ordinal).ToList();
+        profile.ExtensionData[Key] = JsonSerializer.SerializeToElement(s.OrderBy(x => x, StringComparer.Ordinal).ToList());
     }
 }

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Comfort.Common;
 using EFT;
 using UnityEngine;
@@ -45,6 +44,20 @@ public static class TriggerHost
             }
     }
 
+    /// 10-15：聊天「回复」要直接触发某条藏身处触发线（InviteHideout）——按商人 + 触发线原文找场上那一个；没生成（还没进藏身处）就 null
+    internal static VisitTrigger Find(string traderId, DialogTrigger tr)
+    {
+        if (tr == null || string.IsNullOrEmpty(traderId)) return null;
+        var key = VisitTrigger.KeyOf(tr);
+        foreach (var go in _spawned)
+        {
+            if (go == null) continue;
+            var t = go.GetComponent<VisitTrigger>();
+            if (t != null && t.Data != null && string.Equals(t.TraderId, traderId, StringComparison.OrdinalIgnoreCase) && t.Key == key) return t;
+        }
+        return null;
+    }
+
     static void Spawn(string traderId, DialogTrigger tr, bool hideout)
     {
         var go = new GameObject("VisitTrigger_" + traderId);
@@ -60,7 +73,7 @@ public static class TriggerHost
     /// <summary>作者用编辑器写的任务，目标是占位的 VisitPlace（`visitapi_new_trigger`），真正推进靠 .dlg 触发线，场上没有同名触发器，Dynamic Maps 没点可画。
     /// 这里给每条带坐标的战局触发线配一个只给地图看的原生 ExperienceTrigger（碰撞体关着，不推进任何东西）。
     /// 10-01：Dynamic Maps 只在本局第一次开地图时抓一遍场上的 TriggerWithId，之后每次开图现读它们的 Id 和坐标——
-    /// 所以标记进图就全部建好，Id 由 RefreshMarkers 每秒跟着任务状态切。以前只给进图那一刻已在进行中的任务建，局内才接的（初见 / 对峙 / 偶遇）图上没有点。</summary>
+    /// 所以标记进图就全部建好，Id 由 RefreshMarkers 每秒跟着任务状态切。只给进图那一刻已在进行中的任务建的话，局内才接的（初见 / 对峙 / 偶遇）图上没有点。</summary>
     static void MapMarker(DialogTrigger tr)
     {
         try
@@ -107,9 +120,8 @@ public static class TriggerHost
     /// 占位 id 各任务共用，不按状态熄掉会让别的任务也在这里出点；绑了真区域（zones\）的目标由区域自己出点。
     static string MarkerTarget(EFT.Quests.Quest quest)
     {
-        if (quest?.Template?.Conditions == null || quest.QuestStatus != EFT.Quests.EQuestStatus.Started) return null;
-        if (!quest.Template.Conditions.TryGetValue(EFT.Quests.EQuestStatus.AvailableForFinish, out var conds)) return null;
-        foreach (var c in conds)
+        if (quest?.Template == null || quest.QuestStatus != EFT.Quests.EQuestStatus.Started) return null;
+        foreach (var c in quest.Conds(EFT.Quests.EQuestStatus.AvailableForFinish))
         {
             if (quest.IsConditionDone(c) || !quest.CheckVisibilityStatus(c)) continue;
             if (c is EFT.Quests.ConditionVisitPlace vp && Unbound(vp.target)) return vp.target;

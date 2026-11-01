@@ -1,5 +1,4 @@
 using System;
-using Comfort.Common;
 using EFT;
 using HarmonyLib;
 

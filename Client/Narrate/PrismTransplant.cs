@@ -1,5 +1,3 @@
-using System;
-using System.Reflection;
 using EFT.EnvironmentEffect;
 using HarmonyLib;
 using UnityEngine;
@@ -13,7 +11,7 @@ public static class PrismTransplant
     public static float Speed;
     public static Component Prefab;
 
-    public static bool Apply(Component sourcePrefab, Camera camera)
+    public static void Apply(Component sourcePrefab, Camera camera)
     {
         Prefab = sourcePrefab;
         var from = sourcePrefab != null ? sourcePrefab.GetComponent<PrismEffects>() : null;
@@ -22,14 +20,13 @@ public static class PrismTransplant
         {
             Pinned = false;
             Plugin.Log.LogWarning($"[narrate] Prism native parameters not copied: bundledCameraPrism={from != null} localCameraPrism={to != null}");
-            return false;
+            return;
         }
-        Reflect.Copy(from, to, typeof(PrismEffects), out _);
+        Reflect.Copy(from, to, typeof(PrismEffects));
         Shaders11(from, to);
         MiddleGrey = to.exposureMiddleGrey;
         Speed = to.exposureSpeed;
         Pinned = true;
-        return true;
     }
 
     static void Shaders11(PrismEffects from, PrismEffects to)

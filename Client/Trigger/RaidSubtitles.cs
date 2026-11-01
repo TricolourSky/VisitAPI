@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using Comfort.Common;
 using EFT;
 using EFT.UI;
 using TMPro;
@@ -28,17 +27,24 @@ public static class RaidSubtitles
         _playing = Plugin.Instance.StartCoroutine(Run(list));
     }
 
+    /// 10-24：只在时间轴跨过某一行的起点 / 终点时重算要显示的字
     static IEnumerator Run(List<Line> lines)
     {
         var t0 = Time.unscaledTime;
         var end = lines.Max(l => l.End);
+        var edges = lines.SelectMany(l => new[] { l.Start, l.End }).Distinct().OrderBy(t => t).ToList();
+        var nextEdge = float.NegativeInfinity;
         while (Time.unscaledTime - t0 < end && _text != null)
         {
             var now = Time.unscaledTime - t0;
-            var active = lines.Where(l => now >= l.Start && now < l.End).Select(l => l.Key.Localized()).Where(s => !string.IsNullOrEmpty(s)).ToList();
-            var text = string.Join("\n", active);
-            if (_text.text != text) _text.text = text;
-            if (_view != null && _view.activeSelf != (text.Length > 0)) _view.SetActive(text.Length > 0);
+            if (now >= nextEdge)
+            {
+                var text = string.Join("\n", lines.Where(l => now >= l.Start && now < l.End).Select(l => l.Key.Localized()).Where(s => !string.IsNullOrEmpty(s)));
+                if (_text.text != text) _text.text = text;
+                if (_view != null && _view.activeSelf != (text.Length > 0)) _view.SetActive(text.Length > 0);
+                nextEdge = edges.FirstOrDefault(t => t > now);
+                if (nextEdge <= now) nextEdge = float.PositiveInfinity;
+            }
             yield return null;
         }
         if (_view != null) _view.SetActive(false);
@@ -88,9 +94,9 @@ public static class RaidSubtitles
         vlg.childForceExpandWidth = true; vlg.childForceExpandHeight = false;
         view.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        Backdrop(vrt, "Background", null, new Color(0f, 0f, 0f, 0.698f));
+        Chat11.Fill(vrt, "Background", null, new Color(0f, 0f, 0f, 0.698f), Vector2.zero, Vector2.zero);
         var border = Resources.FindObjectsOfTypeAll<Sprite>().FirstOrDefault(s => s != null && s.name == "border_generic");
-        if (border != null) Backdrop(vrt, "Border", border, new Color(0.322f, 0.349f, 0.353f, 1f));
+        if (border != null) Chat11.Fill(vrt, "Border", border, new Color(0.322f, 0.349f, 0.353f, 1f), Vector2.zero, Vector2.zero, Image.Type.Sliced);
         else Plugin.Log.LogWarning("[subtitle] Sprite border_generic not found; the raid subtitle bar has no border");
 
         var textGo = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -103,19 +109,6 @@ public static class RaidSubtitles
         t.richText = true; t.enableWordWrapping = true; t.raycastTarget = false;
 
         _text = t; _view = view; _view.SetActive(false);
-        SyncScale();
         return true;
-    }
-
-    static void Backdrop(RectTransform parent, string name, Sprite sprite, Color color)
-    {
-        var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(LayoutElement));
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(parent, false);
-        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one; rt.offsetMin = rt.offsetMax = Vector2.zero;
-        go.GetComponent<LayoutElement>().ignoreLayout = true;
-        var img = go.GetComponent<Image>();
-        img.sprite = sprite; img.type = sprite != null ? Image.Type.Sliced : Image.Type.Simple;
-        img.color = color; img.raycastTarget = false;
     }
 }

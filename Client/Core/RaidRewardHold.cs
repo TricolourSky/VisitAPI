@@ -44,7 +44,7 @@ public static class RaidRewardHold
                 ?.GetMethod("FinishQuest", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
             if (target == null) { Plugin.Log.LogWarning("[quest] Fika is installed but ClientQuestController.FinishQuest was not found (different version?); in co-op, teammates may see reward items of quests finished in raid that were not actually handed out"); return; }
             var self = typeof(Finish);
-            new Harmony("com.sora.visitapi").Patch(target, prefix: new HarmonyMethod(self, "Prefix"), finalizer: new HarmonyMethod(self, "Finalizer"));
+            Plugin.Harmony.Patch(target, prefix: new HarmonyMethod(self, "Prefix"), finalizer: new HarmonyMethod(self, "Finalizer"));
         }
         catch (Exception e) { Plugin.Log.LogWarning("[quest] hooking Fika's in-raid quest finish failed (single-player unaffected): " + e.Message); }
     }
@@ -55,7 +55,7 @@ public static class RaidRewardHold
         try
         {
             if (quest?.Rewards == null || !QuestFlags.Pack(quest.Id) || Narrating.Now) return;
-            if (!Singleton<GameWorld>.Instantiated || Raid.IsHideout(Singleton<GameWorld>.Instance.LocationId)) return;
+            if (!Singleton<GameWorld>.Instantiated || Raid.InHideout) return;
             if (!quest.Rewards.TryGetValue(EQuestStatus.Success, out var full) || full == null) return;
             var kept = full.Where(r => r.type != ERewardType.Item && r.type != ERewardType.Experience && r.type != ERewardType.TraderStanding).ToList();
             if (kept.Count == full.Count) return;

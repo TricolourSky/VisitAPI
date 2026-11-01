@@ -25,24 +25,12 @@ public static class NarrateHandoverWindow
             var handover = line?.Actions?.OfType<DialogHandoverItemAction>().FirstOrDefault();
             if (handover == null) return true;
             var qc = __instance.questController;
-            var quest = qc?.Quests?.GetConditional(handover.QuestId);
-            var cond = quest?.ProgressCheckers.Keys.FirstOrDefault(c => c.id == handover.ConditionId) as ConditionItem;
-            if (cond == null) return true;
+            if (!TryResolve(qc, handover, out var quest, out var cond, out var key)) return true;
             var items = qc.GetItemsForCondition(cond);
             if (items == null || items.Length == 0) return true;
             var current = quest.ProgressCheckers[cond].CurrentValue;
-            var need = (double)cond.value - current;
-            var have = items.Sum(i => i.StackObjectsCount);
-            if (items.All(i => i.QuestItem || CurrencyUtil.IsCurrencyId(i.TemplateId)))
-            {
-                return true;
-            }
-            if (_open)
-            {
-                __result = Task.CompletedTask;
-                return false;
-            }
-            Show(__instance, line, quest, cond, items, current, need, have);
+            if (items.All(i => i.QuestItem || CurrencyUtil.IsCurrencyId(i.TemplateId))) return true;
+            if (!_open) Show(__instance, line, cond, key, items, current);
             __result = Task.CompletedTask;
             return false;
         }
@@ -53,9 +41,18 @@ public static class NarrateHandoverWindow
         }
     }
 
-    static void Show(ClientDialogController dc, BaseTraderDialogLine line, Quest quest, ConditionItem cond, Item[] items, double current, double need, int have)
+    /// <summary>上交动作指的那条任务和那个「上交物品」条件，以及记选择用的键 任务|条件。
+    /// 任务不在任务书里、条件不是物品条件都算没解析出来。</summary>
+    static bool TryResolve(QuestController qc, DialogHandoverItemAction action, out Quest quest, out ConditionItem cond, out string key)
     {
-        var key = quest.Id + "|" + cond.id;
+        quest = qc?.Quests?.GetConditional(action.QuestId);
+        cond = quest?.ProgressCheckers.Keys.FirstOrDefault(c => c.id == action.ConditionId) as ConditionItem;
+        key = cond == null ? null : quest.Id + "|" + cond.id;
+        return cond != null;
+    }
+
+    static void Show(ClientDialogController dc, BaseTraderDialogLine line, ConditionItem cond, string key, Item[] items, double current)
+    {
         var picked = false;
         var screen = DialogScreenTracker.Live;
         var dialogWindow = screen != null && screen._dialogWindow != null ? screen._dialogWindow.gameObject : null;
@@ -65,13 +62,7 @@ public static class NarrateHandoverWindow
         {
             _open = false;
             if (dialogWindow != null) dialogWindow.SetActive(true);
-            if (picked) return;
-            try
-            {
-                var cur = dc?.CurrentDialog;
-                if (cur != null) { cur.IsBlocked = false; dc.SetCurrentDialog(dc.method_0(cur.Id)); }
-            }
-            catch (Exception e) { Plugin.Log.LogWarning("[handover] Failed to unblock after cancel: " + e.Message); }
+            if (!picked) DialogPage.Reopen(dc, "[handover]");
         }
 
         _open = true;
@@ -84,7 +75,12 @@ public static class NarrateHandoverWindow
                 _picked[key] = selected;
                 _reentry = line;
                 if (dialogWindow != null) dialogWindow.SetActive(true);
-                Run(dc, line, key);
+                // 选完了把这句再执行一遍（上面的前缀认出 _reentry 放行）；这句跑完 _picked 里还有这份选择 = 上交动作没用上它，丢掉
+                DialogPage.ExecuteAgain(dc, line, e => "[handover] Failed to execute line after selection: " + e.Message, () =>
+                {
+                    if (_picked.Remove(key)) Plugin.Log.LogWarning($"[handover] {key} line finished but the handover action did not use the selected items, discarding this selection");
+                    _reentry = null;
+                });
             }, true);
             ctx.OnClose += Closed;
             ctx.OnCloseSilent += Closed;
@@ -98,14 +94,6 @@ public static class NarrateHandoverWindow
         }
     }
 
-    static async void Run(ClientDialogController dc, BaseTraderDialogLine line, string key)
-    {
-        try { await dc.ExecuteLine(line); }
-        catch (Exception e) { Plugin.Log.LogWarning("[handover] Failed to execute line after selection: " + e.Message); }
-        if (_picked.Remove(key)) Plugin.Log.LogWarning($"[handover] {key} line finished but the handover action did not use the selected items, discarding this selection");
-        _reentry = null;
-    }
-
     public static void Reset() { _picked.Clear(); _reentry = null; _open = false; }
 
     [HarmonyPatch(typeof(ClientDialogController), nameof(ClientDialogController.method_16))]
@@ -113,8 +101,7 @@ public static class NarrateHandoverWindow
     {
         static void Postfix(ClientDialogController __instance, ref Task __result)
         {
-            var t = __result; if (t == null) return;
-            __result = RefreshAfter(__instance, t);
+            if (__result != null) __result = RefreshAfter(__instance, __result);
         }
 
         static async Task RefreshAfter(ClientDialogController dc, Task handover)
@@ -123,14 +110,10 @@ public static class NarrateHandoverWindow
             finally { Refresh(dc); }
         }
 
+        /// 上交完把选项页重画一遍（只重画玩家选项页；商人说话那一页重建会把台词再播一遍）
         static void Refresh(ClientDialogController dc)
         {
-            try
-            {
-                var cur = dc?.CurrentDialog;
-                if (cur == null || cur.DialogSide != EDialogSide.Player) return;
-                dc.SetCurrentDialog(dc.method_0(cur.Id));
-            }
+            try { DialogPage.Redraw(dc, playerOnly: true); }
             catch (Exception e) { Plugin.Log.LogWarning("[handover] Failed to rebuild options page after handover: " + e.Message); }
         }
 
@@ -139,10 +122,7 @@ public static class NarrateHandoverWindow
             try
             {
                 var qc = __instance.questController;
-                var quest = qc?.Quests?.GetConditional(handoverAction.QuestId);
-                var cond = quest?.ProgressCheckers.Keys.FirstOrDefault(c => c.id == handoverAction.ConditionId) as ConditionItem;
-                if (cond == null) return true;
-                var key = quest.Id + "|" + cond.id;
+                if (!TryResolve(qc, handoverAction, out var quest, out var cond, out var key)) return true;
                 if (!_picked.TryGetValue(key, out var selected)) return true;
                 _picked.Remove(key);
                 __result = Submit(qc, quest, cond, selected);

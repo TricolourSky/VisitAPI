@@ -7,13 +7,7 @@ public static class GlassProbe
 {
     const float MaxSmoothness = 0.5f;
 
-    public static void Report(Scene scene)
-    {
-        try { Apply(scene); }
-        catch (System.Exception e) { Plugin.Log.LogWarning("[narrate] transparent surface smoothness cap failed (ignored): " + e.GetType().Name + ": " + e.Message); }
-    }
-
-    static void Apply(Scene scene)
+    public static void Apply(Scene scene)
     {
         if (!scene.isLoaded) return;
         var rebuilt = new System.Collections.Generic.Dictionary<Material, Material>();

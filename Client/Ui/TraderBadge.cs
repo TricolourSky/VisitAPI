@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Comfort.Common;
 using EFT;
 using EFT.Quests;
 using EFT.UI;
@@ -17,18 +16,18 @@ public static class TraderBadge
 {
     public static readonly Color Gold = new Color32(0xD8, 0xBC, 0x40, 0xFF);
     internal const float PaddingScale = 36f / 27f;
-    static Sprite _sprite;
-    static bool _spriteTried, _fallback;
+    static bool _fallback;   // call_badge.png 读不出来、退回了 visit_icon（Build 按它上金色）
 
+    /// 金色电话角标的图；嵌入资源读不出来就退回 visit_icon 上金色。VisitArt.Load 自己按文件名缓存（缺图也缓存并报一次），外面不用再包一层
     public static Sprite Sprite
     {
         get
         {
-            if (_spriteTried) return _sprite;
-            _spriteTried = true;
-            _sprite = VisitArt.Load("call_badge.png");
-            if (_sprite == null) { _fallback = true; _sprite = VisitArt.Load("visit_icon.png"); Plugin.Log.LogWarning("[badge] Embedded call_badge.png could not be read, falling back to gold-tinted visit_icon.png"); }
-            return _sprite;
+            var s = VisitArt.Load("call_badge.png");
+            if (s != null) return s;
+            if (!_fallback) Plugin.Log.LogWarning("[badge] Embedded call_badge.png could not be read, falling back to gold-tinted visit_icon.png");
+            _fallback = true;
+            return VisitArt.Load("visit_icon.png");
         }
     }
 
@@ -36,23 +35,22 @@ public static class TraderBadge
     {
         var flagged = QuestFlags.CallTrader(q.Id) ?? QuestFlags.TalkTo(q.Id);
         if (flagged != null) return flagged;
-        // 10-01 SORA：只能对话接/交的任务，对话选项写在谁的剧本里就亮谁的电话（隐藏商人没解锁，CanTalk 自然压掉）
+        // 10-01 SORA：只能对话接/交的任务，点谁的访问能走到对话选项就亮谁的电话（10-18 起只算访问走得到的，见 VisitReach；隐藏商人没解锁，CanTalk 自然压掉）
         if (QuestFlags.DialogOnly(q.Id)) return VisitAPI.ChapterUI.ChapterDialogButton.TraderFor(q)?.TraderId ?? q.Template?.TraderId;
         return q.Template?.TraderId;
     }
 
-    static bool Timed(Quest q) =>
-        q.Template?.Conditions != null && q.Template.Conditions.TryGetValue(EQuestStatus.AvailableForStart, out var cc)
-        && cc.OfType<ConditionQuest>().Any(c => c.availableAfter > 0);
+    static bool Timed(Quest q) => q.Conds(EQuestStatus.AvailableForStart).OfType<ConditionQuest>().Any(c => c.availableAfter > 0);
 
     static bool NeedsTalk(Quest q, QuestController qc)
     {
         if (q?.Template == null) return false;
         // 10-01 SORA：dialogOnly 的任务「下一步在对话里」就亮金色电话——可接（剧本里有 accept 选项）、
-        // 进行中 / 可交付（剧本里有 complete / handover 选项）都算；行里的「去找 X」按钮退役，指路统一走金色电话 + 金色访问
+        // 进行中 / 可交付（剧本里有 complete / handover 选项）都算；行里的「去找 X」按钮退役，指路统一走金色电话 + 金色访问。
+        // 10-18 SORA：选项得是点访问走得到的；只挂在战局 / 藏身处触发点后面的（街区找 SORA 那种）不亮，访问点进去也交不了
         if (QuestFlags.DialogOnly(q.Id))
         {
-            if (q.QuestStatus == EQuestStatus.Started || q.QuestStatus == EQuestStatus.AvailableForFinish)
+            if (VisitAPI.ChapterUI.ChapterStates.Running(q.QuestStatus))
                 return VisitAPI.ChapterUI.ChapterDialogButton.TraderFor(q) != null;
             return q.QuestStatus == EQuestStatus.AvailableForStart
                 && VisitAPI.ChapterUI.ChapterDialogButton.TraderFor(q) != null && ChapterChain.Reachable(qc, q);
@@ -69,20 +67,28 @@ public static class TraderBadge
         if (string.IsNullOrEmpty(traderId)) return false;
         try
         {
-            var profile = Singleton<ClientApplication<IEftSession>>.Instance?.GetClientBackEndSession()?.Profile;
-            if (profile?.TradersInfo != null)
-            {
-                if (traderId.Length != 24 || !profile.TradersInfo.TryGetValue(new MongoID(traderId), out var info) || info == null || !info.Unlocked) return false;
-            }
+            var profile = VisitBackend.Profile;
+            if (profile?.TradersInfo != null && (traderId.Length != 24 || !profile.TradersInfo.TryGetValue(new MongoID(traderId), out var info) || info == null || !info.Unlocked)) return false;
         }
         catch (Exception e) { Plugin.Log.LogWarning("[badge] Failed to read trader unlock state, treating as talkable: " + e.Message); }
-        return QuestFlags.DialogueUnlocked(traderId, qc) != false;
+        return DialogueOpen(traderId, qc);
     }
 
-    static QuestController Controller => ChapterChain.Controller ?? ChapterTab.Quests ?? QuestOps.Resolve();
+    /// 这家商人的对话没被剧情锁着（包里没写 unlockDialogue 的商人永远开着）；TalkButton 判「能不能访问」也用它
+    internal static bool DialogueOpen(string traderId, QuestController qc) => QuestFlags.DialogueUnlocked(traderId, qc) != false;
 
-    /// 10-01（GitHub 商人页面卡顿 issue）：以前每张商人卡各自每秒把任务清单＋库存匹配全量走一遍（上交检查最重），
-    /// 8 张卡 = 同一份重活每秒 8 遍，商人页面周期性掉帧。现在全局 1.5 秒算一次两张名单（电话 / 可上交），各处只查表。
+    /// 三个查表入口的开头都一样：开关开着、有活的任务控制器、名单是新的。两个开关在打补丁之前就 Bind 好了，直接读 Value
+    static bool Ready(ref QuestController qc, bool on)
+    {
+        if (!on) return false;
+        qc ??= QuestOps.Current;
+        if (qc?.Quests == null) return false;
+        Sweep(qc);
+        return true;
+    }
+
+    /// 10-01（GitHub 商人页面卡顿 issue）：每张商人卡各自每秒把任务清单＋库存匹配全量走一遍（上交检查最重）的话，
+    /// 8 张卡 = 同一份重活每秒 8 遍，商人页面周期性掉帧。所以全局 1.5 秒算一次两张名单（电话 / 可上交），各处只查表。
     /// [Badge] 两个开关也一并尊重：关掉 = 名单直接不算，角标和开销一起归零。
     static float _sweepUntil;
     static QuestController _sweepQc;
@@ -96,8 +102,8 @@ public static class TraderBadge
         _sweepUntil = Time.unscaledTime + 1.5f;
         _callSet.Clear();
         _handSet.Clear();
-        var callOn = Plugin.CallBadge == null || Plugin.CallBadge.Value;
-        var handOn = Plugin.HandoverBadge == null || Plugin.HandoverBadge.Value;
+        var callOn = Plugin.CallBadge.Value;
+        var handOn = Plugin.HandoverBadge.Value;
         try
         {
             foreach (var q in qc.Quests)
@@ -130,38 +136,27 @@ public static class TraderBadge
 
     public static bool Wanted(string traderId, QuestController qc = null)
     {
-        if (string.IsNullOrEmpty(traderId) || Plugin.CallBadge?.Value == false) return false;
-        qc ??= Controller;
-        if (qc?.Quests == null) return false;
-        try
-        {
-            Sweep(qc);
-            return _callSet.Contains(traderId) && CanTalk(traderId, qc);
-        }
+        if (string.IsNullOrEmpty(traderId) || !Ready(ref qc, Plugin.CallBadge.Value)) return false;
+        try { return _callSet.Contains(traderId) && CanTalk(traderId, qc); }
         catch (Exception e) { Plugin.Log.LogWarning("[badge] Trader badge check failed: " + e.Message); return false; }
     }
 
     public static bool AnyWanted(QuestController qc = null)
     {
-        if (Plugin.CallBadge?.Value == false) return false;
-        qc ??= Controller;
-        if (qc?.Quests == null) return false;
+        if (!Ready(ref qc, Plugin.CallBadge.Value)) return false;
         try
         {
-            Sweep(qc);
             foreach (var t in _callSet) if (CanTalk(t, qc)) return true;
             return false;
         }
         catch (Exception e) { Plugin.Log.LogWarning("[badge] Top bar badge check failed: " + e.Message); return false; }
     }
 
-    static readonly Dictionary<string, Sprite> _sprites = new();
+    /// 1.1.5 的三张原生角标替换图；VisitArt.Load 自己缓存，缺图每张只报一次
     static Sprite Art(string file)
     {
-        if (_sprites.TryGetValue(file, out var s)) return s;
-        s = VisitArt.Load(file);
-        if (s == null) Plugin.Log.LogWarning($"[badge] Embedded {file} could not be read, this 1.1.5 badge will not be replaced");
-        _sprites[file] = s;
+        var s = VisitArt.Load(file);
+        if (s == null) Plugin.WarnOnce("badge/" + file, $"[badge] Embedded {file} could not be read, this 1.1.5 badge will not be replaced");
         return s;
     }
     public static Sprite HandoverSprite => Art("handover_badge.png");
@@ -178,14 +173,8 @@ public static class TraderBadge
         img.preserveAspect = true;
     }
 
-    public static bool HandoverWanted(string traderId, QuestController qc = null)
-    {
-        if (string.IsNullOrEmpty(traderId) || Plugin.HandoverBadge?.Value == false) return false;
-        qc ??= Controller;
-        if (qc?.Quests == null) return false;
-        Sweep(qc);
-        return _handSet.Contains(traderId);
-    }
+    public static bool HandoverWanted(string traderId, QuestController qc = null) =>
+        !string.IsNullOrEmpty(traderId) && Ready(ref qc, Plugin.HandoverBadge.Value) && _handSet.Contains(traderId);
 
     [HarmonyPatch(typeof(TraderCard), nameof(TraderCard.Show))]
     public static class CardShow
@@ -211,15 +200,7 @@ public static class TraderBadge
         }
     }
 
-    [HarmonyPatch(typeof(MenuTaskBar), "Awake")]
-    public static class TaskBarAwake
-    {
-        static void Postfix(MenuTaskBar __instance)
-        {
-            try { if (__instance.GetComponent<HeaderBadge>() == null) __instance.gameObject.AddComponent<HeaderBadge>(); }
-            catch (Exception e) { Plugin.Log.LogError("[badge] Failed to attach top bar badge (the task bar itself is unaffected): " + e); }
-        }
-    }
+    // 顶栏名字旁的金色电话（HeaderBadge）由 ChatInviteTaskbar 在底栏 Awake 时一并挂上
 
     [HarmonyPatch(typeof(MenuTaskBar), nameof(MenuTaskBar.OnScreenChanged))]
     public static class ScreenChanged
@@ -269,6 +250,14 @@ public class CardBadge : MonoBehaviour
     RectTransform _spacer;
     LayoutGroup _layout;
     bool _layoutChecked;
+    TraderAvatar _avatar;
+
+    /// 卡上的头像组件（原生角标挂在它下面）：找到一次就记住
+    TraderAvatar Avatar()
+    {
+        if (_avatar == null) _avatar = GetComponentInChildren<TraderAvatar>(true);
+        return _avatar;
+    }
 
     LayoutGroup NativeLayout(TraderAvatar avatar)
     {
@@ -287,7 +276,7 @@ public class CardBadge : MonoBehaviour
     {
         try
         {
-            var avatar = GetComponentInChildren<TraderAvatar>(true);
+            var avatar = Avatar();
             if (avatar == null || slot <= 1f) return;
             var layout = NativeLayout(avatar);
             var width = ColumnWidth(slot);
@@ -306,12 +295,13 @@ public class CardBadge : MonoBehaviour
         catch (Exception e) { Plugin.Log.LogWarning("[badge] Failed to size native badge: " + e.Message); }
     }
 
+    static readonly Vector3[] _corners = new Vector3[4];   // 每帧对齐（LateUpdate）：复用，不每帧分配
+
     void AlignGoldToSpacer()
     {
         if (_img == null || !_img.gameObject.activeSelf || _spacer == null || !_spacer.gameObject.activeInHierarchy) return;
-        var corners = new Vector3[4];
-        _spacer.GetWorldCorners(corners);
-        var center = (corners[0] + corners[2]) * 0.5f;
+        _spacer.GetWorldCorners(_corners);
+        var center = (_corners[0] + _corners[2]) * 0.5f;
         if ((_img.transform.position - center).sqrMagnitude > 0.0001f) _img.transform.position = center;
     }
 
@@ -319,7 +309,7 @@ public class CardBadge : MonoBehaviour
     {
         try
         {
-            var avatar = GetComponentInChildren<TraderAvatar>(true);
+            var avatar = Avatar();
             if (avatar == null) return;
             var layout = NativeLayout(avatar);
             if (layout != null)
@@ -369,9 +359,9 @@ public class CardBadge : MonoBehaviour
         if (on)
         {
             var rt = (RectTransform)_img.transform;
-            var size = Mathf.Clamp(w * visible * TraderBadge.PaddingScale, 16f, 64f);
+            var size = Mathf.Clamp(slot * TraderBadge.PaddingScale, 16f, 64f);
             rt.sizeDelta = new Vector2(size, size);
-            rt.anchoredPosition = new Vector2(-w * (0.106f + visible / 2f), -w * (0.11f + visible / 2f));
+            rt.anchoredPosition = Corner(w);
             rt.SetAsLastSibling();
             ShiftNativeIcons(true, slot);
         }
@@ -385,7 +375,7 @@ public class CardBadge : MonoBehaviour
     bool _swapped;
     void SwapNativeIcons(TraderAvatar avatar)
     {
-        if (_swapped || avatar == null || Plugin.HandoverBadge?.Value == false) return;
+        if (_swapped || avatar == null || !Plugin.HandoverBadge.Value) return;
         _swapped = true;
         TraderBadge.Swap(avatar._availableToStartQuestsIcon, TraderBadge.StartSprite);
         TraderBadge.Swap(avatar._availableToFinishQuestsIcon, TraderBadge.FinishSprite);
@@ -395,7 +385,8 @@ public class CardBadge : MonoBehaviour
     {
         try
         {
-            if (!_swapped) SwapNativeIcons(GetComponentInChildren<TraderAvatar>(true));
+            var avatar = Avatar();
+            SwapNativeIcons(avatar);
             var on = TraderBadge.HandoverWanted(_traderId, _qc);
             if (!on) { if (_hand != null && _hand.gameObject.activeSelf) _hand.gameObject.SetActive(false); return; }
             if (_hand == null)
@@ -404,8 +395,6 @@ public class CardBadge : MonoBehaviour
                 _hand = TraderBadge.Build((RectTransform)transform, "VisitHandoverBadge", TraderBadge.HandoverSprite);
             }
             var rt = (RectTransform)_hand.transform;
-            var avatar = GetComponentInChildren<TraderAvatar>(true);
-            SwapNativeIcons(avatar);
             var start = avatar != null && avatar._availableToStartQuestsIcon != null ? avatar._availableToStartQuestsIcon.transform as RectTransform : null;
             if (start != null && start.parent is RectTransform nativeParent)
             {
@@ -436,7 +425,7 @@ public class CardBadge : MonoBehaviour
                 rt.anchorMin = rt.anchorMax = new Vector2(1f, 1f);
                 rt.pivot = new Vector2(0.5f, 0.5f);
                 rt.sizeDelta = new Vector2(slot, slot);
-                rt.anchoredPosition = new Vector2(-w * (0.106f + visible / 2f), -w * (0.11f + visible / 2f) - (gold ? slot : 0f));
+                rt.anchoredPosition = Corner(w) - new Vector2(0f, gold ? slot : 0f);
                 rt.SetAsLastSibling();
             }
             if (!_hand.gameObject.activeSelf) _hand.gameObject.SetActive(true);
@@ -444,6 +433,7 @@ public class CardBadge : MonoBehaviour
         catch (Exception e) { Plugin.Log.LogWarning("[badge] Hand-over badge refresh failed: " + e.Message); }
     }
     const float visible = 0.15f;
+    static Vector2 Corner(float w) => new Vector2(-w * (0.106f + visible / 2f), -w * (0.11f + visible / 2f));
 
     void LateUpdate()
     {
@@ -460,12 +450,6 @@ public class HeaderBadge : MonoBehaviour
     Image _img;
     EEftScreenType _seenScreen;
     float _next, _retry;
-
-    static string Nickname()
-    {
-        try { return Singleton<ClientApplication<IEftSession>>.Instance?.GetClientBackEndSession()?.Profile?.Nickname; }
-        catch { return null; }
-    }
 
     void LateUpdate()
     {
@@ -487,7 +471,7 @@ public class HeaderBadge : MonoBehaviour
 
     bool Find()
     {
-        var nick = Nickname();
+        var nick = VisitBackend.Profile?.Nickname;
         if (string.IsNullOrEmpty(nick)) return false;
         TMP_Text best = null;
         foreach (var t in FindObjectsOfType<TextMeshProUGUI>())

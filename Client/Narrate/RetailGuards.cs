@@ -49,9 +49,6 @@ public static class NarrateSwitchGuard
     }
 }
 
-// 1.3.4 B6：随机台词的闭区间补丁（09-24 M6 的 NarrateRandomGuard）已删——服务端加载内容包时把 1.1 的闭区间数据换成引擎原生的半开区间
-//（Server\DialogueSanitizer.HalfOpenRandoms），访问内外都走原生 RandomLineCondition.Test
-
 [HarmonyPatch(typeof(QuestStatusCondition), "Test")]
 public static class NarrateQuestGhostGuard
 {

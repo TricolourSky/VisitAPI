@@ -9,7 +9,8 @@ namespace VisitAPI.ChapterUI
 {
     internal class RowTrack
     {
-        public MainQuestTaskView Row; public Quest Quest; public Condition Cond; public bool Over; public string Last;
+        public MainQuestTaskView Row; public Quest Quest; public Condition Cond; public bool Over;
+        public (ChapterStates.ERow state, int cur) Last;   // 上次画的是什么（10-24，旧 B23）
     }
 
     public partial class MainQuestTabView
@@ -36,7 +37,7 @@ namespace VisitAPI.ChapterUI
         void FillTasks(ChapterModel ch)
         {
             LiveRows.Clear();
-            var over = ch.Status == ChapterModel.State.Succeeded || ch.Status == ChapterModel.State.Failed;
+            var over = ch.Over;
             var conds = ch.Conditions(_expandedTasks).ToList();
             var hidden = !_expandedTasks && !over && ch.Conditions(true).Count() != conds.Count;
             FillList(_tasksView?._mainTasksList, conds.Where(c => c.primary), over, _mainIds);
@@ -69,15 +70,17 @@ namespace VisitAPI.ChapterUI
             var track = new RowTrack { Row = row, Quest = quest, Cond = cond, Over = chapterOver };
             track.Last = Style(row, quest, cond, chapterOver);
             LiveRows.Add(track);
-            var id = cond.id.ToString();
-            ReadState.OnHover(row.gameObject, () => { ReadState.MarkRead(new[] { id }); RefreshUnread(); });
+            HoverRead(row.gameObject, cond.id.ToString());
             return row;
         }
 
-        internal string Style(MainQuestTaskView row, Quest quest, Condition cond, bool chapterOver)
+        /// 把一行画成它现在该有的样子，返回画的是什么（给 ChapterLive 比较）。snap 没给就现算；ChapterLive 比较过的快照直接传进来（10-24，旧 B23）。
+        /// 探针（FindItemProbe）只在这里跑：行真的重画时查一次，不在每 0.5 秒的比较里扫仓库（10-24，旧 B19；探针本身 #183 定了留着）
+        internal (ChapterStates.ERow state, int cur) Style(MainQuestTaskView row, Quest quest, Condition cond, bool chapterOver, ChapterStates.RowSnap? snap = null)
         {
-            var snap = ChapterStates.Snap(quest, cond, chapterOver);
-            var state = snap.State;
+            var s = snap ?? ChapterStates.Snap(quest, cond, chapterOver);
+            var state = s.State;
+            FindItemProbe.Check(quest, cond, state);
             if (row._titleField != null)
             {
                 var text = cond.FormattedDescription;
@@ -87,11 +90,9 @@ namespace VisitAPI.ChapterUI
             }
             if (row._descriptionField != null)
             {
-                var key = cond.id + "_hint"; var desc = key.Localized();
-                if (string.IsNullOrEmpty(desc) || desc == key) { key = cond.id + " desc"; desc = key.Localized(); }
-                var has = !string.IsNullOrEmpty(desc) && desc != key;
-                row._descriptionField.gameObject.SetActive(has);
-                if (has) TmpFix.Set(row._descriptionField, desc);
+                var desc = Loc.Key(cond.id + "_hint") ?? Loc.Key(cond.id + " desc");
+                row._descriptionField.gameObject.SetActive(desc != null);
+                if (desc != null) TmpFix.Set(row._descriptionField, desc);
             }
             var skipped = state == ChapterStates.ERow.Skipped;
             if (row._checkMark != null) row._checkMark.gameObject.SetActive(state == ChapterStates.ERow.Done);
@@ -102,23 +103,21 @@ namespace VisitAPI.ChapterUI
             if (row._skipMark != null) row._skipMark.gameObject.SetActive(false);
             if (row._counterField != null)
             {
-                TmpFix.Set(row._counterField, snap.Counting ? $"{Num(snap.Cur)}/{Num((int)cond.value)}" : "");
+                TmpFix.Set(row._counterField, s.Counting ? $"{ChapterStates.Thousands(s.Cur, ' ')}/{ChapterStates.Thousands((int)cond.value, ' ')}" : "");
                 row._counterField.color = ChapterStates.RowColor(row, state);
-                row._counterField.gameObject.SetActive(snap.Counting);
+                row._counterField.gameObject.SetActive(s.Counting);
             }
             var info = row.transform.Find(RowInfoPath);
             var bar = info != null ? info.Find("Progress") : null;
             if (bar != null)
             {
-                bar.gameObject.SetActive(snap.Counting);
+                bar.gameObject.SetActive(s.Counting);
                 var fillT = bar.Find("Image"); var fill = fillT != null ? fillT.GetComponent<Image>() : null;
-                if (fill != null) fill.fillAmount = snap.Fill;
+                if (fill != null) fill.fillAmount = s.Fill;
             }
             if (info != null) Toggle(info, "Group", false);
-            return snap.Key;
+            return s.Key;
         }
-
-        static string Num(int n) => n.ToString("#,0", System.Globalization.CultureInfo.InvariantCulture).Replace(',', ' ');
 
         static class SkipVisual
         {
@@ -139,7 +138,7 @@ namespace VisitAPI.ChapterUI
                 return _bar;
             }
 
-            public static void Apply(MainQuestTaskView row, bool on, bool failed = false)
+            public static void Apply(MainQuestTaskView row, bool on, bool failed)
             {
                 var border = row._checkMarkBorder; if (border == null) return;
                 var tag = border.GetComponent<Tag>() ?? border.gameObject.AddComponent<Tag>();

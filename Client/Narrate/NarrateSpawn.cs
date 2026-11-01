@@ -10,8 +10,6 @@ namespace VisitAPI.Native;
 [HarmonyPatch(typeof(NarrateGame), "Move")]
 public static class NarrateSpawnGuard
 {
-    const float EyeHeight = 1.5f;
-
     public const float Fov11 = 55f;
 
     /// 1.1 的访问玩家不进房间：1.1MCP 实测一直在 (0,-100,0)。照放，脚下垫一块看不见的地板（0.16 的玩家没地板会往下掉）
@@ -28,8 +26,6 @@ public static class NarrateSpawnGuard
         // 09-26 照 1.1 定机位（1.1MCP 在 1.1 的 Prapor 访问里实测）：1.1 删掉了 0.16 这张写死坐标的表（VendorScenePresets 只剩场景名），
         // NarrateGame.Move 改读房间里原生的机位点 StaticCameraObservationPoint——玩家本人留在地图下，玩家骨骼里的相机挂点 CameraContainer
         // 每帧钉在机位点上（位置、朝向都一样），相机照原生跟随挂点下的 Cam（挂点里右 / 上 4 厘米、前 5 厘米）；鼠标不转视角。
-        // 以前这里要么用 0.16 的原生坐标（Prapor 这类房间没挪的，玩家站进房间、相机跟眼睛，比 1.1 偏约 0.3 米、低头 3.76°），
-        // 要么按机位点往下 1.5 米放玩家再看向前方 5 米（挪过的房间，差几厘米）
         var point = SceneLoader.FindObservationPoint(scene);
         if (point != null)
         {
@@ -42,24 +38,11 @@ public static class NarrateSpawnGuard
             VisitCameraPin.Arm(__instance, point);
             return;
         }
-        var native = !_markerScenes.Contains(_current) && (sceneInfo.playerPosition != Vector3.zero || sceneInfo.targetPosition != Vector3.zero);
-        var nativePlayer = sceneInfo.playerPosition;
-        if (native && CollisionAligner.HasSupport(scene, nativePlayer))
-        {
-            CollisionAligner.Align(scene, nativePlayer);
-            return;
-        }
-        var cam = SceneLoader.FindCameraPoint(scene);
-        if (cam == null)
-        {
-            if (native) { CollisionAligner.Align(scene, nativePlayer); Plugin.Log.LogWarning($"[narrate] 0.16 native coordinates {nativePlayer} have no room underfoot and the scene has no camera marker - falling back to native coordinates"); }
-            else Plugin.Log.LogWarning("[narrate] no camera point in scene - native coordinates in effect");
-            return;
-        }
-        sceneInfo.playerPosition = cam.position - Vector3.up * EyeHeight;
-        sceneInfo.targetPosition = cam.position + cam.forward * 5f;
-        _markerScenes.Add(_current);
-        CollisionAligner.Align(scene, sceneInfo.playerPosition);
+        // 没有机位点就照 0.16 的原生坐标（脚下没东西 Align 自己垫地板并告警）。用过机位点的房间不算：
+        // 引擎的场景预设是常驻的，它的坐标已经被上面改成了藏身点
+        if (!_markerScenes.Contains(_current) && (sceneInfo.playerPosition != Vector3.zero || sceneInfo.targetPosition != Vector3.zero))
+            CollisionAligner.Align(scene, sceneInfo.playerPosition);
+        else Plugin.Log.LogWarning("[narrate] no camera point in scene - native coordinates in effect");
     }
 }
 
@@ -100,12 +83,10 @@ public static class VisitCameraPin
         container.localRotation = home.rot;
     }
 
-    /// 相机刚建好（NarrateCameraBypass）时先钉一次，第一帧相机就在机位上
-    internal static void PinNow(Player player) => Pin(player);
-
     static void Prefix(PlayerCameraController __instance) => Pin(__instance.Player);
 
-    static void Pin(Player player)
+    /// 相机刚建好（NarrateCameraBypass）时也直接调一次，第一帧相机就在机位上
+    internal static void Pin(Player player)
     {
         if (_point == null || _game == null || player == null) return;
         var owner = _game.PlayerOwner;
@@ -120,8 +101,6 @@ public static class VisitCameraPin
 
 static class CollisionAligner
 {
-    internal static bool HasSupport(Scene scene, Vector3 spawn) => scene.isLoaded && FindSupport(scene, spawn, out _) != null;
-
     static Collider FindSupport(Scene scene, Vector3 spawn, out RaycastHit supportHit)
     {
         var ray = new Ray(spawn + Vector3.up * 3f, Vector3.down);

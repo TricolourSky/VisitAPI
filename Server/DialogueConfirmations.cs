@@ -8,8 +8,6 @@ public static class DialogueConfirmations
 {
     static readonly Dictionary<string, string> _byLine = new(StringComparer.Ordinal);
 
-    public static int Count => _byLine.Count;
-
     public static void Scan(JsonNode node)
     {
         switch (node)

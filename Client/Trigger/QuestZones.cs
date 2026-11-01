@@ -4,7 +4,6 @@ using System.Linq;
 using Comfort.Common;
 using EFT;
 using EFT.Interactive;
-using HarmonyLib;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -12,6 +11,9 @@ namespace VisitAPI.Native;
 
 public static class QuestZones
 {
+    /// 交互型区域的任务门：statuses 空表 = 任意状态（和走进型区域的 QuestOps.StatusIn 同一口径），而 VisitTrigger.GatePasses 的空表是「永远不出现」，所以空表填满（10-29）
+    static readonly List<int> AnyStatus = Enum.GetValues(typeof(EFT.Quests.EQuestStatus)).Cast<EFT.Quests.EQuestStatus>().Select(s => (int)s).ToList();
+
     public class Zone
     {
         public string Id, Type;
@@ -20,7 +22,21 @@ public static class QuestZones
         public Quaternion Rotation = Quaternion.identity;
         public Subtitle Subtitles;
         public float[] Hours;   // 可选时段门（10-01 SORA：恢复「夜晚的海岸线」）：不在时段内就不生成触发器
+        public StayRule Stay;   // 10-17：type "stay"——在里面待够时间才打勾（QuestZoneStay）
     }
+
+    /// 10-17 SORA「看门狗」：玩家在区域里连续待够 Seconds 秒，目标才打勾；出了区域计时清零、回来重新计。
+    /// 只在 Quest 处于 Statuses（默认 2 = 进行中）时计时；Events 在计时到 At 秒时各触发一次（每局一次），现在只有刷兵（spawns 里 on: event 的条目）
+    public class StayRule
+    {
+        public float Seconds = 120f;
+        public string Quest;
+        public List<int> Statuses = new() { 2 };
+        public List<StayEvent> Events = new();
+        public string Caption;   // 10-17：绿色倒计时框上的字（文案键）；没写 / 文案里没有就用「警戒中」
+    }
+
+    public class StayEvent { public float At; public string Spawn; }
 
     public class Subtitle
     {
@@ -32,18 +48,14 @@ public static class QuestZones
         public List<Variant> Pool = new();
         public float Volume = 0.8f;
 
-        public Variant Pick()
-        {
-            if (Pool.Count > 0) return Pool[UnityEngine.Random.Range(0, Pool.Count)];
-            return new Variant { Lines = Lines };
-        }
+        public Variant Pick() => Pool.Count > 0 ? Pool[UnityEngine.Random.Range(0, Pool.Count)] : new Variant { Lines = Lines };
     }
 
     public class Variant { public string Audio; public List<RaidSubtitles.Line> Lines = new(); }
 
     public class Interact
     {
-        public string Prompt = "使用";
+        public string Prompt;   // 没写就按玩家语言显示「使用 / Use」（Spawn 里补）
         public float Dist = 2.5f, Radius = 0.6f;
         public Vector3? At;
         public bool CompleteOnUse = true;
@@ -74,7 +86,19 @@ public static class QuestZones
                         Position = V3(t["position"], Vector3.zero), Size = V3(t["size"], Vector3.one),
                         Rotation = t["rotation"] is JObject r ? new Quaternion(F(r, "x"), F(r, "y"), F(r, "z"), r["w"] != null ? F(r, "w") : 1f) : Quaternion.identity
                     };
-                    if (t["hours"] is JObject hh) z.Hours = new[] { hh["from"]?.Value<float>() ?? 0f, hh["to"]?.Value<float>() ?? 0f };
+                    z.Hours = Hours(t["hours"]);
+                    if (t["stay"] is JObject st)
+                        z.Stay = new StayRule
+                        {
+                            Seconds = Mathf.Max(1f, st["seconds"]?.Value<float>() ?? 120f),
+                            Quest = st["quest"]?.Value<string>(),
+                            Caption = st["caption"]?.Value<string>(),
+                            Statuses = (st["statuses"] as JArray)?.Select(x => x.Value<int>()).ToList() ?? new List<int> { 2 },
+                            Events = (st["events"] as JArray)?.OfType<JObject>()
+                                .Select(e => new StayEvent { At = e["at"]?.Value<float>() ?? 0f, Spawn = e["spawn"]?.Value<string>() })
+                                .Where(e => !string.IsNullOrEmpty(e.Spawn)).ToList() ?? new List<StayEvent>()
+                        };
+                    else if (z.Type == "stay") z.Stay = new StayRule();
                     if (string.IsNullOrEmpty(z.Id) || z.Locations.Count == 0) { Plugin.Log.LogWarning("[zones] a zone is missing id or locations, skipped: " + t.ToString(Newtonsoft.Json.Formatting.None)); continue; }
                     if (t["subtitles"] is JObject s)
                     {
@@ -94,7 +118,7 @@ public static class QuestZones
                         if (s["interact"] is JObject it)
                             sub.Interact = new Interact
                             {
-                                Prompt = it["prompt"]?.Value<string>() is string p && p.Length > 0 ? p : "使用",
+                                Prompt = it["prompt"]?.Value<string>() is string p && p.Length > 0 ? p : null,
                                 Dist = it["dist"]?.Value<float>() ?? 2.5f, Radius = it["radius"]?.Value<float>() ?? 0.6f,
                                 At = it["at"] is JObject at ? V3(at, z.Position) : (Vector3?)null,
                                 CompleteOnUse = it["completeOnUse"]?.Value<bool>() ?? true
@@ -113,7 +137,17 @@ public static class QuestZones
     }
 
     static float F(JObject o, string k) => o[k]?.Value<float>() ?? 0f;
-    static Vector3 V3(JToken t, Vector3 fallback) => t is JObject o ? new Vector3(F(o, "x"), F(o, "y"), F(o, "z")) : fallback;
+    internal static Vector3 V3(JToken t, Vector3 fallback) => t is JObject o ? new Vector3(F(o, "x"), F(o, "y"), F(o, "z")) : fallback;
+    /// 可选时段门 `hours: { from, to }`（zones / spawns 同一种写法）；没写就 null = 不限时
+    internal static float[] Hours(JToken t) => t is JObject hh ? new[] { hh["from"]?.Value<float>() ?? 0f, hh["to"]?.Value<float>() ?? 0f } : null;
+
+    /// 点 p 在不在这个盒子里（盒子按 t 的位置 / 朝向、边长 size）；区域探针和计时区共用
+    internal static bool Contains(Transform t, Vector3 size, Vector3 p)
+    {
+        var local = t.InverseTransformPoint(p);
+        var half = size * 0.5f;
+        return Mathf.Abs(local.x) <= half.x && Mathf.Abs(local.y) <= half.y && Mathf.Abs(local.z) <= half.z;
+    }
 
     /// <summary>可选时段门：按战局内时钟（GameDateTime）算，跨零点规则照原生 daytime 的 TimeBetween（21→6 = 晚 9 点到早 6 点）。
     /// from/to 都是 0 或相等 = 不限时；时钟读不到时放行——宁可白天也能打勾，不能把任务卡死。</summary>
@@ -157,6 +191,16 @@ public static class QuestZones
             trigger.SetId(z.Id);
             go.layer = LayerMask.NameToLayer("Triggers");
             _live.Add(go);
+            if (z.Stay != null)
+            {
+                // 计时区：盒子不交给原生触发检测（不然一走进来就打勾），由 QuestZoneStay 自己量位置、计时，满了再手动 TriggerEnter（同「交互完成」那条路）
+                box.enabled = false;
+                probe.ManualOnly = true;
+                var stay = go.AddComponent<QuestZoneStay>();
+                stay.Zone = z;
+                stay.Trigger = trigger;
+                continue;
+            }
             if (z.Subtitles?.Interact is Interact it)
             {
                 if (it.CompleteOnUse)
@@ -170,8 +214,8 @@ public static class QuestZones
                 t.TraderId = "zone:" + z.Id;
                 t.Data = new VisitAPI.Dialog.DialogTrigger
                 {
-                    Kind = "raid", Place = loc, X = at.x, Y = at.y, Z = at.z, Dist = it.Dist, Radius = it.Radius, Prompt = it.Prompt,
-                    IfQuestId = z.Subtitles.Quest, IfStatuses = new List<int>(z.Subtitles.Statuses)
+                    Kind = "raid", Place = loc, X = at.x, Y = at.y, Z = at.z, Dist = it.Dist, Radius = it.Radius, Prompt = it.Prompt ?? Loc.Pick("使用", "Use"),
+                    IfQuestId = z.Subtitles.Quest, IfStatuses = z.Subtitles.Statuses.Count > 0 ? new List<int>(z.Subtitles.Statuses) : AnyStatus
                 };
                 t.RequireLook = true;
                 t.Voice = z.Subtitles;
@@ -184,8 +228,7 @@ public static class QuestZones
 }
 
 /// 09-25：EFT 的触发检测（玩家身上的重叠检查）只通知实现了 IPhysicsTrigger 的组件（TriggerWithId），同一物体上的普通 MonoBehaviour
-/// 收不到 OnTriggerEnter——所以探针以前的「player entered quest zone」日志和「走进区域播字幕」从来没生效过（原生触发器照常计任务进度）。
-/// 这里继承两种原生触发器，TriggerEnter 先走原生逻辑、再通知探针
+/// 收不到 OnTriggerEnter——所以这里继承两种原生触发器，TriggerEnter 先走原生逻辑、再通知探针
 public class VisitExperienceTrigger : ExperienceTrigger
 {
     QuestZoneProbe _probe;
@@ -213,11 +256,7 @@ public class QuestZoneProbe : MonoBehaviour
         {
             var sub = Zone?.Subtitles;
             if (sub == null || sub.Interact != null || (_subtitled && sub.OncePerRaid)) return;
-            if (!string.IsNullOrEmpty(sub.Quest))
-            {
-                var quest = QuestOps.Resolve()?.Quests?.GetConditional(sub.Quest);
-                if (quest == null || (sub.Statuses.Count > 0 && !sub.Statuses.Contains((int)quest.QuestStatus))) return;
-            }
+            if (!QuestOps.StatusIn(sub.Quest, sub.Statuses)) return;
             _subtitled = true;
             var pick = sub.Pick();
             if (!string.IsNullOrEmpty(pick.Audio)) RaidVoice.PlayAt(pick.Audio, transform.position, sub.Volume);
@@ -231,21 +270,19 @@ public class QuestZoneProbe : MonoBehaviour
         if (ManualOnly) yield break;
         for (var i = 0; i < 120; i++)
         {
-            var player = Singleton<GameWorld>.Instantiated ? Singleton<GameWorld>.Instance.MainPlayer : null;
+            var player = Raid.MainPlayer;
             if (player != null)
             {
                 for (var j = 0; j < 240; j++)
                 {
-                    if (Singleton<AbstractGame>.Instantiated && Singleton<AbstractGame>.Instance.Status == GameStatus.Started) break;
+                    if (Raid.Started) break;
                     yield return new WaitForSeconds(0.5f);
                 }
                 yield return new WaitForSeconds(2f);
-                player = Singleton<GameWorld>.Instantiated ? Singleton<GameWorld>.Instance.MainPlayer : null;
+                player = Raid.MainPlayer;
                 if (player == null) yield break;
                 var box = GetComponent<BoxCollider>();
-                var local = transform.InverseTransformPoint(player.Position);
-                var half = (box != null ? box.size : Vector3.one) * 0.5f;
-                if (Mathf.Abs(local.x) <= half.x && Mathf.Abs(local.y) <= half.y && Mathf.Abs(local.z) <= half.z && !_inside)
+                if (QuestZones.Contains(transform, box != null ? box.size : Vector3.one, player.Position) && !_inside)
                 {
                     _spawnCheck = true;
                     GetComponent<TriggerWithId>()?.TriggerEnter(player);   // 经子类回到 Entered，字幕在那里
@@ -263,24 +300,10 @@ public class QuestZoneProbe : MonoBehaviour
     {
         try
         {
-            if (!Singleton<GameWorld>.Instantiated || player == null || !ReferenceEquals(player, Singleton<GameWorld>.Instance.MainPlayer)) return;
+            if (player == null || !ReferenceEquals(player, Raid.MainPlayer)) return;
             _inside = true;
             PlaySubtitle(_spawnCheck ? "spawned inside" : "walked in");
         }
         catch (Exception e) { Plugin.Log.LogWarning($"[zones] {Id} enter handling failed: " + e.Message); }
-    }
-}
-
-[HarmonyPatch(typeof(GameWorld), nameof(GameWorld.OnGameStarted))]
-public static class QuestZoneSpawn
-{
-    static void Postfix(GameWorld __instance)
-    {
-        try
-        {
-            if (Narrating.IsVisitWorld(__instance) || Narrating.Now) return;
-            QuestZones.Spawn(__instance);
-        }
-        catch (Exception e) { Plugin.Log.LogError("[zones] failed to spawn quest zones (raid unaffected): " + e); }
     }
 }

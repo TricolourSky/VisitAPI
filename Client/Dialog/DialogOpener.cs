@@ -15,20 +15,13 @@ public static class DialogOpener
     public static bool TryOpenTriggered(DialogTree tree, string node, out string error)
     {
         var player = GamePlayerOwner.MyPlayer;
-        var first = player != null && node == null && tree.First != null && tree.Nodes.ContainsKey(tree.First) && !OnceService.Used(player.Profile, OnceService.FirstId(tree.TraderId));
-        if (first) node = tree.First;
-        var ok = TryOpenPlayer(tree, node, out error);
-        if (ok && first) OnceService.Mark(player.Profile, OnceService.FirstId(tree.TraderId), "first");
-        return ok;
-    }
-
-    static bool TryOpenPlayer(DialogTree tree, string forceNode, out string error)
-    {
-        var player = GamePlayerOwner.MyPlayer;
         if (player == null) { error = "no player entity - open the dialog INSIDE the hideout or a raid"; return false; }
-        var ok = TryOpen(tree, player.Profile, QuestOps.Resolve(), player.InventoryController, null, forceNode, false, out error);
-        if (ok) InputGuard.Block();
-        return ok;
+        var first = node == null && tree.First != null && tree.Nodes.ContainsKey(tree.First) && !OnceService.Used(player.Profile, OnceService.FirstId(tree.TraderId));
+        if (first) node = tree.First;
+        if (!TryOpen(tree, player.Profile, QuestOps.Resolve(), player.InventoryController, null, node, false, out error)) return false;
+        InputGuard.Block();
+        if (first) OnceService.Mark(player.Profile, OnceService.FirstId(tree.TraderId));
+        return true;
     }
 
     public static bool TryOpen(DialogTree tree, Profile profile, QuestController quests, InventoryController inventory, TraderScreensGroup tradeScreen, out string error) =>
@@ -41,7 +34,6 @@ public static class DialogOpener
     {
         error = null;
         if (!profile.TradersInfo.ContainsKey(new MongoID(tree.TraderId))) { error = $"trader {tree.TraderId} not found in profile"; return false; }
-        OnceService.Migrate(profile);
         var startNode = ResolveStart(tree, profile);
         var entryNode = forceNode ?? startNode;
         if (!tree.Nodes.ContainsKey(entryNode)) { error = $"start node '{entryNode}' not found in .dlg"; return false; }
@@ -67,19 +59,18 @@ public static class DialogOpener
         if (say == null) yield break;
         dc.LastNpcLine = say;
         dc.History.AddLine(say);
-        dc.SetCurrentDialog(dc.method_0(dc.CurrentDialog.Id));
+        DialogPage.Redraw(dc);
     }
 
     static string ResolveStart(DialogTree tree, Profile profile)
     {
         double level = profile.Info.Level;
         double standing = profile.TradersInfo[new MongoID(tree.TraderId)].Standing;
-        var pick = tree.Start;
         foreach (var rule in tree.WhenRules)
         {
             var ok = rule.Conds.TrueForAll(c => { var v = c.Field == "level" ? level : standing; return c.LessEq ? v <= c.Value : v >= c.Value; });
-            if (ok && tree.Nodes.ContainsKey(rule.Node)) { pick = rule.Node; break; }
+            if (ok && tree.Nodes.ContainsKey(rule.Node)) return rule.Node;
         }
-        return pick;
+        return tree.Start;
     }
 }

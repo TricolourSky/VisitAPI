@@ -1,4 +1,3 @@
-using System.Linq;
 using EFT;
 using EFT.Dialogs;
 using EFT.InventoryLogic;

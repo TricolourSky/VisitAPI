@@ -1,9 +1,5 @@
 using System;
-using System.Linq;
-using Comfort.Common;
-using EFT;
 using EFT.CameraControl;
-using EFT.UI;
 using HarmonyLib;
 using UnityEngine;
 
@@ -12,7 +8,6 @@ namespace VisitAPI.Native;
 [HarmonyPatch(typeof(CameraManager), nameof(CameraManager.SetCameraFromSettings))]
 public static class NarrateCameraBypass
 {
-    // 09-25：原来的设置项 Narrate.Fov（默认 50）/ LevelCamera（默认开）去掉了，固定成默认值
     const float DefaultFov = 50f;
 
     internal static float FixedFov => NarrateSpawnGuard.MarkerUsed ? NarrateSpawnGuard.Fov11 : DefaultFov;
@@ -23,7 +18,7 @@ public static class NarrateCameraBypass
     static bool Prefix(CameraManager __instance, CameraManager.ISettings settings)
     {
         if (!Narrating.Now) return true;
-        var prefab = Resources.Load<GameObject>("Cam2_fps_hideout");
+        var prefab = HideoutCam.Prefab;
         if (prefab == null)
         {
             Plugin.Log.LogError("[narrate] compatible camera prefab 'Cam2_fps_hideout' missing");
@@ -33,8 +28,8 @@ public static class NarrateCameraBypass
         try
         {
             var camera = __instance.Camera;
-            var player = Singleton<GameWorld>.Instantiated ? Singleton<GameWorld>.Instance.MainPlayer : null;
-            if (player != null) VisitCameraPin.PinNow(player);
+            var player = Raid.MainPlayer;
+            if (player != null) VisitCameraPin.Pin(player);
             var eye = player != null ? player.CameraPosition : null;
             if (camera != null)
             {
@@ -42,7 +37,7 @@ public static class NarrateCameraBypass
                 camera.fieldOfView = FixedFov;
                 __instance.Fov = FixedFov;
                 __instance.SetFov(FixedFov, 0.05f);
-                if (camera.GetComponent("CinemachineBrain") is Behaviour brain) brain.enabled = false;
+                HideoutCam.Tame(camera);
                 if (camera.GetComponent<NarrateFovEnforcer>() == null) camera.gameObject.AddComponent<NarrateFovEnforcer>();
                 PrismTransplant.Apply(settings?.CameraPrefab, camera);
                 Camera11.Apply(camera);
@@ -76,20 +71,23 @@ public class NarrateFovEnforcer : MonoBehaviour
     void OnDisable() { Camera.onPreCull -= Pin; Camera.onPreRender -= PreRender; }
 
     float _renderLogAt;
+    /// 渲染前再看一眼投影矩阵（#137）：每帧都修，日志 5 秒一条（10-29：以前节流把修正也一起跳过了，修过一次 5 秒内不再看）
     void PreRender(Camera cam)
     {
-        if (cam != _cam || !Narrating.Now || Time.unscaledTime < _renderLogAt) return;
-        var m11 = cam.projectionMatrix.m11;
-        var projFov = m11 != 0f ? 2f * Mathf.Atan(1f / m11) * Mathf.Rad2Deg : 0f;
+        if (cam != _cam || !Narrating.Now) return;
+        var projFov = ProjFov(cam.projectionMatrix.m11);
         if (Math.Abs(cam.fieldOfView - NarrateCameraBypass.FixedFov) <= 0.5f && Math.Abs(projFov - NarrateCameraBypass.FixedFov) <= 0.5f) return;
         cam.fieldOfView = NarrateCameraBypass.FixedFov;
         if (Math.Abs(projFov - NarrateCameraBypass.FixedFov) > 0.5f) cam.ResetProjectionMatrix();
-        var fixedM11 = cam.projectionMatrix.m11;
-        var fixedFov = fixedM11 != 0f ? 2f * Mathf.Atan(1f / fixedM11) * Mathf.Rad2Deg : 0f;
+        if (Time.unscaledTime < _renderLogAt) return;
+        var fixedFov = ProjFov(cam.projectionMatrix.m11);
         _renderLogAt = Time.unscaledTime + 5f;
         var cm = EFT.CameraControl.CameraManager.Instance;
         Plugin.Log.LogWarning($"[narrate] Pre-render: projection matrix FOV={projFov:0.##} -> {fixedFov:0.##} after recompute (CameraManager.Fov={(cm != null ? cm.Fov : 0f):0.##} target {NarrateCameraBypass.FixedFov:0.##})");
     }
+
+    /// 由投影矩阵的 m11 折算实际生效的竖直 FOV（度）
+    static float ProjFov(float m11) => m11 != 0f ? 2f * Mathf.Atan(1f / m11) * Mathf.Rad2Deg : 0f;
 
     void Pin(Camera cam)
     {
@@ -103,7 +101,7 @@ public class NarrateFovEnforcer : MonoBehaviour
         if (_cam == null) _cam = GetComponent<Camera>();
         if (_cam == null) return;
         Enforce(_cam, "LateUpdate");
-        var cm = EFT.CameraControl.CameraManager.Instance;
+        var cm = CameraManager.Instance;
         if (cm != null && Math.Abs(cm.Fov - NarrateCameraBypass.FixedFov) > 0.5f) cm.Fov = NarrateCameraBypass.FixedFov;
     }
 

@@ -30,15 +30,14 @@ public class DialogBackground : MonoBehaviour
 
     static IEnumerator Find(ClientDialogController controller)
     {
-        yield return UiWait.Until(() => DialogScreenTracker.Open, 120);
+        yield return UiWait.Until(() => DialogScreenTracker.Open, 180);
         var screen = DialogScreenTracker.Live;
-        if (screen == null) yield break;
+        if (screen == null) { Plugin.WarnOnce("bg/screen-timeout", "[bg] the dialog screen did not open within 180 frames; background / audio / narration are not attached this time"); yield break; }
         var bg = _live;
         if (bg == null)
         {
             var rt = new GameObject("VisitBgRoot", typeof(RectTransform)).GetComponent<RectTransform>();
             rt.SetParent(screen.transform.parent, false);
-            rt.SetSiblingIndex(0);
             bg = _live = rt.Stretch().gameObject.AddComponent<DialogBackground>();
         }
         else if (bg._controller != null) bg._controller.OnDialogChanged -= bg.OnDialog;

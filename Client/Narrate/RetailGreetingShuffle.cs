@@ -8,8 +8,8 @@ using Newtonsoft.Json;
 namespace VisitAPI.Native;
 
 /// 访问期间，同一对话里条件相同、当下都成立的几句商人台词随机挑一句放到最前（引擎只取第一句成立的商人台词）。
-/// 09-24 审查低项：以前直接改写共享模板的台词顺序且不还原，对所有对话（包括主菜单里的原版对话）永久生效。
-/// 现在只在访问期间做，并在构造完成后换回原来的台词表——DynamicTraderDialog 的构造函数把 template.Lines 读一遍建好自己的台词列表，之后不再读它
+/// 09-24 审查低项：改的是共享模板的台词顺序，不还原就对所有对话（包括主菜单里的原版对话）永久生效。
+/// 所以只在访问期间做，并在构造完成后换回原来的台词表——DynamicTraderDialog 的构造函数把 template.Lines 读一遍建好自己的台词列表，之后不再读它
 [HarmonyPatch(typeof(DynamicTraderDialog), MethodType.Constructor, typeof(TraderDialogTemplate), typeof(IDialogContext))]
 public static class NarrateNpcVariantShuffle
 {

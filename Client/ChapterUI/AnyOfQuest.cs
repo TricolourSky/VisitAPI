@@ -10,7 +10,7 @@ public static class AnyOfQuest
 {
     static bool _warned;
 
-    /// 09-26 F4：这里跑在引擎的 ManageConditional → CheckForStatusChange 里（撤离结算、大厅重建都会走到），以前没兜：
+    /// 09-26 F4：这里跑在引擎的 ManageConditional → CheckForStatusChange 里（撤离结算、大厅重建都会走到），
     /// Pass 会对引擎自己从不测的非必需子条件调 Test()，一抛就进了原生调用方。出错就交回原生判定
     static bool Prefix(ConditionCollection __instance, IConditional conditional, ref bool __result)
     {
@@ -24,8 +24,10 @@ public static class AnyOfQuest
 
     static bool Core(ConditionCollection __instance, IConditional conditional, ref bool __result)
     {
-        if (!(conditional is Quest quest) || quest.Template?.Conditions == null) return true;
+        if (conditional is not Quest quest || quest.Template?.Conditions == null) return true;
+        // 这里要的是完成条件表这个对象本身（和引擎传进来的 __instance 比引用），所以不走 Conds()
         if (!quest.Template.Conditions.TryGetValue(EQuestStatus.AvailableForFinish, out var finish) || !ReferenceEquals(finish, __instance)) return true;
+        // AnyOf 这里不看 HasGetter（ChapterStates.DoneRaw / LocalFail 那边看），是否有意待 SORA 定（旧 B11）
         bool Pass(Condition c) => quest.ProgressCheckers.TryGetValue(c, out var pc) && pc.Test();
         var finishers = QuestFlags.IsChapter(quest.Id) ? QuestFlags.Finishers(quest.Id) : null;
         if (finishers != null && finishers.Count > 0)
@@ -42,11 +44,9 @@ public static class AnyOfQuest
         return false;
     }
 
-    internal static bool GroupDone(Quest quest, List<string> group)
-    {
-        if (quest.Template?.Conditions == null || !quest.Template.Conditions.TryGetValue(EQuestStatus.AvailableForFinish, out var finish)) return false;
-        return finish.Any(c => group.Contains((string)c.id) && (quest.CompletedConditions.Contains(c.id) || (quest.ProgressCheckers.TryGetValue(c, out var pc) && pc.Test())));
-    }
+    /// 二选一组里有没有哪一条已经做完（已记进 CompletedConditions，或检查器现在测过）。同上：不看 HasGetter，是否有意待 SORA 定
+    internal static bool GroupDone(Quest quest, List<string> group) =>
+        quest.Conds(EQuestStatus.AvailableForFinish).Any(c => group.Contains((string)c.id) && (quest.CompletedConditions.Contains(c.id) || (quest.ProgressCheckers.TryGetValue(c, out var pc) && pc.Test())));
 }
 
 [HarmonyPatch(typeof(Conditional<Quest>), nameof(Conditional<Quest>.CheckVisibilityStatus))]
@@ -54,16 +54,18 @@ public static class AnyOfVisibility
 {
     static bool Prefix(object __instance, Condition condition, ref bool __result)
     {
-        if (!(__instance is Quest quest) || condition?.VisibilityConditions == null || condition.VisibilityConditions.Length == 0) return true;
+        if (__instance is not Quest quest || condition?.VisibilityConditions == null || condition.VisibilityConditions.Length == 0) return true;
         var group = QuestFlags.AnyOfGroup(quest.Id);
         if (group == null) return true;
         try
         {
-            var groupDone = AnyOfQuest.GroupDone(quest, group);
+            // 10-24（旧 B25）：只有可见条件真点到组里的目标时才算 GroupDone
+            bool? groupDone = null;
+            bool GroupDone() => groupDone ??= AnyOfQuest.GroupDone(quest, group);
             foreach (var v in condition.VisibilityConditions)
             {
                 var target = (v as ConditionOneTarget)?.target;
-                if (target != null && group.Contains(target) && groupDone) continue;
+                if (target != null && group.Contains(target) && GroupDone()) continue;
                 if (v is ConditionCounterCreator || quest.IsConditionDone(v) || (target != null && quest.CompletedConditions.Contains(target))) continue;
                 __result = false;
                 return false;

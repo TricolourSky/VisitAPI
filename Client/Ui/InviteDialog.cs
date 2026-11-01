@@ -13,7 +13,6 @@ using EFT.UI.Chat;
 using EFT.UI.Screens;
 using SPT.Common.Http;
 using UnityEngine;
-using UnityEngine.Networking;
 using Object = UnityEngine.Object;
 
 namespace VisitAPI.Native;
@@ -26,17 +25,18 @@ public static class InviteDialog
 {
     public static bool Open(PendingInvite p, ChatScreen screen)
     {
-        var trader = string.IsNullOrEmpty(p.Mail.DialogueTrader) ? p.Trader : p.Mail.DialogueTrader;
+        var trader = p.DialogueTrader;
         var dialogue = p.Mail.Dialogue;
         if (!TarkovApplication.Exist(out var app) || app.Session?.Profile == null) { Plugin.Log.LogWarning("[invite] Open dialogue: no session"); return false; }
-        if (!(NarrateEntry.MenuOpField?.GetValue(app) is MainMenuShowOperation op) || op.QuestController == null || op.InventoryController == null) { Plugin.Log.LogWarning("[invite] Open dialogue: main menu not ready yet"); return false; }
+        if (!NarrateEntry.TryMenuOp(out _, out var op) || op.QuestController == null || op.InventoryController == null) { Plugin.Log.LogWarning("[invite] Open dialogue: main menu not ready yet"); return false; }
         if (app.NarrateControllerAccess != null && app.NarrateControllerAccess.GameExist) { Plugin.Log.LogWarning("[invite] Open dialogue: currently visiting a trader room"); return false; }
         if (DialogScreenTracker.Open) { Plugin.Log.LogWarning("[invite] Open dialogue: dialogue screen already open"); return false; }
         var profile = app.Session.Profile;
+        // 任务 mailSettings 里的 dialogueTraderId / dialogueId 写错位数时 new MongoID 直接抛，按钮无声失效：先守住（10-29）
+        if (trader?.Length != 24 || !string.IsNullOrEmpty(dialogue) && dialogue.Length != 24) { Plugin.Log.LogWarning($"[invite] Open dialogue: trader id '{trader}' / dialogue id '{dialogue}' must be 24 characters (check the quest's mailSettings)"); return false; }
         if (!profile.TradersInfo.ContainsKey(new MongoID(trader))) { Plugin.Log.LogWarning($"[invite] Open dialogue: trader {trader} not in profile"); return false; }
         if (string.IsNullOrEmpty(dialogue)) Plugin.Log.LogWarning($"[invite] Invite for quest {p.QuestId} has no dialogueId, opening the trader's main dialogue");
-        try { screen?.Close(); }
-        catch (Exception e) { Plugin.Log.LogWarning("[invite] Failed to close chat window: " + e.Message); }
+        InviteState.CloseChat(screen);
         WhitelistPatch.RegisteredTraders.Add(trader);   // 原生对话屏只认四位商人，其余的靠 WhitelistPatch 放行
         var dc = new ClientDialogController(profile, op.QuestController, op.InventoryController);
         var presenter = new InvitePresenter(dc, trader);
@@ -99,16 +99,11 @@ public class InvitePresenter : ITraderAnimationController
         if (subs.Count > 0) GlobalEventsController.Instance.CreateCommonEvent<SubtitlesEvent>().Invoke(ESubtitlesSource.Common, subs);
         var start = Time.unscaledTime;
         var pending = new List<(LipSyncParams p, AudioClip clip)>(clips);
-        var probeAt = -1f;
         while (Time.unscaledTime - start < duration)
         {
             var t = Time.unscaledTime - start;
             for (var i = pending.Count - 1; i >= 0; i--)
-                if (t >= pending[i].p.Start) { Play(pending[i].clip, pending[i].p.Volume); pending.RemoveAt(i); probeAt = t + 0.5f; }
-            if (probeAt >= 0f && t >= probeAt && _src != null)
-            {
-                probeAt = -1f;
-            }
+                if (t >= pending[i].p.Start) { Play(pending[i].clip, pending[i].p.Volume); pending.RemoveAt(i); }
             yield return null;
         }
         _co = null;
@@ -168,8 +163,8 @@ public class InvitePresenter : ITraderAnimationController
     }
 }
 
-/// <summary>商人台词语音：先看本地缓存 `BepInEx\cache\VisitAPI\voice\&lt;商人&gt;\&lt;lipSyncId&gt;.ogg|.wav`，没有就从服务端
-/// `/files/visitapi/voice/&lt;商人&gt;/&lt;lipSyncId&gt;` 拿字节（认头四个字节 OggS / RIFF 定格式）存下来，再用 UnityWebRequest 从文件解成 AudioClip。</summary>
+/// <summary>商人台词语音：先看本地缓存 `BepInEx\cache\VisitAPI\voice\&lt;商人&gt;\&lt;lipSyncId&gt;.ogg|.wav|.mp3`，没有就从服务端
+/// `/files/visitapi/voice/&lt;商人&gt;/&lt;lipSyncId&gt;` 拿字节（认文件头 OggS / RIFF / ID3 或 MPEG 帧同步定格式）存下来，再用 UnityWebRequest 从文件解成 AudioClip。</summary>
 public static class VoiceCache
 {
     static readonly Dictionary<string, AudioClip> _clips = new(StringComparer.Ordinal);
@@ -212,13 +207,9 @@ public static class VoiceCache
                 path = Path.Combine(dir, key + ext);
                 File.WriteAllBytes(path, bytes);
             }
-            var type = path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) ? AudioType.WAV : path.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) ? AudioType.MPEG : AudioType.OGGVORBIS;
-            using (var req = UnityWebRequestMultimedia.GetAudioClip("file:///" + path.Replace('\\', '/'), type))
-            {
-                yield return req.SendWebRequest();
-                if (req.result != UnityWebRequest.Result.Success) { _missing.Add(id); Plugin.Log.LogWarning($"[invite] Voice {id} could not be decoded: {req.error}"); yield break; }
-                clip = DownloadHandlerAudioClip.GetContent(req);
-            }
+            string error = null;
+            yield return AudioFiles.Decode(path, c => clip = c, e => error = e);
+            if (error != null) { _missing.Add(id); Plugin.Log.LogWarning($"[invite] Voice {id} could not be decoded: {error}"); yield break; }
             // 解出来是空的 / 失败的（坏文件）就把缓存文件删掉，下次重新从服务端拿，别让一个坏文件卡死
             if (clip == null || clip.length <= 0f || clip.loadState == AudioDataLoadState.Failed)
             {

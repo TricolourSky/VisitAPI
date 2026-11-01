@@ -41,8 +41,6 @@ namespace Audio.ConfiguredAudioPlayer
 			}
 			return _map.TryGetValue(key, out value);
 		}
-
-		public int Count => entries == null ? 0 : entries.Count;
 	}
 }
 

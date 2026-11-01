@@ -4,7 +4,7 @@
 
 给 SPT 商人（含自定义商人）加上 EFT 1.x 正式版风格「访问」对话系统的开源框架——用纯文本 `.dlg` 剧本，让任何商人拥有 3D 房间对话、剧情章节、好感度、任务区域与战局内对话触发点。内容以**内容包**的形式丢进去就生效；EFT 1.1 主线连同商人房间就是这样一个包。
 
-> 目标版本：**SPT 4.1.x**（4.1.0 及以上的 4.1 版本，EFT 0.16.9）· 客户端：BepInEx 5.4.23 插件（net472）· 服务端：SPT 模组（net10.0）· 兼容 Fika · 当前版本 **1.3.6**
+> 目标版本：**SPT 4.1.x**（4.1.0 及以上的 4.1 版本，EFT 0.16.9）· 客户端：BepInEx 5.4.23 插件（net472）· 服务端：SPT 模组（net10.0）· 兼容 Fika · 当前版本 **1.3.7**
 
 ![自制商人的访问对话](docs/Dialogue.png)
 
@@ -12,12 +12,13 @@
 
 - **访问按钮** —— 商人界面出现正式版同款「访问」页签，点击进入 3D 房间对话
 - **商人房间** —— 七位原版商人（Prapor、Therapist、Fence、Skier、Mechanic、Ragman、Jaeger）的 1.1 房间：口型、动作、环境音、正式版加载屏；随 EFT11 附加包提供（见安装）
-- **.dlg 剧本** —— 节点、选项、条件门（等级 / 好感 / 任务状态 / `ifitems`）、分支记号（`set:` / `ifvar:`）、一次性选项（`once` / `always` / `first`）、图片 / 视频 / 3D 场景背景、语音+BGM、好感度（`standing:`）、任务推进（`accept:` / `complete:` / `handover:` / `setstatus:`）
+- **.dlg 剧本** —— 节点、选项、条件门（等级 / 好感 / 任务状态 / `ifitems`）、分支记号（`set:` / `ifvar:`）、一次性选项（`once` / `always` / `first`）、图片 / 视频 / 3D 场景背景、语音+BGM、好感度（`standing:`）、任务推进（`accept:` / `complete:` / `handover:` / `setstatus:`）、1.1 的「关键抉择」确认窗（`confirm: 键名 [-> 节点]`：问话走文案键，图放 `config\VisitAPI\choices\键名_yes.png` / `_no.png`）、跨剧本跳转（`-> 商人id:节点`：对话不关、切到另一个商人剧本的节点，名字头像跟着换）
 - **一份剧本多种语言** —— 任何一句显示文字的下一行写 `en: 译文`，游戏按自己的语言显示译文，没译的句子显示原文；SPT 的 17 种语言代码都行
 - **原生 Narrate 管线** —— 原版商人走 EFT 内置的访问系统 + 零售对话数据回放（口型 / 字幕 / 分支变量全原生），含 1.1 的「关键抉择」确认窗
 - **任务系统** —— 内容包里的任务 JSON，接取 / 上交 / 完成全部走原生网络事务；任务图片、带 3D 模型的任务物品和它们的战局刷新点；在战局里完成的任务，奖励在战局结束时用邮件发
 - **任务区域** —— 包里的 `zones\*.json` 在地图坐标放置到访 / 放置物品区域，进图时按游戏自己的触发器生成，可带战局内字幕、语音和互动提示，也可以限定在一天里的某个时段（`hours`）
 - **剧情刷兵点** —— 包里的 `spawns\*.json` 在任务处于指定状态时，在地图坐标附近刷出一组机器人并让它们守在原地，同样可以限定时段
+- **AI 队友** —— 剧情可以放开至多四名队友，玩家在主菜单左下角的队伍面板邀请进队，下一局以 PMC 进图时刷在身边、按队形跟着走、听语音轮盘指挥（跟我走 / 原地待命 / 集合 / 冲）、自己打药换弹、永远不打真人。用什么兵、什么难度、叫什么代号、提示里怎么称呼，由包的 `pack.json` 写（见「内容包」）；不写就是游戏自带的 Rogue，不用装任何别的模组。装了 SAIN 的话交火由 SAIN 接手、性格调成最敢冲的那档；不装就是这个兵种自己的原版 AI 来打
 - **战局内 / 藏身处触发点** —— `trigger:` 在地图坐标放置对话点（距离 + 视角锥 + 任务门控），或 `enter <秒>` 在战局开始若干秒后起爆；`once` 让触发点每个档案只触发一次
 - **商人定时联系** —— 剧情任务的前置带 `availableAfter` 时任务会等定时走完，到点后商人卡片上和玩家名旁边亮起 1.1 的金色电话角标，去找商人对话接下任务；只能靠对话接 / 交的任务也由这枚金色电话指路
 - **聊天邀请** —— 和 1.1 一样，剧情任务一可接，商人就在聊天里给你来信；信上的「访问」带你进商人房间，没有房间的联系人（电台、笔记本）点「回复」当场开对话，带语音和字幕
@@ -41,13 +42,13 @@
 2. `.dlg` 剧本放 `<SPT>\BepInEx\config\VisitAPI\<商人id>.dlg`；背景和音频放旁边的 `backgrounds\`、`audio\`。
 3. 你自己的任务、文案、区域、图片放进一个包：`<SPT>\SPT_Runtime\user\mods\VisitAPI-Server\packs\<随便起个名>\`（编辑器会替你建）。
 
-**从 1.3.5 升级：** 把新的框架 zip 覆盖解压到游戏目录。EFT11 附加包 1.2.0 加了神秘蓝焰和意外证人，需要框架 1.3.6，覆盖解压到旧附加包上即可。
+**从 1.3.6 升级：** 把新的框架 zip 覆盖解压到游戏目录即可，老剧本和内容包不用改。1.3.7 加的都是可选项：`.dlg` 两条语法（`confirm:` 关键抉择窗、`-> 商人id:节点` 跨剧本跳转）、任务 / 包的几个新字段（`visitapi.lockTraders`、刷新点 `oneOf` 分组、计时区 `stay` 和事件刷兵、`pack.json` 里的 AI 队友）、藏身处触发线并进那块区域自己的菜单、聊天邀请的「回复」直接跳进藏身处、包商人没解锁前不出现在交易界面、章节横幅按 1.2 上色。EFT11 附加包 1.2.0 不变。
 
 **从 1.3.4 升级：** 把新的框架 zip 覆盖解压到游戏目录即可，EFT11 附加包不用动。两处行为变了：`enter <秒>` 的秒数现在从战局正式开始起算（以前从加载时就开始数，剧本里写得偏大的可以调小）；在战局里完成的任务不再当场把奖励塞进背包，统一在战局结束时用邮件发。
 
 **从 1.3.3 升级：** 把新的框架 zip 覆盖解压到游戏目录，再把 EFT11 附加包 1.1.0 覆盖解压到旧附加包上（1.1.0 加了探秘“迷宫”，需要框架 1.3.4 或更新）。设置页精简过（见「配置」）。
 
-**从 1.3.2 或更早升级：** 把新的框架 zip 覆盖解压到游戏目录，然后把 `VisitAPI-Server\db\`、`images\`、`bundles\` 搬进 `VisitAPI-Server\packs\<随便起个名>\`（布局见下），再把 `BepInEx\plugins\VisitAPI\bundles\` 改名 `ui\`、`scenes\bundles\vendors\` 改名 `rooms\`。老位置 1.3.x 照读，日志里会有警告。以前装过实验版 1.1 主线数据（在 `db\` 里）的，删掉它、改装 EFT11 附加包。
+**从 1.3.2 或更早升级：** 把新的框架 zip 覆盖解压到游戏目录，然后把 `VisitAPI-Server\db\`、`images\`、`bundles\` 搬进 `VisitAPI-Server\packs\<随便起个名>\`（布局见下），再把 `BepInEx\plugins\VisitAPI\bundles\` 改名 `ui\`、`scenes\bundles\vendors\` 改名 `rooms\`。1.3.7 起服务端不再读 DLL 旁边老的 `db\`、`images\`、`bundles\`（`db\` 还在的话日志会提示）；客户端的老文件夹名 1.3.x 照读。以前装过实验版 1.1 主线数据（在 `db\` 里）的，删掉它、改装 EFT11 附加包。
 
 ## 内容包
 
@@ -55,7 +56,7 @@
 
 ```
 packs\<包名>\
-  pack.json          name、version、requires（如 "~1.3.4"）、author、description {ch, en}
+  pack.json          name、version、requires（如 "~1.3.4"）、author、description {ch, en}，可选 escort（AI 队友，见下）
   LICENSE            可选，发布的包带上
   quests\*.json      SPT 任务文件（章节就是加了几个开关的任务，见下）
   locales\<语言>.json  任务文案、日记正文、目标提示、包里商人的名字
@@ -64,7 +65,7 @@ packs\<包名>\
   voice\<商人id>\    没有房间的商人对话用的语音（.ogg / .wav / .mp3），文件名 = 对话里引用的语音 id
   zones\*.json       任务区域（地图、坐标、尺寸，可带字幕和时段 hours {from, to}）
   spawns\*.json      剧情刷兵点（map、at {x,y,z} + radius、role、min / max、difficulty、quest + statuses，可选 hours 和 minX / maxX / minZ / maxZ 边界）
-  items\*.json       任务物品模板；loot\*.json 它们的战局刷新点
+  items\*.json       任务物品模板；loot\*.json 它们的战局刷新点（刷新点上可写 "visitapi": {"oneOf": "<组名>"}：同组每局只刷其中一个，按 probability 加权）
   bundles\ + bundles.json   这些物品的 Unity 资源包
   variables\groups.json     1.1 变量组（组的值 = 成员变量之和）
   images\banners\    任务横幅（任务的 image 字段，路由 /files/quest/icon/<名字>）
@@ -72,6 +73,21 @@ packs\<包名>\
 ```
 
 包按名字顺序加载。两个包带了同一条任务 / 区域 / 物品 / 图片 / 文案键，服务端日志里点名、先来的赢。`requires` 对照框架版本检查（`~1.3.4` = 1.3.4 起的任何 1.3.x），对不上只记日志、照样加载。包的客户端文件住在 `BepInEx\plugins\VisitAPI\rooms\`（商人房间），框架自己的界面包在旁边的 `ui\`。
+
+**AI 队友**写在 `pack.json` 里。每一项都可以不写；几个包都写了 `escort` 的话，按包名排序第一个算数：
+
+```jsonc
+"escort": {
+  "role": "exUsec",                              // 兵种（WildSpawnType）；模组加的兵种照写
+  "difficulty": "normal",                        // easy / normal / hard / impossible
+  "names": ["Ghost", "Raven"],                   // 写死的代号；不写就从兵种自己的名字表里抽
+  "nameTypes": ["exusec"],                       // 从哪些名字表里抽（SPT bots\types 下的文件名）
+  "excludeNames": ["Abyss"],                     // 不要的名字，比如剧情人物
+  "label": { "ch": "队友", "en": "Teammates" }   // 「已就位」和语音指挥的提示里怎么称呼他们
+}
+```
+
+对话里写 `set: escort_max=N`（1～4）就放开了：好友名单里出现队友，可以邀请进队；也可以 `set: escort=N` 直接下单。测试时控制台 `visit_setvar escort_max 4`、`visit_setvar escort 2` 效果一样。包里用了别的模组加的兵种，就要装那个模组和它要求的依赖。
 
 ## 从源码构建
 
@@ -117,9 +133,9 @@ start: root
 ```
 
 - 任一子任务开始，章节自动开始；子任务全部完成，章节自动交（邮件、奖励照原生走）；标为终章的子任务一完成章节就结束，终章可以有多个
-- `notes`：任务到达 Started / Success / Fail 时解锁一条日记；目标条件上也可以带 `questNoteId`（目标打勾那一刻解锁）。日记正文放 locale，键就是日记 id
-- 子任务的 `visitapi` 开关：`autoStart`（所属章节已开始、自己的前置也满足时自动接下；没有任务前置的子任务还要等章节清单里排在它前面的那条结束）、`autoFinish`（一达成就自动交）、`startAfter`（一个任务 id 或一组：其中任一完成就接下这条任务）、`anyOf`（`true`，或一组目标 id：其中任一完成即算完成）、`items`（相关物品模板 id，`craft:` / `offer:` 前缀标类型）、`noteLinks`（每条日记各自挂的相关物品）、`unlockTraderOnReady`（任务达成即解锁商人）、`setVariables`（`{ "Started" / "Success" / "Fail": { "<变量id>": 值 } }`：任务进入该状态时给档案变量赋值，相当于 1.1 的 GlobalVariable 奖励）
-- 聊天邀请：任务带上 1.1 的 `mailSettings`（`isEnabled`、`fromTraderId`、`entryPoint`、`dialogueId`、`dialogueTraderId`），locale 里写 `<任务id> whileAvailableMessageText` 作信的正文；任务一可接，这位商人就寄出这封信，每个档案只寄一次。`entryPoint` 为 `InLobby` 时信上是「访问」按钮（进商人房间），`ViaRadio` / `ViaNotebook` 是「回复」按钮（当场开对话）
+- `notes`：任务到达 Started / Success / Fail 时解锁一条日记；目标条件上也可以带 `questNoteId`（目标打勾那一刻解锁）。日记正文放 locale，键就是日记 id。可选子目标（带 `parentId`）上写 `doneWithParent: true`，父目标一完成它就按完成打勾，而不是 1.1 的「跳过」
+- 子任务的 `visitapi` 开关：`autoStart`（所属章节已开始、自己的前置也满足时自动接下；没有任务前置的子任务还要等章节清单里排在它前面的那条结束）、`autoFinish`（一达成就自动交）、`startAfter`（一个任务 id 或一组：其中任一完成就接下这条任务）、`anyOf`（`true`，或一组目标 id：其中任一完成即算完成）、`items`（相关物品模板 id，`craft:` / `offer:` 前缀标类型）、`noteLinks`（每条日记各自挂的相关物品）、`unlockTraderOnReady`（任务达成即解锁商人）、`lockTraders`（一组商人 id：任务完成时把这些商人锁回去，和 `unlockTraderOnReady` 相反）、`setVariables`（`{ "Started" / "Success" / "Fail": { "<变量id>": 值 } }`：任务进入该状态时给档案变量赋值，相当于 1.1 的 GlobalVariable 奖励）
+- 聊天邀请：任务带上 1.1 的 `mailSettings`（`isEnabled`、`fromTraderId`、`entryPoint`、`dialogueId`、`dialogueTraderId`），locale 里写 `<任务id> whileAvailableMessageText` 作信的正文；任务一可接，这位商人就寄出这封信，每个档案只寄一次。`entryPoint` 为 `InLobby` 时信上是「访问」按钮（进商人房间），`ViaRadio` / `ViaNotebook` 是「回复」按钮（当场开对话）。对话商人有 `.dlg`、且剧本里有一条挂着这条任务的藏身处触发线（`trigger: hideout … if <任务id>=AvailableForStart`）时，「回复」改成进藏身处、把你放到那条线的位置前并触发它
 - `unlockDialogue`：一组商人 id，这条任务完成后这些商人的访问按钮才出现；`unlockLocations`：这条任务解锁的地图（只对新建角色）
 - `order`：自制章节在剧情页的位次，小的在前（1.1 原版章节固定是 1～9；没写 `order` 的按配置项 `CustomChapterOrder`，默认 100）；`dialogOnly`：接交只走对话，任务列表里不放按钮，由那位商人头上的金色电话指路；这种任务里「去和某人谈」的目标要等对话把任务收掉才打勾
 - 章节上的 `mailRewardsOnly`：这一章和它的子任务的来信，只在带奖励附件时才寄

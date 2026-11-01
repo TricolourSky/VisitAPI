@@ -22,7 +22,7 @@ using Path = System.IO.Path;
 namespace VisitAPI.Server;
 
 [Injectable(typePriority: OnLoadOrder.PostLoad)]
-public class QuestLoader(CustomQuestService questService, ImageRouter images, JsonUtil json, LocaleTable localeTable, ISptLogger<QuestLoader> log) : IOnLoad
+public class QuestLoader(CustomQuestService questService, ImageRouter images, JsonUtil json, LocaleTable localeTable, TemplateTable templates, ISptLogger<QuestLoader> log) : IOnLoad
 {
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
@@ -35,6 +35,7 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
             if (!locales.ContainsKey(lang)) locales[lang] = new Dictionary<string, string>();
         var all = new Dictionary<string, Quest>();
         var owner = new Dictionary<string, string>();   // 任务 id → 包：两个包都有同一条任务时点名，用先来的
+        Dictionary<string, Dictionary<string, string>> brief = null;   // 交给 CreateQuest 的精简文案，见 AddQuestLocales
         foreach (var p in packs)
         {
             foreach (var file in PackLayout.DataFiles(p, "quests"))
@@ -46,10 +47,12 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
                     var id = quest.Id.ToString();
                     if (owner.TryGetValue(id, out var first)) { log.Error($"[VisitAPI] Quest {id} exists in both pack {first} and {p.Name} ({Path.GetFileName(file)}), using the one from {first}"); continue; }
                     owner[id] = p.Name;
+                    Loaded.Add(id);
                     NativeUnlockReward(quest, Path.GetFileName(file));
                     FixZoneIds(quest, Path.GetFileName(file));
                     BlankMailTexts(quest, locales);
-                    var result = questService.CreateQuest(new NewQuestDetails { NewQuest = quest, Locales = locales });
+                    if (brief == null && !templates.Quests.ContainsKey(quest.Id)) brief = AddQuestLocales(locales);
+                    var result = questService.CreateQuest(new NewQuestDetails { NewQuest = quest, Locales = brief ?? locales });
                     if (result.Success) all[id] = quest;
                     else log.Error($"[VisitAPI] quest {id} ({p.Name}/{Path.GetFileName(file)}): {string.Join("; ", result.Errors ?? new List<string>())}");
                 }
@@ -60,16 +63,30 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
         return Task.CompletedTask;
     }
 
+    /// <summary>10-17 审查 E25：合并文案表每种语言只挂一次。每条任务都把整张表交给 CreateQuest 的话，SPT 每种语言挂一个遍历整张表的变换器，
+    /// 160 条任务 = 160 个一样的，LazyLoad.Value 每取一次全部重跑，真正干活的只有第一个。挂的时刻：第一条真正进任务表的任务之前
+    ///（CreateQuest 撞了已有 id 时不挂文案）；空表、语言表里没有的语言照 SPT 的 AddQuestLocales 不挂。
+    /// 返回以后交给 CreateQuest 的文案：语言一个不少，每种只一条 RewardMailKey（BlankMailTexts 补过），SPT 照样逐语言校验、报错</summary>
+    Dictionary<string, Dictionary<string, string>> AddQuestLocales(Dictionary<string, Dictionary<string, string>> locales)
+    {
+        foreach (var (lang, table) in locales)
+            if (table.Count > 0 && localeTable.Global.TryGetValue(lang, out var lazy)) LocaleText.Add(lazy, table);
+        return locales.ToDictionary(kv => kv.Key, kv => new Dictionary<string, string> { [RewardMailKey] = kv.Value[RewardMailKey] });
+    }
+
     /// <summary>各包的 locales\&lt;语言&gt;.json 按语言合并：同键同文没事；同键不同文点名（每包最多列 5 处）、先来的赢。</summary>
     Dictionary<string, Dictionary<string, string>> MergeLocales(IReadOnlyList<PackInfo> packs)
     {
         var locales = new Dictionary<string, Dictionary<string, string>>();
         var owner = new Dictionary<string, string>();
         foreach (var p in packs)
-            foreach (var file in PackLayout.DataFiles(p, "locales"))
+            foreach (var f in ContentPacks.Locales(p, json))
             {
-                var lang = Path.GetFileNameWithoutExtension(file);
-                var table = Parse<Dictionary<string, string>>(file);
+                if (f.Error != null) { log.Error($"[VisitAPI] cannot parse {Path.GetFileName(f.File)}: {f.Error}"); continue; }
+                var lang = Path.GetFileNameWithoutExtension(f.File);
+                // 文件名不是 SPT 认的语言（zh.json 之类）：进了合并表会让 CreateQuest 对每条任务报 could_not_find_language_key、整包任务收不到文案（10-29）
+                if (!localeTable.Global.ContainsKey(lang)) { log.Warning($"[VisitAPI] {p.Name}/locales/{Path.GetFileName(f.File)}: '{lang}' is not a language SPT knows ({string.Join(", ", localeTable.Global.Keys)}), skipped"); continue; }
+                var table = f.Table;
                 if (table == null) continue;
                 if (!locales.TryGetValue(lang, out var merged)) locales[lang] = merged = new Dictionary<string, string>();
                 var clash = 0;
@@ -102,10 +119,8 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
 
     public static readonly HashSet<string> Loaded = new();
 
-    static int BlankMailTexts(Quest quest, Dictionary<string, Dictionary<string, string>> locales)
+    static void BlankMailTexts(Quest quest, Dictionary<string, Dictionary<string, string>> locales)
     {
-        var added = 0;
-        Loaded.Add(quest.Id.ToString());
         var own = locales.Values.Any(t => t.TryGetValue(quest.Id + " successMessageText", out var s) && !string.IsNullOrWhiteSpace(s));
         if (!own)
         {
@@ -118,29 +133,28 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
             table.TryAdd(RewardMailKey, text);
             if (!own)
             {
-                if (table.TryAdd(quest.Id + " successMessageText", text)) added++;
-                if (table.TryAdd(quest.Id + " startedMessageText", text)) added++;
+                table.TryAdd(quest.Id + " successMessageText", text);
+                table.TryAdd(quest.Id + " startedMessageText", text);
             }
             foreach (var suffix in new[] { "description", "failMessageText" })
-                if (table.TryAdd(quest.Id + " " + suffix, "")) added++;
+                table.TryAdd(quest.Id + " " + suffix, "");
         }
-        return added;
     }
 
     void NativeUnlockReward(Quest quest, string fileName)
     {
         try
         {
-            if (quest?.ExtensionData == null || !quest.ExtensionData.TryGetValue("visitapi", out var v) || v is not JsonElement vx || vx.ValueKind != JsonValueKind.Object) return;
-            if (!vx.TryGetProperty("unlockTraderOnReady", out var flag) || flag.ValueKind != JsonValueKind.True) return;
+            var vx = Ext.Visit(quest?.ExtensionData);
+            if (!Ext.Flag(vx, "unlockTraderOnReady")) return;
             quest.Rewards ??= new Dictionary<string, List<Reward>>();
             if (!quest.Rewards.TryGetValue("Success", out var success) || success == null) quest.Rewards["Success"] = success = new List<Reward>();
             if (success.Any(r => r?.Type == RewardType.TraderUnlock)) return;
-            var target = vx.TryGetProperty("unlockTrader", out var t) && t.ValueKind == JsonValueKind.String && t.GetString()?.Length == 24 ? t.GetString() : quest.TraderId.ToString();
-            if (string.IsNullOrEmpty(target) || target.Length != 24) return;
+            var target = Ext.Str(vx, "unlockTrader") is { Length: 24 } named ? named : quest.TraderId.ToString();
+            if (target?.Length != 24) return;
             success.Add(new Reward { Id = new MongoId(), Type = RewardType.TraderUnlock, Target = target, Index = success.Count, Unknown = false });
         }
-        catch (System.Exception e) { log.Error($"[VisitAPI] quest {quest?.Id} ({fileName}): could not add native TraderUnlock reward: {e.Message}"); }
+        catch (Exception e) { log.Error($"[VisitAPI] quest {quest?.Id} ({fileName}): could not add native TraderUnlock reward: {e.Message}"); }
     }
 
     void FixZoneIds(Quest quest, string fileName)
@@ -151,16 +165,15 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
                 foreach (var c in list ?? new List<QuestCondition>())
                 {
                     if (c.ConditionType is not ("LeaveItemAtLocation" or "PlaceBeacon") || !string.IsNullOrEmpty(c.ZoneId)) continue;
-                    if (c.ExtensionData == null || !c.ExtensionData.TryGetValue("zoneIds", out var z) || z is not JsonElement ze || ze.ValueKind != JsonValueKind.Array) continue;
+                    if (Ext.Get(c.ExtensionData, "zoneIds", JsonValueKind.Array) is not { } ze) continue;
                     foreach (var e in ze.EnumerateArray())
                         if (e.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(e.GetString())) { c.ZoneId = e.GetString(); break; }
                 }
         }
-        catch (System.Exception e) { log.Error($"[VisitAPI] quest {quest?.Id} ({fileName}): zoneIds fix-up failed: {e.Message}"); }
+        catch (Exception e) { log.Error($"[VisitAPI] quest {quest?.Id} ({fileName}): zoneIds fix-up failed: {e.Message}"); }
     }
 
-    /// 任务条件 / visitapi.startAfter 里写错的任务 id（不是 24 位十六进制）报 Error；引用了还没移植的任务是已知的数据缺口，不报
-    ///（09-28 SORA：日志只在出问题时打。以前这里另有一行「N 条条件引用了未移植任务」的汇总，已删）
+    /// 任务条件 / visitapi.startAfter 里写错的任务 id（不是 24 位十六进制）报 Error；引用了还没移植的任务是已知的数据缺口，不报（09-28 SORA：日志只在出问题时打）
     void WarnDangling(Dictionary<string, Quest> all)
     {
         var known = new HashSet<string>(all.Keys);
@@ -169,18 +182,8 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
             var targets = new List<(string what, string target)>();
             foreach (var (status, list) in new[] { ("AvailableForStart", q.Conditions?.AvailableForStart), ("AvailableForFinish", q.Conditions?.AvailableForFinish), ("Fail", q.Conditions?.Fail) })
                 foreach (var c in list ?? new List<QuestCondition>())
-                {
-                    if (c.ConditionType != "Quest" || c.Target == null) continue;
-                    foreach (var t in c.Target.IsItem ? new List<string> { c.Target.Item } : c.Target.List ?? new List<string>())
-                        if (!string.IsNullOrEmpty(t)) targets.Add((status, t));
-                }
-            if (q.ExtensionData != null && q.ExtensionData.TryGetValue("visitapi", out var v) && v is JsonElement vx && vx.ValueKind == JsonValueKind.Object
-                && vx.TryGetProperty("startAfter", out var sa))
-            {
-                if (sa.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(sa.GetString())) targets.Add(("visitapi.startAfter", sa.GetString()!));
-                else if (sa.ValueKind == JsonValueKind.Array)
-                    foreach (var e in sa.EnumerateArray()) if (e.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(e.GetString())) targets.Add(("visitapi.startAfter", e.GetString()!));
-            }
+                    foreach (var t in Ext.QuestCondTargets(c)) targets.Add((status, t));
+            foreach (var s in StartAfterOf(q)) targets.Add(("visitapi.startAfter", s));
             foreach (var (what, target) in targets)
                 if (!known.Contains(target) && !MongoId.IsValidMongoId(target))
                     log.Error($"[VisitAPI] quest {id} {what} says '{target}', which is not a valid 24-char hex quest id (most likely a typo or extra space from hand-editing the JSON); this quest can never reach that step");
@@ -190,9 +193,7 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
     void NameStoryQuests(Dictionary<string, Quest> all)
     {
         var chapterOf = new Dictionary<string, string>();
-        var chapters = all.Where(kv => kv.Value.ExtensionData != null && kv.Value.ExtensionData.TryGetValue("visitapi", out var v) && v is JsonElement vx
-                                       && vx.ValueKind == JsonValueKind.Object && vx.TryGetProperty("chapter", out var ch) && ch.ValueKind == JsonValueKind.True)
-                          .Select(kv => kv.Key).ToList();
+        var chapters = all.Where(kv => Ext.Flag(Ext.Visit(kv.Value.ExtensionData), "chapter")).Select(kv => kv.Key).ToList();
         foreach (var id in chapters)
             foreach (var sub in QuestTargets(all[id], all))
                 if (sub != id && !chapterOf.ContainsKey(sub)) chapterOf[sub] = id;
@@ -216,15 +217,7 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
                 }
             }
         }
-        // 10-01：章节 visitapi.mailRewardsOnly=true → 章节 + 名下全部子任务进「没附件不寄信」名单（StoryQuestMail）
-        var rewardsOnly = new HashSet<string>();
-        foreach (var id in chapters)
-        {
-            if (!(all[id].ExtensionData!["visitapi"] is JsonElement cx && cx.TryGetProperty("mailRewardsOnly", out var mo) && mo.ValueKind == JsonValueKind.True)) continue;
-            rewardsOnly.Add(id);
-            foreach (var (sub, chapter) in chapterOf) if (chapter == id) rewardsOnly.Add(sub);
-        }
-        StoryQuestMail.RewardsOnly = rewardsOnly;
+        StoryQuestMail.RewardsOnly = RewardsOnly(all, chapters, chapterOf);
         if (chapterOf.Count == 0) return;
         foreach (var (_, lazy) in localeTable.Global)
             lazy.AddTransformer(data =>
@@ -240,10 +233,23 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
             });
     }
 
+    /// 10-01：章节 visitapi.mailRewardsOnly=true → 章节 + 名下全部子任务进「没附件不寄信」名单（StoryQuestMail）
+    static HashSet<string> RewardsOnly(Dictionary<string, Quest> all, List<string> chapters, Dictionary<string, string> chapterOf)
+    {
+        var rewardsOnly = new HashSet<string>();
+        foreach (var id in chapters)
+        {
+            if (!Ext.Flag(Ext.Visit(all[id].ExtensionData), "mailRewardsOnly")) continue;
+            rewardsOnly.Add(id);
+            foreach (var (sub, chapter) in chapterOf) if (chapter == id) rewardsOnly.Add(sub);
+        }
+        return rewardsOnly;
+    }
+
+    /// visitapi.startAfter：一个任务 id（字符串）或多个（数组），空的跳过
     static IEnumerable<string> StartAfterOf(Quest q)
     {
-        if (q.ExtensionData == null || !q.ExtensionData.TryGetValue("visitapi", out var v) || v is not JsonElement vx || vx.ValueKind != JsonValueKind.Object
-            || !vx.TryGetProperty("startAfter", out var sa)) yield break;
+        if (Ext.Visit(q.ExtensionData) is not { } vx || !vx.TryGetProperty("startAfter", out var sa)) yield break;
         if (sa.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(sa.GetString())) yield return sa.GetString()!;
         else if (sa.ValueKind == JsonValueKind.Array)
             foreach (var e in sa.EnumerateArray()) if (e.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(e.GetString())) yield return e.GetString()!;
@@ -251,14 +257,10 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
 
     static IEnumerable<string> QuestTargets(Quest q, Dictionary<string, Quest> all)
     {
-        var buckets = new[] { q.Conditions?.AvailableForFinish, q.Conditions?.Fail };
-        foreach (var bucket in buckets)
+        foreach (var bucket in new[] { q.Conditions?.AvailableForFinish, q.Conditions?.Fail })
             foreach (var c in bucket ?? new List<QuestCondition>())
-            {
-                if (c.ConditionType != "Quest" || c.Target == null) continue;
-                var targets = c.Target.IsItem ? new List<string> { c.Target.Item } : c.Target.List ?? new List<string>();
-                foreach (var t in targets) if (!string.IsNullOrEmpty(t) && all.ContainsKey(t)) yield return t;
-            }
+                foreach (var t in Ext.QuestCondTargets(c))
+                    if (all.ContainsKey(t)) yield return t;
     }
 
     /// <summary>包内 images\banners → /files/quest/icon/…、images\icons → /files/quest/chapters_icon/…（1.1 的地址不变，见 PackLayout.ImageFolders）。
@@ -285,6 +287,6 @@ public class QuestLoader(CustomQuestService questService, ImageRouter images, Js
     T Parse<T>(string file) where T : class
     {
         try { return json.DeserializeFromFile<T>(file); }
-        catch (System.Exception e) { log.Error($"[VisitAPI] cannot parse {Path.GetFileName(file)}: {e.Message}"); return null; }
+        catch (Exception e) { log.Error($"[VisitAPI] cannot parse {Path.GetFileName(file)}: {e.Message}"); return null; }
     }
 }

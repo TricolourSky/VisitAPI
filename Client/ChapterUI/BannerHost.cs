@@ -14,13 +14,13 @@ public static class BannerHost
     const string Name = "VisitAPI_BannerHost";
     static readonly List<(BaseNotificationView view, RectTransform back, float flex)> _hosted = new();
 
-    public static bool Attach(BaseNotificationView view, NotifierView notifier)
+    public static void Attach(BaseNotificationView view, NotifierView notifier)
     {
         var dialog = DialogScreenTracker.Live;
-        if (dialog == null || view == null || notifier == null || notifier._container == null) return false;
+        if (dialog == null || view == null || notifier == null || notifier._container == null) return;
         try
         {
-            if (dialog.transform is not RectTransform root) return false;
+            if (dialog.transform is not RectTransform root) return;
             var le = view.GetComponent<LayoutElement>();
             var bannerH = le != null && le.preferredHeight > 0f ? le.preferredHeight : le != null && le.minHeight > 0f ? le.minHeight : 110f;
             var host = Ensure(root, notifier._container, bannerH);
@@ -38,9 +38,8 @@ public static class BannerHost
                 if (v != null && back != null && v.transform.parent == host) v.transform.SetParent(back, false);
             }
             view.OnHideComplete += Restore;
-            return true;
         }
-        catch (Exception e) { Plugin.Log.LogWarning("[banner] Failed to move onto the dialogue screen, showing in place: " + e.Message); return false; }
+        catch (Exception e) { Plugin.Log.LogWarning("[banner] Failed to move onto the dialogue screen, showing in place: " + e.Message); }
     }
 
     public static void ReturnAll()
@@ -77,7 +76,7 @@ public static class BannerHost
             host.SetParent(dialogRoot, false);
             var lg = container.GetComponent<LayoutGroup>();
             if (lg != null && host.gameObject.AddComponent(lg.GetType()) is LayoutGroup copy)
-                for (var t = lg.GetType(); t != null && t != typeof(Component); t = t.BaseType) Reflect.Copy(lg, copy, t, out _);
+                for (var t = lg.GetType(); t != null && t != typeof(Component); t = t.BaseType) Reflect.Copy(lg, copy, t);
         }
         if (host.GetComponent<LayoutGroup>() is HorizontalOrVerticalLayoutGroup hv) { hv.childControlHeight = true; hv.childForceExpandHeight = false; }
         host.SetAsLastSibling();

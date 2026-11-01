@@ -2,7 +2,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Comfort.Common;
-using EFT;
 using EFT.Quests;
 using EFT.UI;
 using UnityEngine;
@@ -17,6 +16,7 @@ namespace VisitAPI.ChapterUI
         ChapterModel _selected;
         QuestController _quests;
         Coroutine _readAllCo;
+        bool _wired;
 
         public void Show(QuestController quests, bool keepSelection = false)
         {
@@ -33,10 +33,18 @@ namespace VisitAPI.ChapterUI
             }
             var keep = keepSelection && _selected != null ? _chapters.FirstOrDefault(c => c.Quest.Id == _selected.Quest.Id) : null;
             Select(keep ?? _chapters.FirstOrDefault(c => c.Status == ChapterModel.State.Active) ?? _chapters.FirstOrDefault());
-            if (_expandHistoryButton != null) { _expandHistoryButton.onClick.RemoveAllListeners(); _expandHistoryButton.onClick.AddListener(ToggleHistory); }
-            WireExpandTasks();
+            // 两个展开按钮的监听只挂一次（10-24，旧 B18：ChapterLive 会反复调 Show）
+            if (!_wired)
+            {
+                _wired = true;
+                if (_expandHistoryButton != null) { _expandHistoryButton.onClick.RemoveAllListeners(); _expandHistoryButton.onClick.AddListener(ToggleHistory); }
+                WireExpandTasks();
+            }
             ChapterLive.Attach(this, quests);
         }
+
+        /// 鼠标在这个物体上停 0.1 秒就把 id 标成已读；真有新标上的才重算未读角标（10-24 收拢，旧 B20）
+        void HoverRead(GameObject go, string id) => ReadState.OnHover(go, () => { if (ReadState.MarkRead(new[] { id })) RefreshUnread(); });
 
         void SpawnIcon(ViewPool pool, ChapterModel ch)
         {
@@ -98,8 +106,7 @@ namespace VisitAPI.ChapterUI
         {
             yield return new WaitForSecondsRealtime(4f);
             if (_selected != ch || !gameObject.activeInHierarchy) yield break;
-            ReadState.MarkRead(ch.ReadableIds());
-            RefreshUnread();
+            if (ReadState.MarkRead(ch.ReadableIds())) RefreshUnread();
         }
 
         void OnDisable() { if (_readAllCo != null) { StopCoroutine(_readAllCo); _readAllCo = null; } }
@@ -144,7 +151,7 @@ namespace VisitAPI.ChapterUI
             foreach (var (ch, view) in _icons) if (view != null) SetWarning(view._unreadWarning, ReadState.CountUnread(ch.ReadableIds()));
             RefreshTaskUnread();
             RefreshNoteUnread();
-            foreach (var kv in _linkMarkers) if (kv.Key != null) kv.Key.SetActive(!ReadState.IsRead(kv.Value));
+            RefreshLinkUnread();
         }
     }
 }

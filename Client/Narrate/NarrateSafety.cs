@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Comfort.Common;
 using EFT;
 using EFT.Dialogs;
 using EFT.UI;
@@ -53,8 +52,8 @@ public static class WhitelistPatch
     // 引擎 method_5 先挂事件、打开对话窗，最后按白名单 switch，白名单外的商人抛这条
     const string Unlisted = "Unable to find trader controller for trader: ";
 
-    /// 09-24 审查低项：只接管「白名单外的商人」这一种异常。以前 method_5 抛任何异常都当成白名单问题接着 StartDialog，
-    /// 比如商人不在档案里（TradersInfo 取不到）时对话窗根本没打开，照样开对话
+    /// 09-24 审查低项：只接管「白名单外的商人」这一种异常。method_5 抛别的异常时不能当成白名单问题接着 StartDialog，
+    /// 比如商人不在档案里（TradersInfo 取不到）时对话窗根本没打开
     static Exception Finalizer(Exception __exception, ClientDialogController ___dialogController,
         MongoID ____traderId, MongoID? ____dialogId, ITraderAnimationController ____animationController)
     {
@@ -77,11 +76,7 @@ public static class WhitelistPatch
 [HarmonyPatch(typeof(Profile), "SetSpawnedInSession")]
 public static class FirGuard
 {
-    static bool Prefix(bool value)
-    {
-        if (value || !Narrating.Now) return true;
-        return false;
-    }
+    static bool Prefix(bool value) => value || !Narrating.Now;
 }
 
 [HarmonyPatch(typeof(NPCObject), "Get")]

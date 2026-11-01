@@ -1,12 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using EFT;
 using EFT.AssetsManager;
 using HarmonyLib;
-using UnityEngine;
 
 namespace VisitAPI.Native;
 
@@ -49,7 +47,6 @@ public static class NarrateStartBroadcast
     static void Notify(GameWorld world)
     {
         if (world == null) return;
-        NarrateLocationId.Fill(world, "before game start");
         var engine = typeof(GameWorld).Assembly;
         if (AfterStarted?.GetValue(world) is Action list)
             foreach (var d in list.GetInvocationList())

@@ -45,7 +45,7 @@ public static class ChapterTab
         nativePart.gameObject.SetActive(false); tabRow.gameObject.SetActive(false);
 
         var toggles = group != null ? group.GetComponent<ToggleGroup>() : null;
-        var story = Wire(group, "MainQuestToggleSpawner/MainQuestToggle", toggles, StoryCaption(), daily._headerFontSize);
+        var story = Wire(group, "MainQuestToggleSpawner/MainQuestToggle", toggles, Loc.Text("UI/MainQuests/TabName", "剧情", "STORY"), daily._headerFontSize);
         var side = Wire(group, "RegularQuestToggleSpawner/RegularQuestToggle", toggles, regular._headerCaption, regular._headerFontSize);
         var ops = Wire(group, "DailyQuestsToggleSpawner/DailyQuestsToggle", toggles, daily._headerCaption, daily._headerFontSize);
         var pve = group != null ? group.Find("MainQuestToggleSpawner/PvEBlockTooltip") : null; if (pve != null) pve.gameObject.SetActive(false);
@@ -93,19 +93,9 @@ public static class ChapterTab
 
     static RectTransform Layer(RectTransform parent, string name, Color color)
     {
-        var go = new GameObject(name, typeof(RectTransform), typeof(Image));
-        var rt = (RectTransform)go.transform;
-        rt.SetParent(parent, false);
-        var img = go.GetComponent<Image>();
-        img.color = color; img.raycastTarget = false;
-        if (go.GetComponent<LayoutElement>() == null) go.AddComponent<LayoutElement>().ignoreLayout = true;
-        return rt;
-    }
-
-    static string StoryCaption()
-    {
-        var key = "UI/MainQuests/TabName"; var text = key.Localized();
-        return text == key ? Loc.Pick("剧情", "STORY") : text;
+        var img = UiFactory.NewImage(parent, name, ignoreLayout: true);
+        img.color = color;
+        return (RectTransform)img.transform;
     }
 
     static void Dock(Transform t, Transform host)
