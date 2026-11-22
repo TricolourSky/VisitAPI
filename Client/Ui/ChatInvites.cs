@@ -713,7 +713,7 @@ public class InviteHeader : MonoBehaviour
         var input = _screen != null ? _screen._inputPanel : null;
         var mp = _screen != null ? _screen._messagesContainerParent : null;
         if (input == null || mp == null) return;
-        var special = _dialogue != null && _screen.gameObject.activeInHierarchy && ChatInviteTabs.IsSpecial(_dialogue);
+        var special = _dialogue != null && _screen.gameObject.activeInHierarchy && ChatInviteTabs.IsSpecial(_dialogue) && !KeepChatBotInput(_dialogue, _screen);
         bool rewards;
         // 09-25 SORA：明明没东西可收还显示「收取全部」。原生 AnyRewardMessage 先看服务端对话列表的 hasMessagesWithRewards，为真就直接返回真，
         // 这个标记在附件领完后不一定清（加上 MailViewRouter 把领过的信照 1.1 显示成「(已收取)」）。这里只看消息本身：
@@ -727,6 +727,18 @@ public class InviteHeader : MonoBehaviour
         if (_bar == null && !BuildBar(input)) return;
         PlaceBar(inputRt);
         if (!_bar.activeSelf) _bar.SetActive(true);
+    }
+
+    static readonly FieldInfo ScreenSocialField = AccessTools.Field(typeof(ChatScreen), "_social");
+
+    /// Chat-bot friends (e.g. Miyako Carry Service) reply with trader-type messages, so their dialogue lands in
+    /// Special comms, but they take commands typed into the chat. Keep the native input whenever the game itself
+    /// would let the player send a message in this dialogue (same check as ChatMessageSendBlock.UpdateInputField).
+    /// Ordinary trader and system dialogues fail that check, so they keep the 1.1 read-only layout.
+    static bool KeepChatBotInput(UpdatableChatDialogue d, ChatScreen screen)
+    {
+        try { return d != null && screen != null && ScreenSocialField?.GetValue(screen) is SocialNetwork social && d.CanSendMessage(social, out _); }
+        catch { return false; }
     }
 
     /// 09-25 SORA 实机：新消息从底下冒出来时被「收取全部」栏挡住。不按「比原生多伸长多少」记增量改消息区：原生中途重排消息区或发送栏高度一变，
